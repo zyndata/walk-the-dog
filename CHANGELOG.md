@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 2 repo skeleton: the `walk_the_dog` custom integration package with a valid
+  `manifest.json` (v0.1.0), constants from the phase 0/1 decisions, a config-flow stub that
+  aborts until the wizard ships, and empty modules matching the architecture layout.
+- HACS/GitHub boilerplate: `hacs.json`, `info.md`, a README written for the public repo,
+  MIT license, and CI workflows for hassfest, HACS validation (brands ignored until the
+  phase 9 submission), lint, and tests.
+- Cross-platform dev environment: uv-provisioned Python 3.14 venv via `scripts/setup.py`,
+  pinned dev dependencies, pre-commit with ruff, `.editorconfig`/`.gitattributes` (LF
+  everywhere), `.env.example`, and task-runner scripts (`lint`, `format`, `test`, `install`)
+  that work identically on Windows and Linux; documented in `docs/DEVELOPMENT.md`.
+- First tests: manifest/const consistency and config-entry setup/unload against the Home
+  Assistant test harness (HA 2026.8.3).
+
 - Phase 1 architecture: `docs/ARCHITECTURE.md` is now the complete implementation blueprint —
   module layout, data flow and core dataclasses, per-source sampling strategy, the exact
   weighted-vote consensus algorithm (risk, confidence, freshness decay, degraded modes),

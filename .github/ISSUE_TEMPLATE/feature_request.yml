@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a change or a new capability.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What is inconvenient or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      description: >
+        The integration must run on single-core ARM with ~512 MB RAM, may only use libraries
+        shipped with HA core, and must stay inside the request budget in docs/DATA_SOURCES.md.
+      options:
+        - label: I have read the constraints above and believe the request fits them.

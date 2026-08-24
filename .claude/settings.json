@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/setup.py*)",
+      "Bash(python scripts/lint.py*)",
+      "Bash(python scripts/format.py*)",
+      "Bash(python scripts/test.py*)",
+      "Bash(python3 scripts/setup.py*)",
+      "Bash(python3 scripts/lint.py*)",
+      "Bash(python3 scripts/format.py*)",
+      "Bash(python3 scripts/test.py*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git ls-files*)"
+    ]
+  }
+}

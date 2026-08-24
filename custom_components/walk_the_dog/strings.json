@@ -1,0 +1,7 @@
+{
+  "config": {
+    "abort": {
+      "not_implemented": "The setup wizard is not implemented yet — it arrives in a later development phase."
+    }
+  }
+}

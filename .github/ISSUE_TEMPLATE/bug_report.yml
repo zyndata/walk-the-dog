@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in the integration behaves incorrectly.
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Integration version
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.8.0"
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware / install method
+      placeholder: "Raspberry Pi 4, HA OS / Docker on x86 / ..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: >
+        Enable debug logging for `custom_components.walk_the_dog` and paste the relevant lines.
+        Remove your coordinates, tokens and any external URL before posting — issues are public.
+      render: text
+  - type: checkboxes
+    id: scrubbed
+    attributes:
+      label: Confirmation
+      options:
+        - label: I removed personal data (coordinates, tokens, URLs) from everything above.
+          required: true

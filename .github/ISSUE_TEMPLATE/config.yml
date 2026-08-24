@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/zyndata/walk-the-dog#readme
+    about: Installation, configuration options and how the recommendation is produced.
+  - name: Data sources and coverage
+    url: https://github.com/zyndata/walk-the-dog/blob/main/docs/DATA_SOURCES.md
+    about: Which weather sources are used, what they cover and how they can fail.

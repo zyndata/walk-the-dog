@@ -142,11 +142,50 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 2 — Repo skeleton + development environment
 
-- **Status:** not started
-- **Date:**
-- **What was built:**
+- **Status:** done
+- **Date:** 2026-08-24
+- **What was built:** Complete integration skeleton in `custom_components/walk_the_dog/`
+  (valid `manifest.json` v0.1.0, minimal `__init__.py` with setup/unload, filled `const.py`,
+  stub `config_flow.py` that aborts until phase 5, docstring-stub modules for every file in the
+  architecture layout, `strings.json` + `translations/en.json`); HACS/GitHub boilerplate
+  (`hacs.json`, `info.md`, README written as-if-public, MIT `LICENSE`, two workflows:
+  hassfest + HACS validation, and lint + test); dev environment (`.gitattributes`,
+  `.editorconfig`, `.gitignore`, `.env.example`, pinned `requirements-dev.txt`,
+  `.pre-commit-config.yaml`, `pyproject.toml` with ruff/pytest config); cross-platform task
+  runner `scripts/{setup,lint,format,test,install}.py` (pathlib only, identical on both OSes);
+  committed `.claude/settings.json` + `/phase` command; `docs/DEVELOPMENT.md`; first two tests
+  (manifest/const consistency, config-entry setup/unload against the real HA test harness).
 - **Decisions:**
+  - **Toolchain is uv-based.** The system Python (3.12 on the Linux machine) cannot install
+    current HA test deps — `pytest-homeassistant-custom-component` requires Python ≥ 3.14 since
+    HA dropped older versions. `scripts/setup.py` uses uv to provision a Python 3.14 venv
+    identically on Windows and Linux; uv itself is the only prerequisite (one-line install
+    documented in `docs/DEVELOPMENT.md`).
+  - **Pins:** ruff 0.16.4 (same rev in pre-commit), pre-commit 4.6.2, phcc 0.13.357
+    (→ homeassistant 2026.8.3 in tests), pytest 9.0.3 — pytest must always match phcc's exact
+    pin, bump the two together.
+  - **HACS validation runs with `ignore: brands`** — the repo is not in `home-assistant/brands`
+    until the phase 9 submission; drop the ignore then. The action authenticates with the
+    workflow's own `GITHUB_TOKEN`, so the private repo itself is not a blocker.
+  - **A second workflow (lint + test) was added** beyond the plan's hassfest + HACS — CI runs
+    exactly `scripts/setup.py` → `lint.py` → `test.py`, i.e. what developers run locally.
+    Addition to the plan, not a change of intent.
+  - Markdown files are excluded from ruff — current ruff reformats Python code blocks inside
+    docs, and the alignment in `docs/ARCHITECTURE.md` is deliberate.
+  - `manifest.json`: `integration_type: service`, `iot_class: cloud_polling`, version starts at
+    0.1.0; `hacs.json` sets minimum HA 2026.8.0 (matches the test harness version).
+  - The config-flow stub aborts with a translated `not_implemented` reason so
+    `config_flow: true` is honest before phase 5 ships the wizard.
 - **Open questions carried forward:**
+  - LibreWXR grey→dBZ calibration for colour scheme `0` — pin in phase 3 (unchanged).
+  - LibreWXR coverage-tile semantics (white@128) — determine in phase 3 (unchanged).
+  - Whether Open-Meteo counts each coordinate as a separate call — confirm in phase 3 (unchanged).
+  - **CI status must be confirmed on GitHub after this push** — no `gh` CLI on the Linux
+    machine, so the runs could not be watched from the session. If the HACS job fails on the
+    `description`/`topics` checks, add a repo description and topics in GitHub settings (they
+    are required for the HACS submission in phase 9 anyway). The brands check is ignored by
+    design until phase 9.
+  - Whether p90 for the LibreWXR disc needs tuning — revisit in phase 8 (unchanged).
 
 ## Phase 3 — Source clients
 
