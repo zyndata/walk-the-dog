@@ -197,12 +197,25 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - LibreWXR grey→dBZ calibration for colour scheme `0` — pin in phase 3 (unchanged).
   - LibreWXR coverage-tile semantics (white@128) — determine in phase 3 (unchanged).
   - Whether Open-Meteo counts each coordinate as a separate call — confirm in phase 3 (unchanged).
-  - **CI status must be confirmed on GitHub after this push** — `gh` is being installed on the
-    Linux machine to make this checkable from the session; until then the runs are only visible
-    in the browser. The brands check is ignored by design until phase 9.
-  - **`python scripts/github_setup.py` still has to be run once** (needs `gh auth login`). It
-    supplies the repo description and topics that the HACS submission requires in phase 9, and
-    reports which security settings the free/private plan refused.
+  - ~~CI status must be confirmed on GitHub~~ — **resolved 2026-08-24: both workflows green.**
+    `gh` 2.98 is installed and authenticated on the Linux machine, so runs are checkable from a
+    session. Two real failures were found and fixed: hassfest rejected `strings.json` /
+    `translations/en.json` without a `config.step` key (placeholder added, phase 5 fills it in),
+    and HACS failed on the missing description/topics (now set).
+  - ~~`scripts/github_setup.py` has to be run once~~ — **run 2026-08-24**; description, topics,
+    repo features, Dependabot alerts + security updates and the read-only workflow token are
+    applied.
+  - **Three settings are blocked by the free plan on a private repo** and must be revisited when
+    the repo goes public in phase 9: branch/tag rulesets (HTTP 403, "Upgrade to GitHub Pro or
+    make this repository public") and secret scanning + push protection (HTTP 422). Until then
+    `main` has no server-side protection at all — force-push discipline is manual. Re-run
+    `python scripts/github_setup.py` right after flipping the repo to public.
+  - **Two HACS checks are ignored because the repo is private** (`hacsjson`,
+    `integration_manifest`): the action reads repository files through the GitHub API and gets
+    nothing back, so both parse as `None`. Drop both ignores together with `brands` in phase 9
+    and confirm they pass for real. hassfest still validates `manifest.json` on every run.
+  - **Dependabot PR #1** (`actions/checkout` 5 → 7) is open and green — merge or close it in the
+    next session.
   - Whether p90 for the LibreWXR disc needs tuning — revisit in phase 8 (unchanged).
 
 ## Phase 3 — Source clients
