@@ -155,6 +155,11 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   runner `scripts/{setup,lint,format,test,install}.py` (pathlib only, identical on both OSes);
   committed `.claude/settings.json` + `/phase` command; `docs/DEVELOPMENT.md`; first two tests
   (manifest/const consistency, config-entry setup/unload against the real HA test harness).
+  Added in a follow-up session, same phase: repository-side GitHub configuration —
+  `.github/dependabot.yml`, `.github/ISSUE_TEMPLATE/*` (bug/feature forms, blank issues off),
+  `SECURITY.md` (private vulnerability reporting), workflow hardening (read-only `GITHUB_TOKEN`,
+  concurrency groups, `push` limited to `main`, weekly scheduled validation run), and
+  `scripts/github_setup.py`, which applies the GitHub-side settings themselves through `gh`.
 - **Decisions:**
   - **Toolchain is uv-based.** The system Python (3.12 on the Linux machine) cannot install
     current HA test deps — `pytest-homeassistant-custom-component` requires Python ≥ 3.14 since
@@ -176,15 +181,28 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     0.1.0; `hacs.json` sets minimum HA 2026.8.0 (matches the test harness version).
   - The config-flow stub aborts with a translated `not_implemented` reason so
     `config_flow: true` is honest before phase 5 ships the wizard.
+  - **GitHub settings are code, not clicks.** `scripts/github_setup.py` is idempotent, has a
+    `--dry-run`, and tolerates settings the plan/visibility forbids — so the Windows machine and
+    any later repo reset reproduce the same configuration instead of relying on memory.
+  - **`main` is protected against history loss only** — deletion and force-push blocked, direct
+    pushes still allowed, no required status checks: single contributor working on `main`
+    (CLAUDE.md workflow rule 4). Release tags `v*` are additionally protected against update and
+    deletion, because HACS installs from them and a moved tag changes a published release.
+  - **Dependabot watches GitHub Actions only.** The Python pins move in coordinated pairs
+    (pytest ↔ phcc, ruff ↔ pre-commit rev), which automated per-package PRs would break.
+  - Secret scanning and push protection are requested by the script but expected to be refused
+    while the repo is private on a free plan; they apply automatically once it goes public in
+    phase 9.
 - **Open questions carried forward:**
   - LibreWXR grey→dBZ calibration for colour scheme `0` — pin in phase 3 (unchanged).
   - LibreWXR coverage-tile semantics (white@128) — determine in phase 3 (unchanged).
   - Whether Open-Meteo counts each coordinate as a separate call — confirm in phase 3 (unchanged).
-  - **CI status must be confirmed on GitHub after this push** — no `gh` CLI on the Linux
-    machine, so the runs could not be watched from the session. If the HACS job fails on the
-    `description`/`topics` checks, add a repo description and topics in GitHub settings (they
-    are required for the HACS submission in phase 9 anyway). The brands check is ignored by
-    design until phase 9.
+  - **CI status must be confirmed on GitHub after this push** — `gh` is being installed on the
+    Linux machine to make this checkable from the session; until then the runs are only visible
+    in the browser. The brands check is ignored by design until phase 9.
+  - **`python scripts/github_setup.py` still has to be run once** (needs `gh auth login`). It
+    supplies the repo description and topics that the HACS submission requires in phase 9, and
+    reports which security settings the free/private plan refused.
   - Whether p90 for the LibreWXR disc needs tuning — revisit in phase 8 (unchanged).
 
 ## Phase 3 — Source clients

@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that work identically on Windows and Linux; documented in `docs/DEVELOPMENT.md`.
 - First tests: manifest/const consistency and config-entry setup/unload against the Home
   Assistant test harness (HA 2026.8.3).
+- Repository configuration: Dependabot for GitHub Actions, issue forms, a security policy with
+  private vulnerability reporting, hardened workflows (read-only token, concurrency groups,
+  weekly validation run), and `scripts/github_setup.py`, which applies the GitHub-side settings
+  (description, topics, features, `main` and release-tag rulesets, security toggles) through the
+  GitHub CLI.
 
 - Phase 1 architecture: `docs/ARCHITECTURE.md` is now the complete implementation blueprint —
   module layout, data flow and core dataclasses, per-source sampling strategy, the exact
