@@ -32,6 +32,10 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # The repo is not in home-assistant/brands yet; the brands PR is
-          # prepared in phase 7 and submitted in phase 9 — drop this then.
-          ignore: brands
+          # Ignored until the repo goes public in phase 9, then drop all three:
+          #   brands              — the home-assistant/brands PR is submitted in phase 9;
+          #   hacsjson, manifest  — the action reads repository files through the GitHub API
+          #                         and gets nothing back for a private repo, so both
+          #                         parse as None. hassfest validates manifest.json in the job
+          #                         above, and pre-commit's check-json parses hacs.json.
+          ignore: brands hacsjson integration_manifest
