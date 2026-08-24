@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 1 architecture: `docs/ARCHITECTURE.md` is now the complete implementation blueprint —
+  module layout, data flow and core dataclasses, per-source sampling strategy, the exact
+  weighted-vote consensus algorithm (risk, confidence, freshness decay, degraded modes),
+  walk-window evaluation with the earlier/later recommendation search and the material-change
+  definition, coordinator polling windows (`lead_time` 30 min, 10-min cycles only inside active
+  windows, zero polling otherwise), a concrete resource budget, and the frame cache design.
+- Alert radius decision: default 5 km, minimum 4 km, maximum 15 km, derived from the measured
+  source resolutions (sampled disc always spans ≥ 1 full cell of the coarsest regular source);
+  reflected in `docs/CONFIG.md` together with the default intensity threshold (light).
 - Phase 0 research: `docs/DATA_SOURCES.md` now documents every evaluated precipitation source
   with per-claim verification dates, a comparison table covering 20 candidates, the ranked
   recommendation, rejected candidates with reasons, the intensity mapping onto the common

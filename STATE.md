@@ -93,11 +93,52 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 1 — Architecture design
 
-- **Status:** not started
-- **Date:**
-- **What was built:**
+- **Status:** done
+- **Date:** 2026-08-24
+- **What was built:** `docs/ARCHITECTURE.md` filled completely (module layout, data flow with
+  the core dataclasses, per-source sampling strategy, exact consensus algorithm with formulas,
+  window evaluation + recommendation search + material-change definition, coordinator polling
+  windows, resource budget with concrete ceilings, frame cache design, alert radius decision,
+  output contract for phases 5–7). `docs/CONFIG.md` updated with the radius/threshold defaults
+  and the internal `lead_time` note.
 - **Decisions:**
+  - **Alert radius: default 5 km, minimum 4 km, maximum 15 km** — min 4 km makes the sampled
+    disc (8 km diameter) span ≥ 1 full ICON-EU cell (6.95 km N-S, the coarsest regular source);
+    MET Norway's ~10 km cell does not raise the minimum because it is failover-only, its
+    single-point sample is by definition one full cell, and failover already caps confidence.
+  - **`lead_time` = 30 min** — covers KNMI's hourly publication cadence and ≥ 3 LibreWXR cycles
+    before the notification decision at `T − earlier_margin`; matches the phase 0 budget.
+  - **Engine and schedule modules are pure** (no I/O, no HA imports, `now` as parameter) — the
+    phase 4 testability requirement enforced structurally.
+  - **Consensus = weighted vote** (`risk` = weighted wet fraction, `confidence` =
+    `|2·risk − 1| × source-count cap`), weights = static reliability (librewxr 1.0, knmi 0.9,
+    icon_eu 0.8, metno 0.7) × linear freshness decay (1.0 → 0.5 at 3× update interval, dropped
+    beyond) — simple, explainable per-source in the sensor attributes.
+  - **Spatial aggregation: p90 over the pixel disc for LibreWXR** (robust to radar speckle),
+    **max over the 5 sample points for NWP sources** (smooth fields, conservative).
+  - **Windows evaluated on a 10-min UTC grid**; hourly sources contribute as step functions
+    (no interpolation). Window dry ⇔ every slot risk < 0.5; window confidence = min slot
+    confidence; nearest dry candidate wins, earlier beats later at ties.
+  - **Material change** for re-notification: direction change, recommended start moved ≥ 20 min
+    vs last notified, verdict flip with 0.4/0.6 hysteresis, or peak intensity class change.
+  - **Open-Meteo fetched every 3rd cycle (30 min), not every cycle** — the freshest model
+    re-runs hourly, so a 10-min cadence would be ≥ ⅔ guaranteed-identical responses. This
+    *lowers* usage vs the phase 0 budget (2/h instead of 6/h); recorded as a budget refinement,
+    not a deviation.
+  - **Cache stores sampled floats, never raw tiles/responses**, keyed by LibreWXR frame `path`
+    (identity that changes on re-issue); 32-entry LRU, persisted via HA Store, ≤ 20 KB.
+- **Deviations from PLAN.md:** none. (The plan's `walk_end` for the active polling window is
+  made precise as `max(T, recommended_start) + duration`, and the phase 0 request budget is
+  refined downward for Open-Meteo — both elaborations, not changes of intent.)
 - **Open questions carried forward:**
+  - LibreWXR grey→dBZ calibration for colour scheme `0` — pin in phase 3 from the AGPL source,
+    lock with a fixture test (unchanged from phase 0).
+  - LibreWXR coverage-tile semantics (white@128) — determine in phase 3 (unchanged).
+  - Whether Open-Meteo counts each coordinate as a separate call — confirm in phase 3 if a
+    rate-limit header exposes it (unchanged).
+  - How the HACS validation action behaves against a private repo — resolve in phase 2 (unchanged).
+  - Whether p90 for the LibreWXR disc needs tuning against real events — revisit in phase 8
+    with measured data if false alarms/misses show up.
 
 ## Phase 2 — Repo skeleton + development environment
 
