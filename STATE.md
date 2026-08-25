@@ -220,11 +220,96 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 3 — Source clients
 
-- **Status:** not started
-- **Date:**
-- **What was built:**
+- **Status:** done
+- **Date:** 2026-08-25
+- **What was built:** the whole source layer plus its cache and tests.
+  `sources/base.py` (the `SourceAdapter` protocol, `SampleGeometry`, `SourceSeries`,
+  `SourceStatus`, `FetchResult`, per-source reliability/cadence/cell-size/attribution tables,
+  `RequestBudget`, `Backoff`, `restate`); `sources/librewxr.py` (frame index + tile fetch,
+  Web-Mercator disc mask, p90 sampling, grey→dBZ→mm/h); `sources/open_meteo.py` (both models,
+  five coordinates, one request); `sources/met_norway.py` (failover-only, `If-Modified-Since`,
+  `Expires`); `sources/__init__.py` (registry, concurrent fetch, provider failover,
+  `build_user_agent`); `cache.py` (32-entry LRU keyed by frame path, HA `Store` persistence,
+  geometry invalidation, 2 h eviction); `intensity_class()` in `const.py`. Seven recorded
+  fixtures under `tests/fixtures/` (LibreWXR frame index + three real tiles, three Open-Meteo
+  responses, one MET Norway response — all Polish public landmarks, no personal coordinates) and
+  **123 tests**, verified green with networking fully disabled.
 - **Decisions:**
+  - **LibreWXR calibration pinned: `dBZ = grey − 32`.** Read out of the AGPL-3.0 source, not
+    guessed: `_dbz_float_to_uint8` encodes `pixel = clamp((dBZ + 32) × 2, 0, 255)` and colour
+    scheme 0 renders `pixel // 2` through a table whose row `i` is grey `#iiiiii` at `dBZ = i − 32`.
+    Locked by `test_grey_level_calibration`. Verified against live tiles over six Polish cities;
+    the lowest level OPERA actually emits is grey 42 (10 dBZ ≈ 0.15 mm/h).
+  - **Grey 0 is ambiguous** — no echo *and* no radar coverage both render transparent. Accepted:
+    Poland is fully inside OPERA coverage, and the consensus vote already outvotes a wrongly-dry
+    `librewxr` (weight 1.0) when both NWP sources say wet (0.9 + 0.8 = 1.7 of 2.7 → risk 0.63).
+  - **`p90` is taken with `method="nearest"`**, so the result is an actually observed grey level
+    and maps back to a real dBZ step instead of interpolating between palette codes.
+  - **Request budgets are enforced over a rolling hour, not per cycle** (`RequestBudget`), because
+    that is how `docs/DATA_SOURCES.md` states them: a cold start may legitimately spend several
+    requests in one cycle provided the hour stays inside its ceiling. Limits: `librewxr` 20/h,
+    `open_meteo` 6/h, `metno` 2/h.
+  - **Adapters own their own cadence** (`should_fetch`), so the coordinator in phase 6 just calls
+    the registry once per cycle: `librewxr` every cycle, `open_meteo` every 30 min, `metno` only
+    while enabled and only after `Expires` and the terms' 10-minute floor.
+  - **A skipped or failed cycle re-presents the cached series, never as fresh.** `restate()`
+    recomputes age against the current clock, so a kept series flips to `stale` and stops
+    contributing on its own.
+  - **A timeout is an ordinary provider failure**, not an exception that escapes; only
+    `asyncio.CancelledError` propagates, so HA shutdown still cancels cleanly.
+  - **`User-Agent` carries the project URL as contact info**, never the user's details — mandatory
+    for MET Norway and for LibreWXR (which 403s the default Python agent).
+- **Deviations from PLAN.md / earlier phases (recorded before proceeding):**
+  1. **Retry backoff is applied *between* cycles, not as sleeps inside one.**
+     `docs/DATA_SOURCES.md` budgets "3 attempts with exponential backoff (1, 2, 4 min)"; sleeping
+     1–4 minutes inside a coordinator update would block the event loop and nearly fill the
+     10-minute cycle. `Backoff` instead arms `next_attempt_at`, and `should_fetch` honours it.
+     Same intent — a failing provider is not hammered — without a blocking cycle.
+  2. **Open-Meteo `issued_at` is the fetch time, not the model run time.** `/v1/forecast` carries
+     no model-run timestamp (checked 2026-08-25; no rate-limit or run header exists either), so
+     upstream run age is unmeasurable. Freshness there therefore tracks our own fetch age — which
+     is exactly what degrades when Open-Meteo stops answering. `librewxr` and `metno` still use
+     real upstream publication times. Noted in `docs/ARCHITECTURE.md` § Consensus scoring.
+  3. **Open-Meteo's multi-coordinate response shape differs from the phase 0 assumption.** With
+     several coordinates it returns a JSON *list*, one object per coordinate, and with several
+     models each variable key is suffixed with the model id
+     (`precipitation_icon_eu`, `precipitation_knmi_harmonie_arome_europe`) — not one object
+     carrying everything. Same request count and size; only the parser is affected.
+  4. **`intensity_class()` landed in `const.py` in phase 3** rather than waiting for the phase 4
+     engine, because "intensity mapping per source matches the table in `docs/DATA_SOURCES.md`" is
+     a phase 3 acceptance criterion and needs the classifier to be testable.
+  5. **`tests/*` gained ruff per-file ignores** (`PLR2004`, `PLR0913`, `PLR0917`, `SLF001`):
+     asserting on literal expected values is the point of a fixture test, and pytest injects
+     fixtures as positional parameters.
 - **Open questions carried forward:**
+  - ~~LibreWXR grey→dBZ calibration~~ — **resolved 2026-08-25**, see decisions above.
+  - ~~LibreWXR coverage-tile semantics (white@128)~~ — **resolved 2026-08-25.**
+    `librewxr.tiles.renderer.compute_coverage_rgba` paints `[255, 255, 255, 128]` wherever the
+    **latest frame's value is non-zero**. So it is neither a coverage boundary nor a static radar
+    mask: it marks pixels that currently have an echo, which is why only ~5 % of Poland was lit
+    when phase 0 checked on a dry day. It cannot distinguish "no radar coverage" from "no rain",
+    so the integration does not use it — the architecture never did, and now that is deliberate
+    rather than incidental.
+  - ~~Whether Open-Meteo counts each coordinate as a separate call~~ — **checked 2026-08-25, still
+    unknowable.** A live 5-coordinate, 2-model request returned **no rate-limit, quota or
+    remaining-calls header of any kind**, so nothing exposes the accounting. The conservative
+    phase 0 budget (each coordinate = one call → 3 % of the daily allowance) stands unchanged.
+  - ~~Dependabot PR #1~~ — merged before this phase started (commit `e0ae92d`); no longer open.
+  - **Tests cannot run natively on Windows.** Home Assistant's `runner.py` imports `fcntl`, so
+    `pytest-homeassistant-custom-component` fails at plugin import before any test runs — this
+    affects the whole suite, not just phase 3, and was simply never hit before because the earlier
+    phases' tests were run on the Linux machine. Lint, format, setup and install all work on both
+    OSes. Workaround documented in `docs/DEVELOPMENT.md`: run the suite in a Linux container
+    (`--network none` doubles as the offline proof). CI is unaffected.
+  - **LibreWXR fuses NWP model layers into its tiles where radar does not reach** (its
+    `docs/coverage.md`, and `_fill_ecmwf_fallback` in its renderer). Over Poland the OPERA
+    composite wins, so the phase 0 independence measurement holds — but outside radar coverage its
+    "independent radar vote" would silently become a model vote. Re-check in phase 8 if false
+    alarms show up.
+  - Whether p90 for the LibreWXR disc needs tuning against real events — revisit in phase 8
+    (unchanged).
+  - Three GitHub settings blocked by the free plan on a private repo, and two ignored HACS checks
+    — revisit when the repo goes public in phase 9 (unchanged from phase 2).
 
 ## Phase 4 — Sampling + consensus scoring engine
 

@@ -32,6 +32,9 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 # Task-runner scripts talk to the developer on stdout
 "scripts/*" = ["T20"]
+# Tests assert against literal expected values (that is the point of a fixture test),
+# and pytest injects fixtures as positional parameters.
+"tests/*" = ["PLR2004", "PLR0913", "PLR0917", "SLF001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

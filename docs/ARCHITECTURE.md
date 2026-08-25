@@ -121,7 +121,8 @@ Python UA is rejected with 403, measured in phase 0).
    apply a precomputed boolean disc mask, take the **90th percentile** of the masked pixels
    (robust against single-pixel radar speckle; a max would false-alarm on one noisy cell),
    convert grey → dBZ → mm/h (Marshall–Palmer, boundaries per
-   [DATA_SOURCES.md](DATA_SOURCES.md); exact grey→dBZ calibration pinned in phase 3).
+   [DATA_SOURCES.md](DATA_SOURCES.md); the grey→dBZ calibration is **`dBZ = grey − 32`**, pinned
+   in phase 3 from the AGPL-3.0 LibreWXR source and locked by a fixture test).
 4. Store only the resulting float per frame in the cache; **discard tile bytes and arrays
    immediately** (function-local, no references escape). Frames are processed sequentially, so
    peak transient memory is one decoded tile (~64 KB + Pillow overhead), never 7.
@@ -166,6 +167,13 @@ slot, not stale.
 interval; at > 3× the source is **stale and dropped** for the cycle (phase 0 staleness rule —
 stale data is excluded, never down-weighted further). Nominal intervals: `librewxr` 10 min,
 `knmi` 1 h, `icon_eu` 3 h, `metno` 2 h (observed publication cadence).
+
+`age` is measured from `issued_at`, which each adapter fills with the best truth available
+(phase 3): `librewxr` uses the newest past frame's timestamp and `metno` uses
+`properties.meta.updated_at`, both real upstream publication times. **Open-Meteo publishes no
+model-run timestamp in `/v1/forecast`** (checked 2026-08-25), so its adapters set
+`issued_at = fetched_at`; freshness there measures how long ago *we* last got an answer, which is
+what actually degrades when the provider stops responding. Recorded in `STATE.md`, phase 3.
 
 **Per-slot risk and confidence.** With the user's intensity threshold θ ∈ {light, moderate,
 heavy} mapped to its mm/h lower bound (0.1 / 2.5 / 7.6):

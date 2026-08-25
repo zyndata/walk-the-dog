@@ -182,7 +182,8 @@ the step, quantised to 0.1 mm **(measured)**.
 `mm/h = value` directly.
 
 **LibreWXR.** Tiles encode radar reflectivity. With colour scheme `0` the pixel is a grayscale
-intensity ramp **(measured)**; convert grey → dBZ, then dBZ → rain rate with Marshall–Palmer
+intensity ramp **(measured)**; convert grey → dBZ with **`dBZ = grey − 32`** (pinned in phase 3,
+see the note below), then dBZ → rain rate with Marshall–Palmer
 (`Z = 200·R^1.6`, i.e. `R = (10^(dBZ/10) / 200)^(1/1.6)`). The class boundaries become:
 
 | Class | mm/h | dBZ |
@@ -192,9 +193,24 @@ intensity ramp **(measured)**; convert grey → dBZ, then dBZ → rain rate with
 | `moderate` | 2.5 – 7.6 | 29.4 – 37.1 |
 | `heavy` | ≥ 7.6 | ≥ 37.1 |
 
-> **Open item for phase 3:** the exact grey-value → dBZ calibration of LibreWXR's scheme `0` is not
-> documented. Pin it by reading the palette definition in the LibreWXR source — the software is
-> AGPL-3.0 and published — and lock it into a fixture test. Do not guess it in phase 1.
+> **Resolved in phase 3 (2026-08-25).** The calibration was read out of the AGPL-3.0 LibreWXR
+> source rather than guessed, and is locked into a fixture test
+> (`tests/test_librewxr.py::test_grey_level_calibration`):
+>
+> - `librewxr.sources._helpers._dbz_float_to_uint8` encodes reflectivity as
+>   `pixel = clamp((dBZ + 32) * 2, 0, 255)`, mapping NODATA (`dBZ ≤ −32`) to 0.
+> - `librewxr.colors.schemes` renders colour scheme `0` ("Black and White") by looking up row
+>   `pixel // 2` of `librewxr/colors/color_table.csv`, whose row `i` holds grey `#iiiiii`
+>   at `dBZ = i − 32`.
+>
+> Therefore **the rendered grey level equals `dBZ + 32`** — a 1 dBZ ramp — and grey `0` is fully
+> transparent and means *no echo or no data*, indistinguishably. Confirmed against live tiles over
+> six Polish cities: every pixel satisfies `R = G = B`, alpha is only ever 0 or 255, and the lowest
+> non-transparent level observed is grey 42 (10 dBZ ≈ 0.15 mm/h), i.e. the OPERA composite's own
+> noise floor sits inside the *light* band. **(measured 2026-08-25)**
+>
+> Rows 128–255 of the table are the snow ramp; requesting `snow=0` keeps every value in 0–127, so
+> snow greys can never be mistaken for extreme rain.
 
 ---
 

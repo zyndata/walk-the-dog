@@ -44,6 +44,7 @@ LEAD_TIME_MIN: Final = 30
 SLOT_MINUTES: Final = 10
 
 # Common intensity scale, mm/h lower bounds (docs/DATA_SOURCES.md)
+INTENSITY_NONE: Final = "none"
 INTENSITY_THRESHOLD_LIGHT: Final = "light"
 INTENSITY_THRESHOLD_MODERATE: Final = "moderate"
 INTENSITY_THRESHOLD_HEAVY: Final = "heavy"
@@ -53,6 +54,18 @@ INTENSITY_MM_H: Final[dict[str, float]] = {
     INTENSITY_THRESHOLD_HEAVY: 7.6,
 }
 DEFAULT_INTENSITY_THRESHOLD: Final = INTENSITY_THRESHOLD_LIGHT
+
+
+def intensity_class(mm_per_h: float) -> str:
+    """Classify a rain rate on the common scale (docs/DATA_SOURCES.md § Intensity mapping)."""
+    if mm_per_h >= INTENSITY_MM_H[INTENSITY_THRESHOLD_HEAVY]:
+        return INTENSITY_THRESHOLD_HEAVY
+    if mm_per_h >= INTENSITY_MM_H[INTENSITY_THRESHOLD_MODERATE]:
+        return INTENSITY_THRESHOLD_MODERATE
+    if mm_per_h >= INTENSITY_MM_H[INTENSITY_THRESHOLD_LIGHT]:
+        return INTENSITY_THRESHOLD_LIGHT
+    return INTENSITY_NONE
+
 
 # Source ids (roles fixed in phase 0; weights in docs/ARCHITECTURE.md § Consensus)
 SOURCE_LIBREWXR: Final = "librewxr"

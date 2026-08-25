@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 3 source clients: one adapter per recommended provider behind a common interface —
+  LibreWXR (frame index, tile fetch, Web-Mercator disc mask, 90th-percentile pixel sampling),
+  Open-Meteo (ICON-EU and KNMI HARMONIE from a single five-coordinate request), and MET Norway
+  (failover-only, centre point, `If-Modified-Since`, honouring `Expires`). All three return the
+  same normalized `SourceSeries` of UTC slots in mm/h.
+- Source registry with provider failover: MET Norway is woken only after Open-Meteo fails twice
+  in a row and stood down after it succeeds twice, so correlated sources never vote together.
+- Frame sample cache: 32-entry LRU keyed by LibreWXR frame path, persisted through the Home
+  Assistant `Store`, cleared when the location or radius changes, storing sampled floats only.
+- Per-source request budgets enforced over a rolling hour, cross-cycle retry backoff, and
+  cached-series reuse that keeps ageing so stale data drops itself out of the consensus.
+- Recorded API fixtures under `tests/fixtures/` and 123 tests covering parsing, intensity
+  mapping, disc geometry, budgets, failover, caching and error handling — all passing with
+  networking disabled.
+
 - Phase 2 repo skeleton: the `walk_the_dog` custom integration package with a valid
   `manifest.json` (v0.1.0), constants from the phase 0/1 decisions, a config-flow stub that
   aborts until the wizard ships, and empty modules matching the architecture layout.
@@ -50,8 +65,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decision.
 - This changelog.
 
+### Fixed
+
+- LibreWXR intensity calibration is now pinned rather than assumed: the rendered grey level of
+  colour scheme 0 equals `dBZ + 32`, established from the AGPL-3.0 LibreWXR source and locked
+  by a fixture test. `docs/DATA_SOURCES.md` records the derivation.
+
 ### Changed
 
+- `docs/DEVELOPMENT.md` documents that the test suite cannot run natively on Windows (Home
+  Assistant imports the Unix-only `fcntl`) and gives the Linux-container command to run it there.
 - The source mix is one tile source plus two point/grid JSON sources, rather than the all-tiles
   design assumed at bootstrap. No free tile-based nowcast from an established provider survived
   evaluation.

@@ -41,6 +41,22 @@ This creates `.venv/` with Python 3.14, installs the pinned dev dependencies fro
 Tests use `pytest-homeassistant-custom-component` and recorded fixtures — they must pass with
 no network access.
 
+### Tests do not run natively on Windows
+
+Home Assistant imports `fcntl` (`homeassistant/runner.py`), a Unix-only module, so
+`pytest-homeassistant-custom-component` fails at plugin import on Windows — before any test
+runs. Everything else (`setup.py`, `lint.py`, `format.py`, `install.py`) works on both OSes.
+
+Run the suite on the Windows machine through a Linux container instead:
+
+```
+docker run --rm --network none -v "%CD%:/repo" -w /repo ghcr.io/astral-sh/uv:python3.14-bookworm-slim   sh -c "uv venv /tmp/v && uv pip install --python /tmp/v/bin/python -r requirements-dev.txt && /tmp/v/bin/python -m pytest"
+```
+
+(`--network none` also proves the offline requirement.) Drop `--network none` on the first run so
+the dependencies can be downloaded, or bake them into an image. On the Linux machine, and in CI,
+`python scripts/test.py` runs directly.
+
 ## Deploying into a test Home Assistant instance
 
 1. Copy `.env.example` to `.env` and set `HA_CONFIG_DIR` to your HA configuration directory

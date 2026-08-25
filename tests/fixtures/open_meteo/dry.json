@@ -1,0 +1,296 @@
+[
+ {
+  "latitude": 52.25,
+  "longitude": 21.0,
+  "generationtime_ms": 0.03159046173095703,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 113.0,
+  "hourly_units": {
+   "time": "unixtime",
+   "precipitation_icon_eu": "mm",
+   "precipitation_knmi_harmonie_arome_europe": "mm"
+  },
+  "hourly": {
+   "time": [
+    1787637600,
+    1787641200,
+    1787644800,
+    1787648400,
+    1787652000,
+    1787655600,
+    1787659200,
+    1787662800,
+    1787666400,
+    1787670000,
+    1787673600,
+    1787677200
+   ],
+   "precipitation_icon_eu": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "precipitation_knmi_harmonie_arome_europe": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ {
+  "latitude": 52.25,
+  "longitude": 21.0,
+  "generationtime_ms": 0.018477439880371094,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 83.0,
+  "location_id": 1,
+  "hourly_units": {
+   "time": "unixtime",
+   "precipitation_icon_eu": "mm",
+   "precipitation_knmi_harmonie_arome_europe": "mm"
+  },
+  "hourly": {
+   "time": [
+    1787637600,
+    1787641200,
+    1787644800,
+    1787648400,
+    1787652000,
+    1787655600,
+    1787659200,
+    1787662800,
+    1787666400,
+    1787670000,
+    1787673600,
+    1787677200
+   ],
+   "precipitation_icon_eu": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "precipitation_knmi_harmonie_arome_europe": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ {
+  "latitude": 52.25,
+  "longitude": 21.0625,
+  "generationtime_ms": 0.01800060272216797,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 88.0,
+  "location_id": 2,
+  "hourly_units": {
+   "time": "unixtime",
+   "precipitation_icon_eu": "mm",
+   "precipitation_knmi_harmonie_arome_europe": "mm"
+  },
+  "hourly": {
+   "time": [
+    1787637600,
+    1787641200,
+    1787644800,
+    1787648400,
+    1787652000,
+    1787655600,
+    1787659200,
+    1787662800,
+    1787666400,
+    1787670000,
+    1787673600,
+    1787677200
+   ],
+   "precipitation_icon_eu": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "precipitation_knmi_harmonie_arome_europe": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ {
+  "latitude": 52.1875,
+  "longitude": 21.0,
+  "generationtime_ms": 0.01704692840576172,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 109.0,
+  "location_id": 3,
+  "hourly_units": {
+   "time": "unixtime",
+   "precipitation_icon_eu": "mm",
+   "precipitation_knmi_harmonie_arome_europe": "mm"
+  },
+  "hourly": {
+   "time": [
+    1787637600,
+    1787641200,
+    1787644800,
+    1787648400,
+    1787652000,
+    1787655600,
+    1787659200,
+    1787662800,
+    1787666400,
+    1787670000,
+    1787673600,
+    1787677200
+   ],
+   "precipitation_icon_eu": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "precipitation_knmi_harmonie_arome_europe": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ },
+ {
+  "latitude": 52.25,
+  "longitude": 20.9375,
+  "generationtime_ms": 0.016450881958007812,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "timezone_abbreviation": "GMT",
+  "elevation": 121.0,
+  "location_id": 4,
+  "hourly_units": {
+   "time": "unixtime",
+   "precipitation_icon_eu": "mm",
+   "precipitation_knmi_harmonie_arome_europe": "mm"
+  },
+  "hourly": {
+   "time": [
+    1787637600,
+    1787641200,
+    1787644800,
+    1787648400,
+    1787652000,
+    1787655600,
+    1787659200,
+    1787662800,
+    1787666400,
+    1787670000,
+    1787673600,
+    1787677200
+   ],
+   "precipitation_icon_eu": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "precipitation_knmi_harmonie_arome_europe": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ]
+  }
+ }
+]

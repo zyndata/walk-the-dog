@@ -1,0 +1,189 @@
+{
+ "version": "2.0",
+ "generated": 1787641177,
+ "host": "https://api.librewxr.net",
+ "radar": {
+  "past": [
+   {
+    "time": 1787634000,
+    "path": "/v2/radar/1787634000"
+   },
+   {
+    "time": 1787634600,
+    "path": "/v2/radar/1787634600"
+   },
+   {
+    "time": 1787635200,
+    "path": "/v2/radar/1787635200"
+   },
+   {
+    "time": 1787635800,
+    "path": "/v2/radar/1787635800"
+   },
+   {
+    "time": 1787636400,
+    "path": "/v2/radar/1787636400"
+   },
+   {
+    "time": 1787637000,
+    "path": "/v2/radar/1787637000"
+   },
+   {
+    "time": 1787637600,
+    "path": "/v2/radar/1787637600"
+   },
+   {
+    "time": 1787638200,
+    "path": "/v2/radar/1787638200"
+   },
+   {
+    "time": 1787638800,
+    "path": "/v2/radar/1787638800"
+   },
+   {
+    "time": 1787639400,
+    "path": "/v2/radar/1787639400"
+   },
+   {
+    "time": 1787640000,
+    "path": "/v2/radar/1787640000"
+   },
+   {
+    "time": 1787640600,
+    "path": "/v2/radar/1787640600"
+   }
+  ],
+  "nowcast": [
+   {
+    "time": 1787641200,
+    "path": "/v2/radar/1787641200"
+   },
+   {
+    "time": 1787641800,
+    "path": "/v2/radar/1787641800"
+   },
+   {
+    "time": 1787642400,
+    "path": "/v2/radar/1787642400"
+   },
+   {
+    "time": 1787643000,
+    "path": "/v2/radar/1787643000"
+   },
+   {
+    "time": 1787643600,
+    "path": "/v2/radar/1787643600"
+   },
+   {
+    "time": 1787644200,
+    "path": "/v2/radar/1787644200"
+   }
+  ],
+  "colorSchemes": [
+   {
+    "id": 0,
+    "name": "Black and White"
+   },
+   {
+    "id": 1,
+    "name": "Rainviewer Original"
+   },
+   {
+    "id": 2,
+    "name": "Universal Blue"
+   },
+   {
+    "id": 3,
+    "name": "Titan"
+   },
+   {
+    "id": 4,
+    "name": "The Weather Channel (TWC)"
+   },
+   {
+    "id": 5,
+    "name": "Meteored"
+   },
+   {
+    "id": 6,
+    "name": "NEXRAD Level III"
+   },
+   {
+    "id": 7,
+    "name": "Rainbow @ Selex SI"
+   },
+   {
+    "id": 8,
+    "name": "Dark Sky"
+   },
+   {
+    "id": 9,
+    "name": "Datameteo Valerio"
+   },
+   {
+    "id": 10,
+    "name": "Viper HD"
+   },
+   {
+    "id": 11,
+    "name": "MRMS CREF"
+   },
+   {
+    "id": 12,
+    "name": "33/40 Max Storm"
+   }
+  ]
+ },
+ "satellite": {
+  "infrared": [
+   {
+    "time": 1787598000,
+    "path": "/v2/satellite/1787598000"
+   },
+   {
+    "time": 1787601600,
+    "path": "/v2/satellite/1787601600"
+   },
+   {
+    "time": 1787605200,
+    "path": "/v2/satellite/1787605200"
+   },
+   {
+    "time": 1787608800,
+    "path": "/v2/satellite/1787608800"
+   },
+   {
+    "time": 1787612400,
+    "path": "/v2/satellite/1787612400"
+   },
+   {
+    "time": 1787616000,
+    "path": "/v2/satellite/1787616000"
+   },
+   {
+    "time": 1787619600,
+    "path": "/v2/satellite/1787619600"
+   },
+   {
+    "time": 1787623200,
+    "path": "/v2/satellite/1787623200"
+   },
+   {
+    "time": 1787626800,
+    "path": "/v2/satellite/1787626800"
+   },
+   {
+    "time": 1787630400,
+    "path": "/v2/satellite/1787630400"
+   },
+   {
+    "time": 1787634000,
+    "path": "/v2/satellite/1787634000"
+   },
+   {
+    "time": 1787637600,
+    "path": "/v2/satellite/1787637600"
+   }
+  ]
+ }
+}
