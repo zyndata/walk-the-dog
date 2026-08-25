@@ -54,6 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   walk; it is logged and skipped.
 - `notify.py` renamed to `notifier.py`: a module named after a platform inside an integration
   *is* that platform to Home Assistant, and this one is not a notify platform.
+- `docs/DATA_SOURCES.md` opens with *What is actually wired in* — the four shipped sources side by
+  side (horizon, series step, publisher cadence, our fetch cadence, staleness, cell size, weight,
+  sampling, request ceilings, licences) ahead of the phase 0 research that chose them.
 - `docs/CONFIG.md` documents the entities, the sensor states and attributes, the notification
   rules and the full `walk_the_dog_alert` payload schema.
 - Work-in-progress banners in `README.md` and `info.md` updated: the prediction loop works;

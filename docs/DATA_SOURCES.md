@@ -1,5 +1,9 @@
 # Data sources
 
+> **Reading this document:** [What is actually wired in](#what-is-actually-wired-in) is the
+> current state — the four sources the integration ships with. Everything after it is the phase 0
+> research that chose them.
+
 **Phase 0 research — completed 2026-08-24.** Every claim below was verified against current
 official documentation or against the live API on that date; the per-claim date is noted as
 *checked 2026-08-24* unless stated otherwise. Where a fact could be established by querying the
@@ -31,6 +35,66 @@ past frames disqualify — this integration never computes cloud movement itself
 5. Consequence for the architecture: the source mix is **one tile source plus two point/grid JSON
    sources**, not the all-tiles design assumed at bootstrap. Pixel sampling and `Pillow` are needed
    for LibreWXR only. This deviation is recorded in `STATE.md`.
+
+---
+
+## What is actually wired in
+
+The rest of this document is the phase 0 research — twenty candidates evaluated, most of them
+rejected. This section is the short answer: **what the integration ships with today**, and what
+each source is worth to it. Every figure here is a constant in the code, named in the last row so
+the table can be checked rather than trusted.
+
+Only **one of the four is a radar.** LibreWXR extrapolates the EUMETNET OPERA composite; the other
+three are numerical models. That is why they carry different roles rather than being averaged.
+
+### Time windows and intervals
+
+| | **LibreWXR** | **ICON-EU** | **KNMI HARMONIE** | **MET Norway** |
+|---|---|---|---|---|
+| Source id | `librewxr` | `icon_eu` | `knmi` | `metno` |
+| What it is | OPERA radar, extrapolated | DWD model | KNMI AROME model | ECMWF-driven model |
+| Role | timing precision | reliability baseline | independent model, freshest run | provider-level failover |
+| **Forecast horizon** | now … **+60 min** | **+12 h** | **+12 h** | **+12 h** |
+| **Step of the series** | **10 min** (7 frames) | 60 min | 60 min | 60 min |
+| Publisher's cadence | every 10 min | every 3 h | **every 1 h** | ~every 2 h |
+| **How often we fetch** | every cycle (10 min) | every 30 min | every 30 min (same request) | ≥ 10 min, **only while Open-Meteo is failing** |
+| Dropped as stale after | 30 min | 9 h | 3 h | 6 h |
+
+Fetch cadences and horizons live in the adapters (`sources/librewxr.py`, `sources/open_meteo.py`,
+`sources/met_norway.py`); the publisher cadences and the 3× staleness rule live in
+`UPDATE_INTERVAL_S` and `STALE_FACTOR` in `sources/base.py`.
+
+### Resolution, weight and cost
+
+| | **LibreWXR** | **ICON-EU** | **KNMI HARMONIE** | **MET Norway** |
+|---|---|---|---|---|
+| Effective cell at 52° N | **~2 km** | 6.95 km N-S | 5.5 km | ~10 km |
+| Consensus reliability weight | **1.00** | 0.80 | 0.90 | 0.70 |
+| How the disc is sampled | every pixel inside the disc, p90 | 5 points (centre + N/E/S/W) | 5 points, **one shared request** | 1 point (centre) |
+| Wire format | PNG tiles, z=8, ~376 m/pixel | JSON | JSON | JSON |
+| Self-imposed request ceiling | 20 /h | 6 /h (shared with KNMI) | — | 2 /h |
+| API key | none | none | none | none (identifying `User-Agent` mandatory) |
+| Licence | CC BY 4.0 (OPERA) | CC BY 4.0 (Open-Meteo + DWD) | CC BY 4.0 (Open-Meteo + KNMI) | CC BY 4.0 / NLOD |
+
+Cell sizes and weights are `CELL_KM` and `RELIABILITY` in `sources/base.py`; the attribution
+strings the sensor must show are `ATTRIBUTION` in the same module.
+
+### What that means in practice
+
+- **The radar only reaches an hour ahead.** The search window is `earlier_margin` (60 min by
+  default) + the walk (30 min) + `later_margin` (30 min), so up to ~2 h. Beyond +60 min only the
+  hourly models score the window, and the sensor raises `horizon_limited` to say so.
+- **MET Norway is silent by default.** It wakes only after two consecutive Open-Meteo failures,
+  because it correlates 0.61 with KNMI — polling it alongside would add a dependent vote dressed
+  up as an independent one.
+- **ICON-EU and KNMI cost one HTTP request between them**, covering both models and all five
+  sample points.
+- **Zero requests outside a walk window**, and zero while the alerting switch is off. The whole
+  budget is ≤ 28 requests/hour inside a window and ≤ 200/day.
+- **No Polish radar is in the set.** IMGW-PIB publishes observations only (11 h stale when
+  measured) and RainViewer stopped serving forecast frames publicly. Both are in
+  [Rejected candidates](#rejected-candidates) with the evidence.
 
 ---
 
