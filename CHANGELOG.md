@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 5 setup wizard: location on a map pre-filled with the Home Assistant home, a walk
+  schedule in one of three modes (same times every day, weekday/weekend split, or a full
+  per-day schedule) with the times form adapting to the chosen mode, and the alert parameters
+  from `docs/CONFIG.md`.
+- Options flow reusing the wizard's schedule and parameter steps verbatim, so everything except
+  the location — schedule mode included — is editable later and validates identically; changing
+  an option reloads the config entry.
+- Walk-schedule model in `schedule.py` (pure): the per-mode storage shape, time parsing and
+  normalization, and `expand()`, the single place that turns any mode into per-weekday walk
+  times.
+- Long-walk warning: an average walk duration over 30 minutes has to be confirmed on its own
+  step, and declining returns to the parameters form with the entered values intact.
+- Full English `strings.json` / `translations/en.json` for both flows, including translated
+  schedule-mode and rain-intensity choices.
+- 64 further tests (271 total, still green with networking disabled) covering the happy path,
+  each schedule mode, the long-walk warning, invalid input, an options round-trip, and the
+  strings files themselves.
+
 - Phase 4 decision engine: `engine/grid.py`, `engine/consensus.py` and `engine/window.py` turn
   the sources' normalized series into a recommendation, as pure functions with no I/O, no Home
   Assistant imports and no clock of their own.
@@ -93,6 +111,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `manifest.json` declares `single_config_entry`: one home, one schedule, one recommendation
+  sensor, so a second setup attempt now aborts.
+- `docs/CONFIG.md` describes the implemented flows and pins the config entry data and options
+  shape, replacing the phase 1 placeholders.
 - `docs/DEVELOPMENT.md` documents that the test suite cannot run natively on Windows (Home
   Assistant imports the Unix-only `fcntl`) and gives the Linux-container command to run it there.
 - The source mix is one tile source plus two point/grid JSON sources, rather than the all-tiles

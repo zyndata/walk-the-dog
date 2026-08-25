@@ -1,12 +1,15 @@
 {
   "domain": "walk_the_dog",
   "name": "Walk the dog",
-  "codeowners": ["@zyndata"],
+  "codeowners": [
+    "@zyndata"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/zyndata/walk-the-dog",
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/zyndata/walk-the-dog/issues",
   "requirements": [],
+  "single_config_entry": true,
   "version": "0.1.0"
 }

@@ -40,6 +40,22 @@ DEFAULT_LATER_MARGIN_MIN: Final = 30
 WALK_DURATION_WARN_MIN: Final = 30
 LEAD_TIME_MIN: Final = 30
 
+# Config-flow input bounds. Margins move in whole slots so a search offset always
+# lands on the 10-minute grid the engine evaluates on.
+MIN_MARGIN_MIN: Final = 0
+MAX_MARGIN_MIN: Final = 180
+MARGIN_STEP_MIN: Final = 10
+MIN_WALK_DURATION_MIN: Final = 5
+MAX_WALK_DURATION_MIN: Final = 240
+WALK_DURATION_STEP_MIN: Final = 5
+RADIUS_STEP_KM: Final = 0.5
+
+# Notification target: only the companion app's per-device services qualify.
+NOTIFY_DOMAIN: Final = "notify"
+NOTIFY_SERVICE_PREFIX: Final = "mobile_app_"
+
+DEFAULT_FIRE_EVENT: Final = False
+
 # Time grid: all window evaluation happens on a 10-minute UTC grid
 SLOT_MINUTES: Final = 10
 

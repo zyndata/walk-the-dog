@@ -1,10 +1,11 @@
-"""The engine's purity is a structural property, so it is checked structurally.
+"""Purity is a structural property, so it is checked structurally.
 
-docs/ARCHITECTURE.md makes `engine/*` pure — no I/O, no Home Assistant imports, no
-clock reads, `now` always a parameter — because that is what makes every rain
-scenario testable as plain arithmetic and every decision reproducible from a
-recorded set of series. A stray `datetime.now()` would quietly undo that without
-failing a single behavioural test, so this module reads the source instead.
+docs/ARCHITECTURE.md makes `engine/*` and `schedule.py` pure — no I/O, no Home
+Assistant imports, no clock reads, `now` always a parameter — because that is
+what makes every rain scenario testable as plain arithmetic and every decision
+reproducible from a recorded set of series. A stray `datetime.now()` would
+quietly undo that without failing a single behavioural test, so this module
+reads the source instead.
 """
 
 from __future__ import annotations
@@ -14,10 +15,10 @@ from pathlib import Path
 
 import pytest
 
-ENGINE = Path(__file__).parents[1] / "custom_components" / "walk_the_dog" / "engine"
-MODULES = sorted(ENGINE.glob("*.py"))
+COMPONENT = Path(__file__).parents[1] / "custom_components" / "walk_the_dog"
+MODULES = [*sorted(COMPONENT.joinpath("engine").glob("*.py")), COMPONENT / "schedule.py"]
 
-#: Absolute imports the engine may use: the standard library, and nothing else.
+#: Absolute imports a pure module may use: the standard library, and nothing else.
 ALLOWED_ROOTS = {
     "__future__",
     "bisect",
@@ -44,26 +45,27 @@ def _module_names(tree: ast.AST) -> set[str]:
     return roots
 
 
-def test_the_engine_package_is_not_empty() -> None:
+def test_every_pure_module_is_covered() -> None:
     """Guard against the glob silently finding nothing and passing every check."""
     assert {path.name for path in MODULES} == {
         "__init__.py",
         "consensus.py",
         "grid.py",
+        "schedule.py",
         "window.py",
     }
 
 
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)
-def test_engine_module_imports_only_the_standard_library(path: Path) -> None:
-    """No homeassistant, no aiohttp, no numpy: the engine is plain Python over dataclasses."""
+def test_pure_module_imports_only_the_standard_library(path: Path) -> None:
+    """No homeassistant, no aiohttp, no numpy: plain Python over dataclasses."""
     roots = _module_names(ast.parse(path.read_text(encoding="utf-8")))
 
     assert roots <= ALLOWED_ROOTS, f"{path.name} imports {sorted(roots - ALLOWED_ROOTS)}"
 
 
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)
-def test_engine_module_never_reads_a_clock_or_does_io(path: Path) -> None:
+def test_pure_module_never_reads_a_clock_or_does_io(path: Path) -> None:
     """`now` is a parameter everywhere — nothing in here may ask the system for it."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
     called = {
@@ -76,7 +78,7 @@ def test_engine_module_never_reads_a_clock_or_does_io(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", MODULES, ids=lambda path: path.name)
-def test_engine_module_defines_nothing_async(path: Path) -> None:
+def test_pure_module_defines_nothing_async(path: Path) -> None:
     """Async is where I/O lives; a pure decision layer has no use for it."""
     tree = ast.parse(path.read_text(encoding="utf-8"))
 

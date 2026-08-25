@@ -2,12 +2,150 @@
   "config": {
     "step": {
       "user": {
-        "title": "Walk the dog",
-        "description": "The setup wizard arrives in a later development phase."
+        "title": "Where do you walk the dog?",
+        "description": "Rain is predicted for a circle around this point. It starts at your Home Assistant home location — move the marker if you usually walk somewhere else.",
+        "data": {
+          "location": "Walk location"
+        }
+      },
+      "schedule_mode": {
+        "title": "Walk schedule",
+        "description": "How do you want to describe your walk times?",
+        "data": {
+          "schedule_mode": "Schedule type"
+        }
+      },
+      "schedule_times": {
+        "title": "Walk times",
+        "description": "Add the time each walk usually starts. A day with no walks can be left empty, as long as there is at least one walk somewhere in the week.",
+        "data": {
+          "all": "Every day",
+          "weekday": "Monday to Friday",
+          "weekend": "Saturday and Sunday",
+          "mon": "Monday",
+          "tue": "Tuesday",
+          "wed": "Wednesday",
+          "thu": "Thursday",
+          "fri": "Friday",
+          "sat": "Saturday",
+          "sun": "Sunday"
+        }
+      },
+      "params": {
+        "title": "Alert settings",
+        "description": "How far around the walk location to look, what counts as rain, and how far the suggested walk time may move.",
+        "data": {
+          "radius_km": "Alert radius",
+          "intensity_threshold": "Rain intensity that counts",
+          "earlier_margin_min": "Search this far earlier",
+          "later_margin_min": "Search this far later",
+          "walk_duration_min": "Average walk duration",
+          "notify_service": "Notification device",
+          "fire_event": "Fire a custom event",
+          "auto_mute_entity": "Mute alerts when this is away"
+        },
+        "data_description": {
+          "radius_km": "The circle around the walk location that is checked for rain. The minimum keeps the circle larger than one forecast cell.",
+          "intensity_threshold": "A moment counts as rainy once the forecast reaches this intensity.",
+          "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives.",
+          "later_margin_min": "How much later than the scheduled time you are willing to set off.",
+          "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested.",
+          "notify_service": "The companion app device that receives the push notification. Leave empty for no push notification.",
+          "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
+          "auto_mute_entity": "While this person or device tracker is not home, no notification is sent."
+        }
+      },
+      "long_walk": {
+        "title": "That is a long walk",
+        "description": "You entered {duration} minutes. Rain forecasts for the next hour are much more reliable than for longer periods, so for walks over {limit} minutes the suggestion will more often be a best guess than a promise. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
+        "data": {
+          "confirm": "Keep this duration"
+        }
       }
     },
-    "abort": {
-      "not_implemented": "The setup wizard is not implemented yet — it arrives in a later development phase."
+    "error": {
+      "invalid_time": "A walk time could not be read. Use the 24-hour form, for example 07:30.",
+      "no_walk_times": "Add at least one walk time.",
+      "invalid_notify_service": "Pick one of the listed devices, or type a notify service name that starts with mobile_app_."
+    }
+  },
+  "options": {
+    "step": {
+      "schedule_mode": {
+        "title": "Walk schedule",
+        "description": "How do you want to describe your walk times?",
+        "data": {
+          "schedule_mode": "Schedule type"
+        }
+      },
+      "schedule_times": {
+        "title": "Walk times",
+        "description": "Add the time each walk usually starts. A day with no walks can be left empty, as long as there is at least one walk somewhere in the week.",
+        "data": {
+          "all": "Every day",
+          "weekday": "Monday to Friday",
+          "weekend": "Saturday and Sunday",
+          "mon": "Monday",
+          "tue": "Tuesday",
+          "wed": "Wednesday",
+          "thu": "Thursday",
+          "fri": "Friday",
+          "sat": "Saturday",
+          "sun": "Sunday"
+        }
+      },
+      "params": {
+        "title": "Alert settings",
+        "description": "How far around the walk location to look, what counts as rain, and how far the suggested walk time may move.",
+        "data": {
+          "radius_km": "Alert radius",
+          "intensity_threshold": "Rain intensity that counts",
+          "earlier_margin_min": "Search this far earlier",
+          "later_margin_min": "Search this far later",
+          "walk_duration_min": "Average walk duration",
+          "notify_service": "Notification device",
+          "fire_event": "Fire a custom event",
+          "auto_mute_entity": "Mute alerts when this is away"
+        },
+        "data_description": {
+          "radius_km": "The circle around the walk location that is checked for rain. The minimum keeps the circle larger than one forecast cell.",
+          "intensity_threshold": "A moment counts as rainy once the forecast reaches this intensity.",
+          "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives.",
+          "later_margin_min": "How much later than the scheduled time you are willing to set off.",
+          "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested.",
+          "notify_service": "The companion app device that receives the push notification. Leave empty for no push notification.",
+          "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
+          "auto_mute_entity": "While this person or device tracker is not home, no notification is sent."
+        }
+      },
+      "long_walk": {
+        "title": "That is a long walk",
+        "description": "You entered {duration} minutes. Rain forecasts for the next hour are much more reliable than for longer periods, so for walks over {limit} minutes the suggestion will more often be a best guess than a promise. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
+        "data": {
+          "confirm": "Keep this duration"
+        }
+      }
+    },
+    "error": {
+      "invalid_time": "A walk time could not be read. Use the 24-hour form, for example 07:30.",
+      "no_walk_times": "Add at least one walk time.",
+      "invalid_notify_service": "Pick one of the listed devices, or type a notify service name that starts with mobile_app_."
+    }
+  },
+  "selector": {
+    "schedule_mode": {
+      "options": {
+        "daily": "The same times every day",
+        "weekday_weekend": "Weekdays and weekends differ",
+        "per_day": "Every day of the week is different"
+      }
+    },
+    "intensity_threshold": {
+      "options": {
+        "light": "Light rain and above (from 0.1 mm/h)",
+        "moderate": "Moderate rain and above (from 2.5 mm/h)",
+        "heavy": "Heavy rain only (from 7.6 mm/h)"
+      }
     }
   }
 }

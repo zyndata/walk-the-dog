@@ -381,11 +381,82 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 5 — Config flow wizard + options flow
 
-- **Status:** not started
-- **Date:**
-- **What was built:**
+- **Status:** done
+- **Date:** 2026-08-25
+- **What was built:** the complete setup wizard and options flow, plus the schedule model they
+  write. `config_flow.py`: `_WalkFlowSteps` (the schedule and parameter steps, shared verbatim by
+  both flows), `WalkTheDogConfigFlow` (step 1 location on a `LocationSelector` pre-filled with the
+  HA home, then the shared steps, then entry creation) and `WalkTheDogOptionsFlow`
+  (`OptionsFlowWithReload`, entering the same shared steps prefilled from stored options).
+  `schedule.py` (pure): `DAY_KEYS` / `SCHEDULE_KEYS`, `normalize_time`, `normalize_times`,
+  `normalize_schedule`, `expand`, `ScheduleError`. `const.py` gained the config-flow input bounds
+  and the notify-service constants. Full English `strings.json` + `translations/en.json` for both
+  flows, with translated `schedule_mode` and `intensity_threshold` choices.
+  `manifest.json` gained `single_config_entry`. `docs/CONFIG.md` rewritten to describe the
+  implementation and pin the storage shape. Tests: `tests/test_config_flow.py`,
+  `tests/test_schedule.py`, `tests/test_strings.py`, and `tests/test_engine_purity.py` renamed to
+  `tests/test_purity.py` and extended to cover `schedule.py` — **64 new tests, 271 in total**,
+  green with networking fully disabled (`docker run --network none`). hassfest was also run
+  locally against the real action image and passes.
 - **Decisions:**
+  - **Location is entry data; everything else is options.** `PLAN.md` scopes the options flow to
+    steps 2–3, so the location is set once. It is also the only value whose change invalidates the
+    whole frame cache, which makes "set once" the honest contract rather than a limitation.
+  - **`single_config_entry: true`.** `CLAUDE.md` specifies one shared coordinator and phase 6
+    specifies exactly one sensor; letting a second entry exist would contradict both. HA then
+    aborts a second flow with its own `single_instance_allowed` string, so no extra strings are
+    needed.
+  - **Step 2 is two forms, not one.** HA renders a form from a fixed schema, so "the form adapts
+    to the chosen mode" can only mean: submit the mode (`schedule_mode`), then render exactly the
+    slots that mode uses (`schedule_times`). Recorded in `docs/CONFIG.md`.
+  - **The schedule is stored under the mode's own keys** (`all` / `weekday`+`weekend` /
+    `mon`…`sun`), never pre-expanded to seven days. Storage then says what the user actually
+    chose, and switching mode cannot leave the previous mode's slots behind. `expand()` is the
+    single place that knows what the keys mean.
+  - **An empty slot is allowed, an empty week is not.** "No weekend walks" is a real answer; a
+    schedule with no walk at all has nothing to predict for and is rejected with `no_walk_times`.
+  - **Times are entered with the frontend's native time input** (`TextSelector`, `type=time`,
+    `multiple=True`), which gives a real add/remove list of picker fields. Values are normalized
+    server-side anyway (`H:MM`, `HH:MM:SS` and duplicates are all accepted) because the browser
+    decides what it sends.
+  - **The > 30 min warning is its own confirmation step** (`long_walk`), not an inline error.
+    Declining returns to the parameter form with the entered values still in it, so the user can
+    simply lower the number — a red error under a legitimate value would have been a lie.
+  - **The notification device is optional and accepts a custom value.** A companion-app service
+    may not be registered yet at setup time; a typed value is still validated to be a
+    `mobile_app_*` service and is stored without the `notify.` prefix.
+  - **Optional options left empty are absent from storage, never `null`** — so clearing a field
+    in the options flow really removes it, and phase 6 can test presence rather than truthiness.
+  - **`OptionsFlowWithReload`** applies option changes by reloading the entry. Phase 6 must
+    therefore *not* register a config-entry update listener; the class forbids combining the two.
+- **Deviations from PLAN.md (recorded before proceeding):**
+  1. **The schedule model landed in `schedule.py` in phase 5**, not phase 6. `docs/ARCHITECTURE.md`
+     already assigns the walk-schedule model to that module, and phase 5's task 5 (validation)
+     needs it; phase 6 adds only the next-walk computation on top. Same precedent as
+     `intensity_class()` landing early in phase 3.
+  2. **Phase 2's `not_implemented` abort string was removed** — the wizard exists now, so nothing
+     can reach it.
+  3. **`tests/test_engine_purity.py` became `tests/test_purity.py`** and now checks `schedule.py`
+     too. The architecture always called both `engine/*` and `schedule.py` pure; only the engine
+     existed when the test was written.
 - **Open questions carried forward:**
+  - **The location cannot be changed after setup.** `PLAN.md` deliberately scopes the options flow
+    to steps 2–3, so moving house means removing and re-adding the entry. If that proves annoying
+    in real use, the HA-idiomatic fix is an `async_step_reconfigure` reusing step 1 — deferred, not
+    forgotten.
+  - **The flows have not been exercised in a real Home Assistant UI yet.** Everything here is
+    driven through `hass.config_entries` in tests and validated by hassfest; the first visual pass
+    happens with the phase 6 smoke test via `scripts/install.py`.
+  - Whether p90 for the LibreWXR disc needs tuning against real events — revisit in phase 8
+    (unchanged since phase 1).
+  - LibreWXR fuses NWP model layers into its tiles outside radar coverage — re-check in phase 8
+    if false alarms show up (unchanged from phase 3).
+  - **Tests cannot run natively on Windows** (HA imports `fcntl`); this phase was developed on the
+    Windows machine and its suite run in the documented Linux container with `--network none`,
+    which doubles as the offline proof. Lint, format and hassfest run there too (hassfest through
+    its own container image). Unchanged from phase 3.
+  - Three GitHub settings blocked by the free plan on a private repo, and two ignored HACS checks
+    — revisit when the repo goes public in phase 9 (unchanged from phase 2).
 
 ## Phase 6 — Coordinator, entities, notifications, events
 
