@@ -14,9 +14,10 @@ from typing import Any
 
 import pytest
 
+from custom_components.walk_the_dog.config_flow import SLOT_LABEL_PREFIX
 from custom_components.walk_the_dog.const import INTENSITY_MM_H
 from custom_components.walk_the_dog.notifier import ALERT_DIRECTIONS, TEXT_PREFIX
-from custom_components.walk_the_dog.schedule import SCHEDULE_MODES
+from custom_components.walk_the_dog.schedule import DAY_KEYS, SCHEDULE_KEYS, SCHEDULE_MODES
 from custom_components.walk_the_dog.sensor import OPTIONS
 
 COMPONENT = Path(__file__).parents[1] / "custom_components" / "walk_the_dog"
@@ -131,5 +132,19 @@ def test_every_notification_has_a_text() -> None:
     expected = {f"{TEXT_PREFIX}title"} | {
         f"{TEXT_PREFIX}{direction}" for direction in ALERT_DIRECTIONS
     }
+
+    assert expected <= set(STRINGS["common"])
+
+
+def test_every_schedule_slot_has_a_day_label() -> None:
+    """The notification step names the days of the walk it is asking about.
+
+    Its description is prose, not a field, so the labels live under `common` and
+    are read back at runtime — the same route the notification texts take.
+    """
+    slots = {key for keys in SCHEDULE_KEYS.values() for key in keys}
+    assert slots == {"all", "weekday", "weekend", *DAY_KEYS}
+
+    expected = {f"{SLOT_LABEL_PREFIX}{slot}" for slot in slots}
 
     assert expected <= set(STRINGS["common"])

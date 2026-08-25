@@ -23,6 +23,11 @@ CONF_SCHEDULE: Final = "schedule"
 CONF_NOTIFY_SERVICE: Final = "notify_service"
 CONF_FIRE_EVENT: Final = "fire_event"
 CONF_AUTO_MUTE_ENTITY: Final = "auto_mute_entity"
+CONF_WALK_TARGETS: Final = "walk_targets"
+
+# Keys inside one walk's entry of `walk_targets` (docs/CONFIG.md § Per-walk alerts)
+CONF_TARGET_SERVICES: Final = "notify_services"
+CONF_TARGET_MUTE: Final = "mute"
 
 # Schedule modes (docs/CONFIG.md, step 2)
 SCHEDULE_MODE_DAILY: Final = "daily"

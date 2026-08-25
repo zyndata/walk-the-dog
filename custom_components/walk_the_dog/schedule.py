@@ -13,10 +13,16 @@ Storage shape (docs/CONFIG.md § Config entry data shape)::
 The slot keys depend on the mode, so nothing is stored that the chosen mode does
 not mean: `daily` keeps one list, `weekday_weekend` two, `per_day` seven.
 `expand()` is the single place that turns any of them into per-weekday times.
+
+A walk is identified by the pair `(slot key, configured time)` rather than by the
+UTC instant it resolves to, because that pair is what the user typed and what
+survives a DST change. `target_key()` renders it as the key under which the
+per-walk notification settings are stored (docs/CONFIG.md § Per-walk alerts).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
@@ -29,6 +35,10 @@ from .const import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
     from datetime import date, tzinfo
+
+#: One configured walk as the user typed it: the slot key it belongs to and its
+#: local `HH:MM` start. Together they identify a walk across DST and across days.
+type WalkSlot = tuple[str, str]
 
 #: Weekday slot keys in `datetime.weekday()` order — Monday is 0.
 DAY_KEYS: Final = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -63,6 +73,10 @@ _HORIZON_DAYS: Final = 9
 
 #: Enough upcoming walks for the coordinator to find the one whose window is open.
 _DEFAULT_COUNT: Final = 8
+
+#: Separates the two halves of a `target_key`. Neither half can contain it: slot
+#: keys are fixed identifiers and a time is always `HH:MM`.
+TARGET_SEPARATOR: Final = "|"
 
 #: Error keys — the config flow shows them through `strings.json`.
 ERROR_INVALID_TIME: Final = "invalid_time"
@@ -118,28 +132,77 @@ def normalize_schedule(mode: str, raw: Mapping[str, Iterable[str]]) -> dict[str,
     return schedule
 
 
-def expand(mode: str, schedule: Mapping[str, Iterable[str]]) -> dict[int, tuple[str, ...]]:
-    """Map every weekday (0 = Monday) to its walk times for the given mode.
+def _slot_times(key: str, schedule: Mapping[str, Iterable[str]]) -> tuple[WalkSlot, ...]:
+    """One slot's times, each tagged with the slot key it came from."""
+    return tuple((key, time) for time in normalize_times(schedule.get(key) or ()))
+
+
+def expand(mode: str, schedule: Mapping[str, Iterable[str]]) -> dict[int, tuple[WalkSlot, ...]]:
+    """Map every weekday (0 = Monday) to its walks, as `(slot key, time)` pairs.
 
     The one place that knows what each mode's slot keys mean; everything
-    downstream works per weekday and never re-reads the mode.
+    downstream works per weekday and never re-reads the mode. The slot key travels
+    with the time because together they identify the walk whose notification
+    settings are looked up later.
     """
     if mode == SCHEDULE_MODE_DAILY:
-        times = normalize_times(schedule.get(KEY_ALL) or ())
-        return dict.fromkeys(range(len(DAY_KEYS)), times)
+        return dict.fromkeys(range(len(DAY_KEYS)), _slot_times(KEY_ALL, schedule))
     if mode == SCHEDULE_MODE_WEEKDAY_WEEKEND:
-        weekday = normalize_times(schedule.get(KEY_WEEKDAY) or ())
-        weekend = normalize_times(schedule.get(KEY_WEEKEND) or ())
+        weekday = _slot_times(KEY_WEEKDAY, schedule)
+        weekend = _slot_times(KEY_WEEKEND, schedule)
         return {day: (weekend if day >= _WEEKEND_FROM else weekday) for day in range(len(DAY_KEYS))}
     if mode == SCHEDULE_MODE_PER_DAY:
-        return {day: normalize_times(schedule.get(key) or ()) for day, key in enumerate(DAY_KEYS)}
+        return {day: _slot_times(key, schedule) for day, key in enumerate(DAY_KEYS)}
     raise ScheduleError(ERROR_NO_WALK_TIMES)
 
 
+def _by_start(walk: Walk) -> datetime:
+    """Sort key — `Walk` is deliberately not ordered, only its instant is."""
+    return walk.start
+
+
+def target_key(slot: str, time: str) -> str:
+    """Storage key for one configured walk's notification settings."""
+    return f"{slot}{TARGET_SEPARATOR}{normalize_time(time)}"
+
+
+def configured_walks(mode: str, schedule: Mapping[str, Iterable[str]]) -> tuple[WalkSlot, ...]:
+    """Every configured walk as `(slot key, time)`, in the order the form shows them.
+
+    The config flow builds one notification step per entry, and prunes stored
+    targets down to these keys — a walk time that was deleted must not leave its
+    device list behind.
+    """
+    if mode not in SCHEDULE_KEYS:
+        raise ScheduleError(ERROR_NO_WALK_TIMES)
+    return tuple(
+        (key, time)
+        for key in SCHEDULE_KEYS[mode]
+        for time in normalize_times(schedule.get(key) or ())
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class Walk:
+    """One occurrence of a configured walk: when it happens, and which walk it is."""
+
+    #: When this occurrence starts, in UTC.
+    start: datetime
+    #: Schedule slot key the walk was configured under.
+    slot: str
+    #: The configured local start time, `HH:MM` — half of the walk's identity.
+    time: str
+
+    @property
+    def target_key(self) -> str:
+        """Key under which this walk's notification settings are stored."""
+        return target_key(self.slot, self.time)
+
+
 def walk_times_on(
-    per_day: Mapping[int, Iterable[str]], day: date, tz: tzinfo
-) -> tuple[datetime, ...]:
-    """Walk starts (UTC) for one local calendar day.
+    per_day: Mapping[int, Iterable[WalkSlot]], day: date, tz: tzinfo
+) -> tuple[Walk, ...]:
+    """The walks of one local calendar day, resolved to UTC.
 
     Times are configured in the local timezone and resolved to UTC per occurrence,
     so a 07:00 walk stays at 07:00 local across a DST change instead of drifting by
@@ -147,13 +210,13 @@ def walk_times_on(
     spring-forward skips resolves through the pre-transition offset, which lands the
     walk at the first moment the clock actually reaches.
     """
-    starts = []
-    for text in per_day.get(day.weekday(), ()):
-        hour, minute = (int(part) for part in normalize_time(text).split(":"))
-        starts.append(
-            datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz).astimezone(UTC)
-        )
-    return tuple(sorted(starts))
+    walks = []
+    for slot, text in per_day.get(day.weekday(), ()):
+        time = normalize_time(text)
+        hour, minute = (int(part) for part in time.split(":"))
+        start = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz).astimezone(UTC)
+        walks.append(Walk(start=start, slot=slot, time=time))
+    return tuple(sorted(walks, key=_by_start))
 
 
 def walks_from(
@@ -163,8 +226,8 @@ def walks_from(
     moment: datetime,
     tz: tzinfo,
     count: int = _DEFAULT_COUNT,
-) -> tuple[datetime, ...]:
-    """The next `count` walk starts (UTC) at or after `moment`, chronologically.
+) -> tuple[Walk, ...]:
+    """The next `count` walks starting at or after `moment`, chronologically.
 
     Returns an empty tuple for a schedule with no walk times at all — there is
     then nothing to predict for, and the coordinator arms no timer.
@@ -176,10 +239,10 @@ def walks_from(
     # Start a day early: a late-evening local walk can still be ahead of `moment`
     # in UTC when the local date has already rolled over.
     day = moment.astimezone(tz).date() - _ONE_DAY
-    found: list[datetime] = []
+    found: list[Walk] = []
     for _ in range(_HORIZON_DAYS):
-        found.extend(start for start in walk_times_on(per_day, day, tz) if start >= moment)
+        found.extend(walk for walk in walk_times_on(per_day, day, tz) if walk.start >= moment)
         if len(found) >= count:
             break
         day += _ONE_DAY
-    return tuple(sorted(found)[:count])
+    return tuple(sorted(found, key=_by_start)[:count])

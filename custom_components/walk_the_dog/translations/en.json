@@ -31,6 +31,18 @@
           "sun": "Sunday"
         }
       },
+      "walk_target": {
+        "title": "Who gets this walk's alert?",
+        "description": "Walk {index} of {total}: {days} at {time}.\n\nPick the phones that should be told when this walk needs moving — the morning walk and the evening walk are often not the same person's job. Leave the list empty to use the default device you set on the last step.",
+        "data": {
+          "notify_services": "Notification devices",
+          "mute": "Never alert about this walk"
+        },
+        "data_description": {
+          "notify_services": "The companion app devices that receive the push for this walk. Empty means the default notification device is used instead.",
+          "mute": "No push notification is ever sent for this walk. The sensor and the custom event still update, so your own automations keep working."
+        }
+      },
       "params": {
         "title": "Alert settings",
         "description": "How far around the walk location to look, what counts as rain, and how far the suggested walk time may move.",
@@ -40,7 +52,7 @@
           "earlier_margin_min": "Search this far earlier",
           "later_margin_min": "Search this far later",
           "walk_duration_min": "Average walk duration",
-          "notify_service": "Notification device",
+          "notify_service": "Default notification device",
           "fire_event": "Fire a custom event",
           "auto_mute_entity": "Mute alerts when this is away"
         },
@@ -50,7 +62,7 @@
           "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives.",
           "later_margin_min": "How much later than the scheduled time you are willing to set off.",
           "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested.",
-          "notify_service": "The companion app device that receives the push notification. Leave empty for no push notification.",
+          "notify_service": "The companion app device used for any walk you did not give devices of its own. Leave empty for no push notification.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
           "auto_mute_entity": "While this person or device tracker is not home, no notification is sent."
         }
@@ -94,6 +106,18 @@
           "sun": "Sunday"
         }
       },
+      "walk_target": {
+        "title": "Who gets this walk's alert?",
+        "description": "Walk {index} of {total}: {days} at {time}.\n\nPick the phones that should be told when this walk needs moving — the morning walk and the evening walk are often not the same person's job. Leave the list empty to use the default device you set on the last step.",
+        "data": {
+          "notify_services": "Notification devices",
+          "mute": "Never alert about this walk"
+        },
+        "data_description": {
+          "notify_services": "The companion app devices that receive the push for this walk. Empty means the default notification device is used instead.",
+          "mute": "No push notification is ever sent for this walk. The sensor and the custom event still update, so your own automations keep working."
+        }
+      },
       "params": {
         "title": "Alert settings",
         "description": "How far around the walk location to look, what counts as rain, and how far the suggested walk time may move.",
@@ -103,7 +127,7 @@
           "earlier_margin_min": "Search this far earlier",
           "later_margin_min": "Search this far later",
           "walk_duration_min": "Average walk duration",
-          "notify_service": "Notification device",
+          "notify_service": "Default notification device",
           "fire_event": "Fire a custom event",
           "auto_mute_entity": "Mute alerts when this is away"
         },
@@ -113,7 +137,7 @@
           "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives.",
           "later_margin_min": "How much later than the scheduled time you are willing to set off.",
           "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested.",
-          "notify_service": "The companion app device that receives the push notification. Leave empty for no push notification.",
+          "notify_service": "The companion app device used for any walk you did not give devices of its own. Leave empty for no push notification.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
           "auto_mute_entity": "While this person or device tracker is not home, no notification is sent."
         }
@@ -220,6 +244,16 @@
     "notification_title": "Walk the dog",
     "notification_earlier": "Rain is expected around {scheduled}. Set off at {recommended} instead — {shift} minutes earlier — and the whole {duration}-minute walk should stay dry.",
     "notification_later": "Rain is expected around {scheduled}. Wait until {recommended} — {shift} minutes later — and the whole {duration}-minute walk should stay dry.",
-    "notification_no_dry_window": "Rain is expected around {scheduled} and there is no dry {duration}-minute window nearby. Take a raincoat."
+    "notification_no_dry_window": "Rain is expected around {scheduled} and there is no dry {duration}-minute window nearby. Take a raincoat.",
+    "walk_slot_all": "every day",
+    "walk_slot_weekday": "Monday to Friday",
+    "walk_slot_weekend": "Saturday and Sunday",
+    "walk_slot_mon": "Monday",
+    "walk_slot_tue": "Tuesday",
+    "walk_slot_wed": "Wednesday",
+    "walk_slot_thu": "Thursday",
+    "walk_slot_fri": "Friday",
+    "walk_slot_sat": "Saturday",
+    "walk_slot_sun": "Sunday"
   }
 }

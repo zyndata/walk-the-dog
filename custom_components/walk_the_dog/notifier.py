@@ -8,6 +8,12 @@ the threshold cannot notify twice in an hour.
 
 Nothing is ever sent about a walk that looks dry: silence means "go as planned".
 
+Who is interrupted is decided per walk, not per integration: each configured walk
+carries its own list of companion-app devices and its own mute switch
+(docs/CONFIG.md § Per-walk alerts), because the morning walk and the evening walk
+are often not the same person's job. A walk with no devices of its own falls back
+to the entry-wide default device.
+
 The `walk_the_dog_alert` event fires whenever a notification *would* fire, even
 when auto-mute suppresses the push — an automation may well want to know while
 nobody is home. Its payload is `WalkData.payload()`, documented in docs/CONFIG.md.
@@ -16,6 +22,7 @@ nobody is home. Its payload is `WalkData.payload()`, documented in docs/CONFIG.m
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.const import STATE_HOME
@@ -52,6 +59,22 @@ TRANSLATION_CATEGORY: Final = "common"
 TEXT_PREFIX: Final = "notification_"
 
 
+@dataclass(frozen=True, slots=True)
+class WalkTarget:
+    """Who to interrupt about one particular walk, and whether to interrupt at all.
+
+    `services` empty means "use the entry-wide default device"; silencing a walk
+    is what `muted` is for, so an empty list can never be mistaken for one.
+    """
+
+    services: tuple[str, ...] = ()
+    muted: bool = False
+
+
+#: A walk the user has not given its own devices or mute switch.
+DEFAULT_TARGET: Final = WalkTarget()
+
+
 class WalkNotifier:
     """Decides whether to speak, and says it once."""
 
@@ -65,7 +88,7 @@ class WalkNotifier:
     ) -> None:
         """Take the notification options; they only change when the entry reloads."""
         self.hass = hass
-        self._service = notify_service
+        self._default_service = notify_service
         self._fire_event = fire_event
         self._mute_entity = mute_entity
         self._walk_start: datetime | None = None
@@ -77,19 +100,35 @@ class WalkNotifier:
         self._notified = None
 
     @property
-    def muted(self) -> bool:
+    def away(self) -> bool:
         """True while the tracked person or device is away from home."""
         if not self._mute_entity:
             return False
         state = self.hass.states.get(self._mute_entity)
         return state is None or state.state != STATE_HOME
 
-    async def async_process(self, data: WalkData, now: datetime, *, arm_at: datetime) -> None:
+    def services_for(self, target: WalkTarget) -> tuple[str, ...]:
+        """The devices this walk's push goes to — its own, else the default one."""
+        if target.services:
+            return target.services
+        return (self._default_service,) if self._default_service else ()
+
+    async def async_process(
+        self,
+        data: WalkData,
+        now: datetime,
+        *,
+        arm_at: datetime,
+        target: WalkTarget = DEFAULT_TARGET,
+    ) -> None:
         """Consider this cycle's result and dispatch if it is news.
 
         `arm_at` is `T - earlier_margin`. Before it, nothing is sent even when the
         forecast already looks bad: a recommendation to leave an hour early is not
         actionable two hours in advance, and it would only be superseded.
+
+        `target` is the walk's own notification setting; a muted walk still scores,
+        still updates the sensor and still fires the event, it just says nothing.
         """
         if data.walk_start != self._walk_start:
             self.reset()
@@ -111,31 +150,37 @@ class WalkNotifier:
         self._notified = recommendation
 
         payload = data.payload()
-        muted = self.muted
+        muted = target.muted or self.away
         payload["muted"] = muted
         if self._fire_event:
             self.hass.bus.async_fire(EVENT_ALERT, payload)
         if not muted:
-            await self._async_send(recommendation)
+            await self._async_send(recommendation, self.services_for(target))
 
-    async def _async_send(self, recommendation: Recommendation) -> None:
-        """Call the configured companion-app notify service."""
-        if not self._service:
-            return
-        if not self.hass.services.has_service(NOTIFY_DOMAIN, self._service):
-            _LOGGER.warning(
-                "Notification service %s.%s is not registered; no push sent",
-                NOTIFY_DOMAIN,
-                self._service,
-            )
+    async def _async_send(self, recommendation: Recommendation, services: tuple[str, ...]) -> None:
+        """Call every companion-app notify service this walk is addressed to."""
+        registered = [service for service in services if self._registered(service)]
+        if not registered:
             return
         title, message = await self._async_text(recommendation)
-        await self.hass.services.async_call(
+        for service in registered:
+            await self.hass.services.async_call(
+                NOTIFY_DOMAIN,
+                service,
+                {"title": title, "message": message},
+                blocking=False,
+            )
+
+    def _registered(self, service: str) -> bool:
+        """Whether a configured device still has its notify service, warning if not."""
+        if self.hass.services.has_service(NOTIFY_DOMAIN, service):
+            return True
+        _LOGGER.warning(
+            "Notification service %s.%s is not registered; no push sent",
             NOTIFY_DOMAIN,
-            self._service,
-            {"title": title, "message": message},
-            blocking=False,
+            service,
         )
+        return False
 
     async def _async_text(self, recommendation: Recommendation) -> tuple[str, str]:
         """Build the notification, in the user's language."""
@@ -171,4 +216,11 @@ def _local_time(moment: datetime | None) -> str:
     return "" if moment is None else dt_util.as_local(moment).strftime("%H:%M")
 
 
-__all__ = ["ALERT_DIRECTIONS", "TEXT_PREFIX", "TRANSLATION_CATEGORY", "WalkNotifier"]
+__all__ = [
+    "ALERT_DIRECTIONS",
+    "DEFAULT_TARGET",
+    "TEXT_PREFIX",
+    "TRANSLATION_CATEGORY",
+    "WalkNotifier",
+    "WalkTarget",
+]

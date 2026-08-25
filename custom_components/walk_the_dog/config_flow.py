@@ -1,8 +1,14 @@
 """Config flow wizard and options flow for the Walk the dog integration.
 
-Implements docs/CONFIG.md: location -> walk schedule -> parameters. The schedule
-and parameter steps are shared verbatim with the options flow (`_WalkFlowSteps`),
-so what the wizard accepts and what the options flow accepts can never drift.
+Implements docs/CONFIG.md: location -> walk schedule -> who to notify per walk ->
+parameters. The schedule, notification and parameter steps are shared verbatim
+with the options flow (`_WalkFlowSteps`), so what the wizard accepts and what the
+options flow accepts can never drift.
+
+The notification step repeats, once per configured walk, because a form's schema
+is fixed before it is rendered and the number of walks is not known until the
+times are submitted. One form per walk also keeps every label translatable — a
+single form with a field per walk could only fall back to raw storage keys.
 
 There is exactly one entry per Home Assistant (`single_config_entry` in the
 manifest): one home, one schedule, one recommendation sensor.
@@ -31,6 +37,7 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
     TextSelectorType,
 )
+from homeassistant.helpers.translation import async_get_translations
 
 from .const import (
     CONF_AUTO_MUTE_ENTITY,
@@ -43,7 +50,10 @@ from .const import (
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
+    CONF_TARGET_MUTE,
+    CONF_TARGET_SERVICES,
     CONF_WALK_DURATION_MIN,
+    CONF_WALK_TARGETS,
     DEFAULT_EARLIER_MARGIN_MIN,
     DEFAULT_FIRE_EVENT,
     DEFAULT_INTENSITY_THRESHOLD,
@@ -65,16 +75,32 @@ from .const import (
     WALK_DURATION_STEP_MIN,
     WALK_DURATION_WARN_MIN,
 )
-from .schedule import SCHEDULE_KEYS, SCHEDULE_MODES, ScheduleError, normalize_schedule
+from .schedule import (
+    SCHEDULE_KEYS,
+    SCHEDULE_MODES,
+    ScheduleError,
+    configured_walks,
+    normalize_schedule,
+    target_key,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from homeassistant.config_entries import ConfigEntry
 
+    from .schedule import WalkSlot
+
 CONF_CONFIRM: Final = "confirm"
 
 ERROR_INVALID_NOTIFY_SERVICE: Final = "invalid_notify_service"
+
+#: The notification step names the days a walk belongs to in its description, and
+#: that text belongs to no form field. `common` is the only top-level strings.json
+#: key Home Assistant allows for such strings (see `notifier.py`), so the labels
+#: live there and are read back at runtime like the notification texts are.
+SLOT_LABEL_CATEGORY: Final = "common"
+SLOT_LABEL_PREFIX: Final = "walk_slot_"
 
 #: Sentinel for "this field has no default" — `None` is a legitimate default.
 _NO_DEFAULT: Final = object()
@@ -154,6 +180,27 @@ def _collect_params(user_input: dict[str, Any], *, keep_notify: bool = True) -> 
     return params
 
 
+def _collect_target(user_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Normalize one walk's notification form into what is stored for it.
+
+    A walk left at the defaults stores nothing at all, so `walk_targets` only ever
+    holds walks the user actually said something about.
+    """
+    services = [
+        service
+        for service in (
+            _validate_notify_service(raw) for raw in user_input.get(CONF_TARGET_SERVICES) or ()
+        )
+        if service
+    ]
+    target: dict[str, Any] = {}
+    if services:
+        target[CONF_TARGET_SERVICES] = services
+    if user_input.get(CONF_TARGET_MUTE):
+        target[CONF_TARGET_MUTE] = True
+    return target
+
+
 class _WalkFlowSteps:
     """The schedule and parameter steps, shared by the wizard and the options flow.
 
@@ -168,6 +215,8 @@ class _WalkFlowSteps:
     _current: Mapping[str, Any]
     _schedule_mode: str
     _schedule: dict[str, list[str]]
+    _targets: dict[str, dict[str, Any]]
+    _pending: list[WalkSlot]
     _params: dict[str, Any]
 
     def _init_steps(self, current: Mapping[str, Any]) -> None:
@@ -175,6 +224,10 @@ class _WalkFlowSteps:
         self._current = current
         self._schedule_mode = current.get(CONF_SCHEDULE_MODE, SCHEDULE_MODE_DAILY)
         self._schedule = dict(current.get(CONF_SCHEDULE, {}))
+        self._targets = {
+            key: dict(value) for key, value in (current.get(CONF_WALK_TARGETS) or {}).items()
+        }
+        self._pending = []
         self._params = {}
 
     async def _async_finish(self) -> ConfigFlowResult:
@@ -183,11 +236,22 @@ class _WalkFlowSteps:
 
     def _options(self) -> dict[str, Any]:
         """The full options payload both flows write."""
-        return {
+        options: dict[str, Any] = {
             CONF_SCHEDULE_MODE: self._schedule_mode,
             CONF_SCHEDULE: self._schedule,
-            **self._params,
         }
+        if self._targets:
+            options[CONF_WALK_TARGETS] = self._targets
+        options.update(self._params)
+        return options
+
+    def _notify_services(self) -> list[str]:
+        """The companion-app notify services registered right now, alphabetically."""
+        return sorted(
+            name
+            for name in self.hass.services.async_services_for_domain(NOTIFY_DOMAIN)
+            if name.startswith(NOTIFY_SERVICE_PREFIX)
+        )
 
     async def async_step_schedule_mode(
         self, user_input: dict[str, Any] | None = None
@@ -221,7 +285,7 @@ class _WalkFlowSteps:
             except ScheduleError as err:
                 errors["base"] = err.error_key
             else:
-                return await self.async_step_params()
+                return await self._async_start_walk_targets()
 
         times = TextSelector(TextSelectorConfig(type=TextSelectorType.TIME, multiple=True))
         source: Mapping[str, Any] = user_input if user_input is not None else self._schedule
@@ -233,14 +297,101 @@ class _WalkFlowSteps:
         )
         return self.async_show_form(step_id="schedule_times", data_schema=schema, errors=errors)
 
+    async def _async_start_walk_targets(self) -> ConfigFlowResult:
+        """Queue one notification step per configured walk and show the first.
+
+        Targets of walk times that no longer exist are dropped here: a deleted
+        07:00 walk must not leave its device list behind to be resurrected by a
+        later walk that happens to land on the same key.
+        """
+        self._pending = list(configured_walks(self._schedule_mode, self._schedule))
+        keys = {target_key(slot, time) for slot, time in self._pending}
+        self._targets = {key: value for key, value in self._targets.items() if key in keys}
+        return await self.async_step_walk_target()
+
+    async def async_step_walk_target(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Step 2c — who is told about this one walk, repeated for every walk."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                target = _collect_target(user_input)
+            except vol.Invalid:
+                errors[CONF_TARGET_SERVICES] = ERROR_INVALID_NOTIFY_SERVICE
+            else:
+                self._store_target(self._pending.pop(0), target)
+                user_input = None
+                if not self._pending:
+                    return await self.async_step_params()
+        return await self._async_show_walk_target(errors, user_input)
+
+    def _store_target(self, walk: WalkSlot, target: dict[str, Any]) -> None:
+        """Keep one walk's notification settings, or forget them if it has none."""
+        key = target_key(*walk)
+        if target:
+            self._targets[key] = target
+        else:
+            self._targets.pop(key, None)
+
+    async def _async_show_walk_target(
+        self, errors: dict[str, str], user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Render the notification form for the walk at the head of the queue."""
+        slot, time = self._pending[0]
+        source: Mapping[str, Any] = (
+            user_input if user_input is not None else self._targets.get(target_key(slot, time), {})
+        )
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_TARGET_SERVICES,
+                    default=list(source.get(CONF_TARGET_SERVICES) or ()),
+                ): SelectSelector(
+                    SelectSelectorConfig(
+                        options=self._notify_services(),
+                        multiple=True,
+                        custom_value=True,
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional(
+                    CONF_TARGET_MUTE, default=bool(source.get(CONF_TARGET_MUTE, False))
+                ): BooleanSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="walk_target",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "days": await self._async_slot_label(slot),
+                "time": time,
+                "index": str(self._walk_index()),
+                "total": str(self._walk_total()),
+            },
+        )
+
+    def _walk_total(self) -> int:
+        """How many walks the notification steps will ask about in total."""
+        return len(configured_walks(self._schedule_mode, self._schedule))
+
+    def _walk_index(self) -> int:
+        """Which of them is on screen, counting from one."""
+        return self._walk_total() - len(self._pending) + 1
+
+    async def _async_slot_label(self, slot: str) -> str:
+        """The days a walk belongs to, in the user's language."""
+        texts = await async_get_translations(
+            self.hass, self.hass.config.language, SLOT_LABEL_CATEGORY, {DOMAIN}
+        )
+        key = f"component.{DOMAIN}.{SLOT_LABEL_CATEGORY}.{SLOT_LABEL_PREFIX}{slot}"
+        return texts.get(key, slot)
+
     def _params_schema(self) -> vol.Schema:
         """Step 3's schema, in the order docs/CONFIG.md lists the options."""
         current: Mapping[str, Any] = self._params or self._current
-        notify_services = sorted(
-            name
-            for name in self.hass.services.async_services_for_domain(NOTIFY_DOMAIN)
-            if name.startswith(NOTIFY_SERVICE_PREFIX)
-        )
+        notify_services = self._notify_services()
         margin = _minutes_selector(MIN_MARGIN_MIN, MAX_MARGIN_MIN, MARGIN_STEP_MIN)
         return vol.Schema(
             {

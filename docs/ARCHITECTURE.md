@@ -23,11 +23,11 @@ Sources referenced throughout (roles fixed in phase 0):
 custom_components/walk_the_dog/
 ├── __init__.py        # config entry setup/unload; builds coordinator; forwards platforms
 ├── const.py           # domain, config/option keys, defaults, intensity class boundaries
-├── config_flow.py     # 3-step wizard + options flow (implemented in phase 5)
+├── config_flow.py     # wizard + options flow: location, schedule, per-walk alerts, params
 ├── coordinator.py     # WalkCoordinator(DataUpdateCoordinator): polling windows, orchestration
-├── schedule.py        # walk-schedule model (3 modes) → next-walk computation; PURE
+├── schedule.py        # walk-schedule model (3 modes) → Walk identity + next-walk computation; PURE
 ├── cache.py           # bounded frame/sample cache + persistence via HA Store
-├── notifier.py        # notification dispatch, material-change detection, auto-mute check
+├── notifier.py        # notification dispatch, material-change detection, per-walk target + mute
 ├── entity.py          # shared entity base: the one service device both entities sit on
 ├── sensor.py          # the single recommendation sensor
 ├── switch.py          # enable/disable switch (RestoreEntity)
@@ -260,10 +260,17 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
 - **Notification dispatch** (`notifier.py`): evaluated on the cycle that lands on `T − E`, fires
   with the freshest coordinator data **only if** the scheduled window is not dry; afterwards
   every cycle until `walk end` re-checks material change. Suppressed entirely by: switch off,
-  auto-mute entity not `home`, or 0 contributing sources. A muted alert is suppressed, not
+  the walk's own mute switch, auto-mute entity not `home`, or 0 contributing sources. A muted alert is suppressed, not
   queued — the decision state advances either way, so coming home does not release a stale
   message. The module is `notifier.py`, not `notify.py`: a file named after a platform inside an
   integration *is* that platform to Home Assistant, and this one is not a notify platform.
+- **Per-walk targets** (added after the first live test): each walk carries its own list of
+  companion-app devices and its own mute switch, so the morning walk and the evening walk can
+  belong to different people. The coordinator resolves the walk to a `Walk` — the UTC instant
+  **plus** the `(slot key, configured time)` pair that identifies it — and looks the settings up
+  by that pair, not by the instant, so a daylight-saving change cannot detach a walk from its
+  devices. An empty device list falls back to the entry-wide default device; the mute switch is
+  the only way to silence a walk. Details in [CONFIG.md](CONFIG.md) § Per-walk alerts.
 - **Provider failover** (phase 0 rule, owned by the adapter registry): Open-Meteo failed on 2
   consecutive cycles → enable `metno`; Open-Meteo healthy twice in a row → disable it again.
 

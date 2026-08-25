@@ -1,8 +1,9 @@
 # Configuration
 
 > Option semantics and defaults were finalized in phase 1; phase 5 implemented the flows and
-> pinned the storage shape; **phase 6 added the entities, the notification and the
-> `walk_the_dog_alert` payload** below. This document describes what the code actually does.
+> pinned the storage shape; phase 6 added the entities, the notification and the
+> `walk_the_dog_alert` payload below; **per-walk notification targets** were added after the
+> first live test (see `STATE.md`). This document describes what the code actually does.
 
 Only **one** Walk the dog entry can exist per Home Assistant (`single_config_entry` in
 `manifest.json`): one home, one schedule, one recommendation sensor. A second attempt aborts
@@ -15,6 +16,7 @@ with *"Already configured"*.
 | 1 | `user` | **Location** — map picker (HA `LocationSelector`), pre-filled with the HA home coordinates. |
 | 2a | `schedule_mode` | **Schedule type** — *same times daily* / *weekday + weekend* / *per-day*. |
 | 2b | `schedule_times` | **Walk times** — one editable list of times per slot of the chosen mode. |
+| 2c | `walk_target` | **Who gets this walk's alert** — repeated once per configured walk: its notification devices and its own mute switch. See [Per-walk alerts](#per-walk-alerts). |
 | 3 | `params` | **Parameters** — the table below. |
 | — | `long_walk` | Shown **only** when the average walk duration exceeds 30 min: a warning that must be confirmed. Declining returns to step 3 with the entered values still in the form. |
 
@@ -25,6 +27,12 @@ exactly the fields the chosen mode uses — one list, two lists, or seven.
 Walk times are entered as `HH:MM` in the Home Assistant local timezone. They are deduplicated and
 sorted on save. A slot may be left empty (no weekend walks, say) as long as the week contains at
 least one walk.
+
+Step 2c repeats: Home Assistant renders a form from a schema fixed before the form is shown, and
+how many walks there are is not known until step 2b is submitted. One form per walk also keeps
+every label translatable — a single form with one field per walk could only fall back to raw
+storage keys. Each form's description names the walk it is asking about (`Walk 2 of 3: Monday to
+Friday at 18:30`), so the sequence stays legible.
 
 All of steps 2–3 (including the schedule mode) are editable later via the options flow, which
 reuses the same steps and therefore validates identically. Changing an option **reloads** the
@@ -39,7 +47,8 @@ config entry. The **location is entry data, not an option**: it is set once in t
 | Earlier margin | `earlier_margin_min` | int minutes, 0–180, 10-min steps | 60 | How far back to search for a dry window |
 | Later margin | `later_margin_min` | int minutes, 0–180, 10-min steps | 30 | How far forward to search |
 | Average walk duration | `walk_duration_min` | int minutes, 5–240, 5-min steps | **required, no default** | Values over 30 min require confirming the `long_walk` warning (nowcast reliability) |
-| Notification device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means no push notification. |
+| Default notification device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. Used for any walk that has no devices of its own. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means no push notification. |
+| Per-walk alerts | `walk_targets` | map | *(unset)* | One entry per walk the user configured something for. See [Per-walk alerts](#per-walk-alerts). |
 | Fire custom event | `fire_event` | bool | `false` | Emits `walk_the_dog_alert`; payload documented below |
 | Auto-mute entity | `auto_mute_entity` | entity id | *(unset)* | Optional `person`/`device_tracker`; alerts suppressed while it is not `home` |
 
@@ -49,6 +58,41 @@ Optional options that are left empty are **absent** from the stored options, nev
 Internal, not user-facing: `lead_time` = 30 min — how long before `T − earlier_margin` polling
 starts so the decision moment has fresh data (decision in
 [ARCHITECTURE.md](ARCHITECTURE.md) § Coordinator scheduling & polling windows).
+
+## Per-walk alerts
+
+The morning walk and the evening walk are often not the same person's job, so **who is
+interrupted is decided per walk, not per integration**. Step 2c asks about every configured walk
+in turn.
+
+| Field | Key | Type | Default | Notes |
+|---|---|---|---|---|
+| Notification devices | `notify_services` | list of `mobile_app_*` service names | *(empty)* | Every device in the list receives the same message. **Empty means "use `notify_service`"**, never "notify nobody" — silencing a walk is what the mute switch is for. Validated exactly like `notify_service`, custom values included. |
+| Never alert about this walk | `mute` | bool | `false` | No push is ever sent for this walk. The sensor and the `walk_the_dog_alert` event still update (with `muted: true`), so automations keep working. |
+
+A walk left at both defaults stores **nothing at all**, so `walk_targets` only ever holds walks
+the user actually said something about, and an entry configured before this feature existed keeps
+behaving exactly as it did.
+
+### Storage key
+
+A walk is identified by the **schedule slot key and the configured local time**, joined by `|`:
+
+```json
+"walk_targets": {
+  "weekday|07:00": { "notify_services": ["mobile_app_anna"] },
+  "weekday|18:30": { "notify_services": ["mobile_app_piotr"] },
+  "weekend|09:00": { "mute": true }
+}
+```
+
+The pair is what the user typed, so it survives a daylight-saving change that moves the walk's
+UTC instant, and it distinguishes a 07:00 weekday walk from a 07:00 weekend walk. `schedule.py`
+owns it: `target_key()` builds it and `Walk.target_key` reads it back.
+
+**Deleting a walk time deletes its entry.** Step 2c prunes `walk_targets` down to the walks that
+still exist, so a device list can never be inherited by a later walk that happens to land on the
+same time.
 
 ## Entities
 
@@ -91,12 +135,16 @@ After the first message, every later cycle re-checks material change (defined pr
 [ARCHITECTURE.md](ARCHITECTURE.md) § Material change) and stays silent unless something really
 changed. Nothing is ever sent about a walk that looks dry: silence means "go as planned".
 
-Suppressed entirely by: the enable switch being off, the auto-mute entity not being `home`, or
-zero contributing sources. A muted alert is **suppressed, not queued** — coming home does not
-release a message about a decision that has since moved on.
+The message goes to the walk's own devices, or to `notify_service` when it has none. Every
+device in the list gets the same message.
 
-If the configured `notify.mobile_app_*` service is not registered (a phone configured before
-its companion-app service existed), a warning is logged and the cycle continues.
+Suppressed entirely by: the enable switch being off, the walk's own mute switch, the auto-mute
+entity not being `home`, or zero contributing sources. A muted alert is **suppressed, not
+queued** — coming home does not release a message about a decision that has since moved on.
+
+If a configured `notify.mobile_app_*` service is not registered (a phone configured before its
+companion-app service existed), a warning is logged, the other devices are still notified, and
+the cycle continues.
 
 ## Event payload
 
@@ -146,7 +194,7 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
 | `degraded` | bool | Some slot rested on a single source |
 | `horizon_limited` | bool | The walk reaches past what the sources forecast |
 | `data_age_s` | int \| `null` | Age of the freshest source that voted |
-| `muted` | bool | Auto-mute suppressed the push for this alert |
+| `muted` | bool | The push was suppressed for this alert — by the walk's own mute switch or by auto-mute |
 | `sources` | list | One entry per source: its own verdict over the scheduled window, its status, its weight and its peak |
 
 `risk`, `confidence` and `expected_intensity` are `null` — never `0` — when no source reaches
@@ -175,7 +223,11 @@ the scheduled window, so "we do not know" can never be read as "no rain".
   "walk_duration_min": 30,
   "fire_event": false,
   "notify_service": "mobile_app_phone",
-  "auto_mute_entity": "person.owner"
+  "auto_mute_entity": "person.owner",
+  "walk_targets": {
+    "weekday|07:00": { "notify_services": ["mobile_app_anna"] },
+    "weekend|09:00": { "mute": true }
+  }
 }
 ```
 

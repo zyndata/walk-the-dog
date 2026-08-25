@@ -19,14 +19,19 @@ from custom_components.walk_the_dog.const import (
     CONF_AUTO_MUTE_ENTITY,
     CONF_FIRE_EVENT,
     CONF_NOTIFY_SERVICE,
+    CONF_TARGET_MUTE,
+    CONF_TARGET_SERVICES,
+    CONF_WALK_TARGETS,
     EVENT_ALERT,
     NOTIFY_DOMAIN,
 )
 from custom_components.walk_the_dog.coordinator import CYCLE, WalkCoordinator
 from custom_components.walk_the_dog.engine import DIRECTION_EARLIER
+from custom_components.walk_the_dog.schedule import KEY_ALL, target_key
 
 from .conftest import (
     ARM_AT,
+    WALK_HHMM,
     WALK_START,
     WINDOW_START,
     hourly_sources,
@@ -45,6 +50,13 @@ IDLE = datetime(2026, 8, 25, 0, 0, tzinfo=UTC)
 
 NOTIFY_SERVICE = "mobile_app_test"
 MUTE_ENTITY = "person.owner"
+
+#: Two phones that share the dog: the standard walk is addressed to them by name.
+MORNING_PHONE = "mobile_app_morning"
+EVENING_PHONE = "mobile_app_evening"
+
+#: Where the standard walk's own notification settings are stored.
+WALK_KEY = target_key(KEY_ALL, WALK_HHMM)
 
 #: Dry until 05:00 UTC, then rain — the 05:00 walk should be moved earlier.
 RAIN_AT_FIVE = [0.0, 0.0, 3.0, 3.0, 0.0]
@@ -287,3 +299,150 @@ async def test_no_notify_service_still_fires_the_event(
     await run_cycle(hass, freezer, ARM_AT)
 
     assert len(alerts) == 1
+
+
+@pytest.fixture
+def morning(hass: HomeAssistant) -> list[ServiceCall]:
+    """Capture the first phone's pushes."""
+    return async_mock_service(hass, NOTIFY_DOMAIN, MORNING_PHONE)
+
+
+@pytest.fixture
+def evening(hass: HomeAssistant) -> list[ServiceCall]:
+    """Capture the second phone's pushes."""
+    return async_mock_service(hass, NOTIFY_DOMAIN, EVENING_PHONE)
+
+
+async def setup_with_target(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    target: dict[str, object],
+) -> WalkCoordinator:
+    """Set the entry up with a default device and one walk-specific setting."""
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
+            CONF_FIRE_EVENT: True,
+            CONF_WALK_TARGETS: {WALK_KEY: target},
+        },
+    )
+    freezer.move_to(IDLE)
+    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    return await setup_entry(hass, entry)
+
+
+async def test_a_walk_notifies_its_own_devices_instead_of_the_default(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    morning: list[ServiceCall],
+) -> None:
+    """The morning walk is one person's job, so only that phone is interrupted."""
+    await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE]})
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(morning) == 1
+    assert "05:00" in morning[0].data["message"]
+    assert notifications == []
+
+
+async def test_a_walk_can_address_several_devices(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+    evening: list[ServiceCall],
+) -> None:
+    """Both phones get the same message when the walk names both."""
+    await setup_with_target(
+        hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE, EVENING_PHONE]}
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(morning) == 1
+    assert len(evening) == 1
+    assert morning[0].data["message"] == evening[0].data["message"]
+
+
+async def test_a_walk_with_no_devices_of_its_own_uses_the_default(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    morning: list[ServiceCall],
+) -> None:
+    """An empty device list means "the default device", never "nobody"."""
+    await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_MUTE: False})
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
+    assert morning == []
+
+
+async def test_a_muted_walk_sends_no_push_but_still_fires_the_event(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    morning: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """Muting one walk silences it the same way being away silences all of them."""
+    await setup_with_target(
+        hass,
+        entry,
+        fetch,
+        freezer,
+        {CONF_TARGET_SERVICES: [MORNING_PHONE], CONF_TARGET_MUTE: True},
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert notifications == []
+    assert morning == []
+    assert len(alerts) == 1
+    assert alerts[0].data["muted"] is True
+
+
+async def test_another_walks_settings_do_not_leak_into_this_one(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    evening: list[ServiceCall],
+) -> None:
+    """A target stored under a different walk's key must not silence this walk."""
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
+            CONF_WALK_TARGETS: {
+                target_key(KEY_ALL, "18:30"): {
+                    CONF_TARGET_SERVICES: [EVENING_PHONE],
+                    CONF_TARGET_MUTE: True,
+                }
+            },
+        },
+    )
+    freezer.move_to(IDLE)
+    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    await setup_entry(hass, entry)
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
+    assert evening == []

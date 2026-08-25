@@ -38,7 +38,10 @@ from .const import (
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
+    CONF_TARGET_MUTE,
+    CONF_TARGET_SERVICES,
     CONF_WALK_DURATION_MIN,
+    CONF_WALK_TARGETS,
     DEFAULT_EARLIER_MARGIN_MIN,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
@@ -49,7 +52,7 @@ from .const import (
     SLOT_MINUTES,
 )
 from .engine import DIRECTION_UNKNOWN, build_consensus, evaluation_slots, recommend
-from .notifier import WalkNotifier
+from .notifier import WalkNotifier, WalkTarget
 from .schedule import ScheduleError, walks_from
 from .sources import SourceRegistry, build_user_agent
 from .sources.base import SampleGeometry
@@ -61,6 +64,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
     from .engine import Recommendation, SourceBreakdown
+    from .schedule import Walk
     from .sources.base import SourceStatus
 
 _LOGGER = logging.getLogger(__name__)
@@ -194,6 +198,7 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         self._later = timedelta(
             minutes=int(options.get(CONF_LATER_MARGIN_MIN, DEFAULT_LATER_MARGIN_MIN))
         )
+        self._targets: dict[str, Any] = options.get(CONF_WALK_TARGETS) or {}
 
         self._cache = SampleCache(self._geometry.key)
         self._cache.attach_store(hass)
@@ -208,7 +213,7 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         # Starts off: the switch restores the real state and turns it on, so a
         # restart with alerting disabled makes no request at all.
         self._enabled = False
-        self._walk: datetime | None = None
+        self._walk: Walk | None = None
         self._unsub_timer: Any = None
 
     # --- lifecycle ----------------------------------------------------------
@@ -249,15 +254,29 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
     async def _async_update_data(self) -> WalkData:
         """One update cycle: resolve the walk, fetch if due, score, recommend."""
         now = dt_util.utcnow()
-        self._walk = self._resolve_walk(now)
-        if not self._enabled or self._walk is None or not self._is_active(now):
+        walk = self._walk = self._resolve_walk(now)
+        if not self._enabled or walk is None or not self._is_active(now):
             return self._idle(active=False)
 
-        data = await self._cycle(now, self._walk)
-        await self.notifier.async_process(data, now, arm_at=self._walk - self._earlier)
+        data = await self._cycle(now, walk)
+        await self.notifier.async_process(
+            data, now, arm_at=walk.start - self._earlier, target=self._target_for(walk)
+        )
         return data
 
-    async def _cycle(self, now: datetime, walk: datetime) -> WalkData:
+    def _target_for(self, walk: Walk) -> WalkTarget:
+        """This walk's own notification devices and mute switch, if it has any.
+
+        Everything absent falls back to the entry-wide default, so a walk the user
+        never opened the notification step for behaves exactly as before.
+        """
+        stored = self._targets.get(walk.target_key) or {}
+        return WalkTarget(
+            services=tuple(stored.get(CONF_TARGET_SERVICES) or ()),
+            muted=bool(stored.get(CONF_TARGET_MUTE, False)),
+        )
+
+    async def _cycle(self, now: datetime, walk: Walk) -> WalkData:
         """Fetch what is due, score every slot the search can reach, recommend."""
         session = async_get_clientsession(self.hass)
         series, statuses = await self._registry.async_fetch(session, self._geometry, now)
@@ -267,13 +286,13 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         consensus = build_consensus(
             series,
             statuses,
-            slots=evaluation_slots(walk, self._duration, self._earlier, self._later),
+            slots=evaluation_slots(walk.start, self._duration, self._earlier, self._later),
             threshold=self._threshold,
             now=now,
         )
         recommendation = recommend(
             consensus,
-            scheduled_start=walk,
+            scheduled_start=walk.start,
             duration=self._duration,
             earlier_margin=self._earlier,
             later_margin=self._later,
@@ -281,7 +300,7 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         return WalkData(
             enabled=True,
             active=True,
-            walk_start=walk,
+            walk_start=walk.start,
             recommendation=recommendation,
             statuses=consensus.statuses,
             attributions=tuple(self._registry.attributions(list(consensus.statuses))),
@@ -291,11 +310,14 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
 
     def _idle(self, *, active: bool) -> WalkData:
         """A cycle that made no request: the schedule is known, the forecast is not."""
-        return WalkData(enabled=self._enabled, active=active, walk_start=self._walk)
+        walk = self._walk
+        return WalkData(
+            enabled=self._enabled, active=active, walk_start=None if walk is None else walk.start
+        )
 
     # --- scheduling ---------------------------------------------------------
 
-    def _walks(self, now: datetime) -> tuple[datetime, ...]:
+    def _walks(self, now: datetime) -> tuple[Walk, ...]:
         """Upcoming walk starts, including one whose window may still be running."""
         try:
             return walks_from(
@@ -308,23 +330,23 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
             _LOGGER.warning("Stored walk schedule is unusable; no walk can be predicted")
             return ()
 
-    def _window_start(self, walk: datetime) -> datetime:
+    def _window_start(self, walk: Walk) -> datetime:
         """When polling for this walk begins: `T - earlier_margin - lead_time`."""
-        return walk - self._earlier - LEAD_TIME
+        return walk.start - self._earlier - LEAD_TIME
 
-    def _walk_end(self, walk: datetime) -> datetime:
+    def _walk_end(self, walk: Walk) -> datetime:
         """End of the window being watched — a `later` recommendation extends it."""
         recommended = self._recommended_start(walk)
-        return max(walk, recommended or walk) + self._duration
+        return max(walk.start, recommended or walk.start) + self._duration
 
-    def _recommended_start(self, walk: datetime) -> datetime | None:
+    def _recommended_start(self, walk: Walk) -> datetime | None:
         """The current recommendation's start, but only if it is about this walk."""
         data = self.data
-        if data is None or data.walk_start != walk or data.recommendation is None:
+        if data is None or data.walk_start != walk.start or data.recommendation is None:
             return None
         return data.recommendation.recommended_start
 
-    def _resolve_walk(self, now: datetime) -> datetime | None:
+    def _resolve_walk(self, now: datetime) -> Walk | None:
         """The walk currently being watched: the first whose window has not ended."""
         for walk in self._walks(now):
             if now < self._walk_end(walk):

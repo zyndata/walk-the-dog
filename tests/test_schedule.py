@@ -25,12 +25,20 @@ from custom_components.walk_the_dog.schedule import (
     SCHEDULE_KEYS,
     SCHEDULE_MODES,
     ScheduleError,
+    Walk,
+    configured_walks,
     expand,
     normalize_schedule,
     normalize_time,
     normalize_times,
+    target_key,
     walks_from,
 )
+
+
+def starts(walks: tuple[Walk, ...]) -> tuple[datetime, ...]:
+    """Just the instants — most tests are about *when*, not about which walk."""
+    return tuple(walk.start for walk in walks)
 
 
 @pytest.mark.parametrize(
@@ -121,22 +129,17 @@ def test_expand_daily_gives_every_day_the_same_times() -> None:
     """Daily mode is seven identical days."""
     result = expand(SCHEDULE_MODE_DAILY, {"all": ["07:00", "18:30"]})
 
-    assert result == dict.fromkeys(range(7), ("07:00", "18:30"))
+    assert result == dict.fromkeys(range(7), (("all", "07:00"), ("all", "18:30")))
 
 
 def test_expand_weekday_weekend_splits_at_saturday() -> None:
     """Monday-Friday are weekdays; Saturday (5) and Sunday (6) are the weekend."""
     result = expand(SCHEDULE_MODE_WEEKDAY_WEEKEND, {"weekday": ["07:00"], "weekend": ["09:30"]})
 
-    assert [result[day] for day in range(7)] == [
-        ("07:00",),
-        ("07:00",),
-        ("07:00",),
-        ("07:00",),
-        ("07:00",),
-        ("09:30",),
-        ("09:30",),
-    ]
+    weekday = (("weekday", "07:00"),)
+    weekend = (("weekend", "09:30"),)
+
+    assert [result[day] for day in range(7)] == [*[weekday] * 5, weekend, weekend]
 
 
 def test_expand_per_day_maps_each_key_to_its_weekday() -> None:
@@ -145,8 +148,8 @@ def test_expand_per_day_maps_each_key_to_its_weekday() -> None:
 
     result = expand(SCHEDULE_MODE_PER_DAY, schedule)
 
-    assert result[0] == ("07:00",)
-    assert result[6] == ("13:00",)
+    assert result[0] == (("mon", "07:00"),)
+    assert result[6] == (("sun", "13:00"),)
 
 
 def test_expand_keeps_an_empty_day_empty() -> None:
@@ -177,7 +180,7 @@ def test_walks_from_returns_the_next_occurrences_in_order() -> None:
         count=3,
     )
 
-    assert result == (
+    assert starts(result) == (
         datetime(2026, 8, 25, 18, 30, tzinfo=UTC),
         datetime(2026, 8, 26, 7, 0, tzinfo=UTC),
         datetime(2026, 8, 26, 18, 30, tzinfo=UTC),
@@ -190,7 +193,7 @@ def test_walks_from_includes_a_walk_starting_exactly_now() -> None:
 
     result = walks_from(SCHEDULE_MODE_DAILY, {"all": ["07:00"]}, moment=moment, tz=UTC, count=1)
 
-    assert result == (moment,)
+    assert starts(result) == (moment,)
 
 
 def test_walks_from_resolves_local_times_to_utc() -> None:
@@ -203,7 +206,7 @@ def test_walks_from_resolves_local_times_to_utc() -> None:
         count=1,
     )
 
-    assert result == (datetime(2026, 8, 25, 5, 0, tzinfo=UTC),)
+    assert starts(result) == (datetime(2026, 8, 25, 5, 0, tzinfo=UTC),)
 
 
 def test_a_walk_time_survives_the_end_of_summer_time() -> None:
@@ -218,12 +221,14 @@ def test_a_walk_time_survives_the_end_of_summer_time() -> None:
 
     # Poland leaves summer time in the small hours of Sunday 25 October 2026:
     # CEST (UTC+2) before, CET (UTC+1) from that morning on.
-    assert result == (
+    assert starts(result) == (
         datetime(2026, 10, 24, 5, 0, tzinfo=UTC),
         datetime(2026, 10, 25, 6, 0, tzinfo=UTC),
         datetime(2026, 10, 26, 6, 0, tzinfo=UTC),
     )
-    assert [start.astimezone(WARSAW).hour for start in result] == [7, 7, 7]
+    assert [start.astimezone(WARSAW).hour for start in starts(result)] == [7, 7, 7]
+    # The identity is what the user typed, so it does not move with the offset.
+    assert {walk.target_key for walk in result} == {"all|07:00"}
 
 
 def test_walks_from_crosses_a_local_midnight() -> None:
@@ -236,7 +241,7 @@ def test_walks_from_crosses_a_local_midnight() -> None:
         count=1,
     )
 
-    assert result == (datetime(2026, 8, 25, 21, 30, tzinfo=UTC),)
+    assert starts(result) == (datetime(2026, 8, 25, 21, 30, tzinfo=UTC),)
 
 
 def test_walks_from_skips_a_day_with_no_walks() -> None:
@@ -250,10 +255,11 @@ def test_walks_from_skips_a_day_with_no_walks() -> None:
         count=2,
     )
 
-    assert result == (
+    assert starts(result) == (
         datetime(2026, 8, 29, 9, 0, tzinfo=UTC),
         datetime(2026, 8, 30, 9, 0, tzinfo=UTC),
     )
+    assert {walk.slot for walk in result} == {"weekend"}
 
 
 def test_walks_from_finds_a_single_weekly_walk() -> None:
@@ -270,7 +276,8 @@ def test_walks_from_finds_a_single_weekly_walk() -> None:
         count=1,
     )
 
-    assert result == (datetime(2026, 8, 31, 7, 0, tzinfo=UTC),)
+    assert starts(result) == (datetime(2026, 8, 31, 7, 0, tzinfo=UTC),)
+    assert result[0].target_key == "mon|07:00"
 
 
 def test_walks_from_returns_nothing_for_an_empty_week() -> None:
@@ -283,3 +290,50 @@ def test_walks_from_returns_nothing_for_an_empty_week() -> None:
     )
 
     assert result == ()
+
+
+def test_a_walk_carries_the_slot_it_was_configured_under() -> None:
+    """Two slots can hold the same time; only the pair identifies the walk."""
+    result = walks_from(
+        SCHEDULE_MODE_WEEKDAY_WEEKEND,
+        {"weekday": ["07:00"], "weekend": ["07:00"]},
+        # 25 August 2026 is a Tuesday, so Saturday is the fifth walk from here.
+        moment=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+        tz=UTC,
+        count=5,
+    )
+
+    assert [walk.target_key for walk in result] == [
+        "weekday|07:00",
+        "weekday|07:00",
+        "weekday|07:00",
+        "weekend|07:00",
+        "weekend|07:00",
+    ]
+
+
+def test_target_key_normalizes_the_time_it_is_given() -> None:
+    """A hand-typed `7:00` must address the same walk as the stored `07:00`."""
+    assert target_key("all", "7:00") == target_key("all", "07:00") == "all|07:00"
+
+
+def test_configured_walks_lists_every_walk_in_form_order() -> None:
+    """The notification steps follow the schedule form, slot by slot, time by time."""
+    result = configured_walks(
+        SCHEDULE_MODE_WEEKDAY_WEEKEND, {"weekday": ["18:30", "07:00"], "weekend": ["09:00"]}
+    )
+
+    assert result == (("weekday", "07:00"), ("weekday", "18:30"), ("weekend", "09:00"))
+
+
+def test_configured_walks_skips_an_empty_slot() -> None:
+    """A slot with no walks contributes no notification step."""
+    result = configured_walks(SCHEDULE_MODE_WEEKDAY_WEEKEND, {"weekday": ["07:00"]})
+
+    assert result == (("weekday", "07:00"),)
+
+
+def test_configured_walks_rejects_an_unknown_mode() -> None:
+    """Same guard as everywhere else: no mode, no slot keys, no walks."""
+    with pytest.raises(ScheduleError):
+        configured_walks("fortnightly", {"all": ["07:00"]})

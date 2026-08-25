@@ -622,6 +622,65 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     too. Unchanged from phase 3.
   - Two HACS ignores and the brands PR — revisit in phase 9 (unchanged).
 
+## Post-phase-6 change — per-walk notification targets
+
+- **Status:** done (code, tests and docs; the live re-test is the user's next step)
+- **Date:** 2026-08-25
+- **Why it exists:** not a phase. It came out of the first real Home Assistant test of phase 6:
+  the morning walk and the evening walk are usually different people's job, so a single
+  entry-wide `notify_service` is the wrong shape. **Deviation from `PLAN.md`, recorded here
+  before proceeding, as workflow rule 3 requires.** No phase was started or advanced.
+- **What was built:**
+  - `schedule.py`: a walk now has an identity. `Walk(start, slot, time)` carries the UTC instant
+    **and** the `(slot key, configured local time)` pair it came from; `expand()` yields those
+    pairs per weekday; `walks_from()` and `walk_times_on()` return `Walk` objects;
+    `target_key()` renders the pair as the storage key and `configured_walks()` lists every walk
+    in schedule-form order. Still pure.
+  - `config_flow.py`: a new step `walk_target`, shown once per configured walk between the walk
+    times and the parameters, asking for that walk's notification devices (multi-select over the
+    registered `mobile_app_*` services, custom values allowed) and a *never alert about this
+    walk* switch. Stale targets are pruned when a walk time is deleted.
+  - `notifier.py`: `WalkTarget(services, muted)`; the push goes to the walk's own devices, or to
+    the entry-wide default when it has none, and an unregistered device no longer silences the
+    others.
+  - `coordinator.py`: holds a `Walk` instead of a bare datetime and hands the notifier the
+    walk's target each cycle.
+  - `strings.json` / `translations/en.json`: the new step, and `common.walk_slot_*` day labels
+    read back at runtime for its description.
+  - `docs/CONFIG.md` § Per-walk alerts and `docs/ARCHITECTURE.md` § Coordinator scheduling.
+  - Tests: **17 new (336 total)**, green offline — per-walk devices, several devices at once,
+    per-walk mute, the default fallback, another walk's settings not leaking, one step per walk
+    with its placeholders, storage shape, pruning, and validation of a typed device name.
+- **Decisions:**
+  - **A walk is identified by `(slot key, configured time)`, not by its UTC instant.** The pair
+    is what the user typed; the instant moves with daylight saving and would detach a walk from
+    its devices twice a year. It also keeps a 07:00 weekday walk distinct from a 07:00 weekend
+    walk.
+  - **One form per walk, not one form with a field per walk.** A form's schema is fixed before
+    it is rendered, so dynamic field keys would have to be their own labels — untranslatable,
+    which the project's i18n rule forbids. The cost is one extra click per walk in the options
+    flow; the day/time and a `Walk 2 of 3` counter go in the step description via placeholders.
+  - **Day labels live under `strings.json` → `common`** (`walk_slot_all`, `walk_slot_mon`, …) and
+    are read at runtime with `async_get_translations`, exactly like the notification texts.
+    `common` is the only top-level key hassfest allows for prose that belongs to no form field.
+  - **An empty device list means "use the default device", never "notify nobody".** Silencing a
+    walk is what the mute switch is for, so the two can never be confused — and a user who wants
+    to keep a device list while going quiet does not have to delete it.
+  - **A walk left at the defaults stores nothing.** `walk_targets` only holds walks the user
+    said something about, so an entry configured before this change keeps behaving identically
+    and no migration is needed.
+  - **A per-walk mute behaves exactly like auto-mute:** the event still fires with
+    `muted: true`, the push does not go out, and the material-change state advances either way.
+  - **`notify_service` was not removed**, only relabelled *Default notification device*: it is
+    the fallback for every walk without devices of its own, and it keeps existing entries working.
+- **Open questions carried forward:**
+  - **The manual smoke test of phase 6 still has not been run**, and now covers this change too:
+    set different devices on two walks and confirm each phone gets only its own walk's alert.
+    The procedure is in the phase 6 section below; step 2 now has one extra form per walk.
+  - `hassfest` was not re-run for this change (it needs the action container); the automated
+    suite and `ruff` are green. Run it with the phase 7 tooling pass.
+  - Everything else carried forward from phase 6 is unchanged.
+
 ## Phase 7 — Localization + branding
 
 - **Status:** not started

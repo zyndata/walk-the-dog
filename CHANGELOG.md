@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-walk notification targets.** Every configured walk now has its own list of companion-app
+  devices and its own *never alert about this walk* switch, so the morning walk and the evening
+  walk can belong to different people. The setup wizard and the options flow ask about each walk
+  in turn, between the walk times and the alert settings.
+- 17 further tests (336 total, still green with networking disabled) covering per-walk devices,
+  several devices at once, per-walk mute, the fallback to the default device, and the storage,
+  pruning and validation of the new step.
 - Phase 6 coordinator: one shared `DataUpdateCoordinator` that runs a cycle every 10 minutes
   only while a walk window is near — from `walk − earlier margin − 30 min` until the end of the
   walk it recommends — and holds a single armed timer the rest of the time. No `update_interval`,
@@ -38,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The **notification device** option is now the *default* notification device: it is used for any
+  walk that has no devices of its own. Existing configurations keep working unchanged — a walk
+  nobody has set devices for behaves exactly as before.
+- A walk is now identified by the schedule slot and the local time the user typed, rather than by
+  the UTC instant it resolves to, so its notification settings survive a daylight-saving change.
+- An unregistered `notify.mobile_app_*` service no longer silences the other devices on the same
+  walk; it is logged and skipped.
 - `notify.py` renamed to `notifier.py`: a module named after a platform inside an integration
   *is* that platform to Home Assistant, and this one is not a notify platform.
 - `docs/CONFIG.md` documents the entities, the sensor states and attributes, the notification

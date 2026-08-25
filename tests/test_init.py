@@ -85,6 +85,8 @@ async def test_editing_the_schedule_reaches_the_coordinator(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"all": ["06:00"]}
     )
+    # One notification step per walk sits between the schedule and the parameters.
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     await hass.config_entries.options.async_configure(result["flow_id"], PARAMS)
     await hass.async_block_till_done()
 

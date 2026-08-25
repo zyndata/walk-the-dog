@@ -31,7 +31,10 @@ from custom_components.walk_the_dog.const import (
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
+    CONF_TARGET_MUTE,
+    CONF_TARGET_SERVICES,
     CONF_WALK_DURATION_MIN,
+    CONF_WALK_TARGETS,
     DEFAULT_EARLIER_MARGIN_MIN,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
@@ -45,7 +48,7 @@ from custom_components.walk_the_dog.const import (
     SCHEDULE_MODE_WEEKDAY_WEEKEND,
     WALK_DURATION_WARN_MIN,
 )
-from custom_components.walk_the_dog.schedule import DAY_KEYS, ERROR_NO_WALK_TIMES
+from custom_components.walk_the_dog.schedule import DAY_KEYS, ERROR_NO_WALK_TIMES, target_key
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -93,18 +96,46 @@ async def advance(hass: HomeAssistant, result: dict[str, Any], user_input: Any) 
     return await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
 
 
+async def drain_targets(
+    configure: Any, result: dict[str, Any], targets: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Submit the per-walk notification steps, one form per configured walk.
+
+    Without `targets` every walk is left at its defaults, which is what most of
+    these tests want: the step exists, but it stores nothing.
+    """
+    pending = list(targets or [])
+    while result["type"] is FlowResultType.FORM and result["step_id"] == "walk_target":
+        result = await configure(result["flow_id"], pending.pop(0) if pending else {})
+    assert not pending, "more notification answers than the schedule has walks"
+    return result
+
+
+async def to_params(
+    hass: HomeAssistant,
+    *,
+    mode: str = SCHEDULE_MODE_DAILY,
+    times: dict[str, list[str]] | None = None,
+    targets: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Drive the wizard as far as the parameter form."""
+    result = await start(hass)
+    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
+    result = await advance(hass, result, {CONF_SCHEDULE_MODE: mode})
+    result = await advance(hass, result, times if times is not None else {"all": ["07:00"]})
+    return await drain_targets(hass.config_entries.flow.async_configure, result, targets)
+
+
 async def run_wizard(
     hass: HomeAssistant,
     *,
     mode: str = SCHEDULE_MODE_DAILY,
     times: dict[str, list[str]] | None = None,
+    targets: list[dict[str, Any]] | None = None,
     params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Drive the whole wizard with valid input and return the final result."""
-    result = await start(hass)
-    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
-    result = await advance(hass, result, {CONF_SCHEDULE_MODE: mode})
-    result = await advance(hass, result, times if times is not None else {"all": ["07:00"]})
+    result = await to_params(hass, mode=mode, times=times, targets=targets)
     return await advance(hass, result, params if params is not None else PARAMS)
 
 
@@ -134,10 +165,7 @@ async def test_wizard_prefills_the_home_location(hass: HomeAssistant) -> None:
 
 async def test_wizard_offers_the_documented_radius_bounds(hass: HomeAssistant) -> None:
     """The phase 1 decision — 5 km default between 4 and 15 km — is what the form shows."""
-    result = await start(hass)
-    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
-    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
-    result = await advance(hass, result, {"all": ["07:00"]})
+    result = await to_params(hass)
 
     config = selector_config(result["data_schema"], CONF_RADIUS_KM)
     assert (config["min"], config["max"]) == (MIN_RADIUS_KM, MAX_RADIUS_KM)
@@ -146,10 +174,7 @@ async def test_wizard_offers_the_documented_radius_bounds(hass: HomeAssistant) -
 
 async def test_wizard_walk_duration_has_no_default(hass: HomeAssistant) -> None:
     """A required input with no default: the user must state how long a walk takes."""
-    result = await start(hass)
-    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
-    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
-    result = await advance(hass, result, {"all": ["07:00"]})
+    result = await to_params(hass)
 
     marker = marker_for(result["data_schema"], CONF_WALK_DURATION_MIN)
     assert marker.default is vol.UNDEFINED
@@ -215,6 +240,7 @@ async def test_schedule_recovers_after_an_empty_week(hass: HomeAssistant) -> Non
     result = await advance(hass, result, {"all": []})
 
     result = await advance(hass, result, {"all": ["07:00"]})
+    result = await drain_targets(hass.config_entries.flow.async_configure, result)
     result = await advance(hass, result, PARAMS)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -222,10 +248,7 @@ async def test_schedule_recovers_after_an_empty_week(hass: HomeAssistant) -> Non
 
 async def test_a_radius_below_the_minimum_is_refused(hass: HomeAssistant) -> None:
     """The selector enforces the phase 1 minimum; sampling below one cell is meaningless."""
-    result = await start(hass)
-    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
-    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
-    result = await advance(hass, result, {"all": ["07:00"]})
+    result = await to_params(hass)
 
     with pytest.raises(InvalidData):
         await advance(hass, result, {**PARAMS, CONF_RADIUS_KM: 1.0})
@@ -234,10 +257,7 @@ async def test_a_radius_below_the_minimum_is_refused(hass: HomeAssistant) -> Non
 async def test_long_walk_warning_is_shown_and_can_be_confirmed(hass: HomeAssistant) -> None:
     """Over the warn threshold the wizard says so, then takes yes for an answer."""
     duration = WALK_DURATION_WARN_MIN + 15
-    result = await start(hass)
-    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
-    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
-    result = await advance(hass, result, {"all": ["07:00"]})
+    result = await to_params(hass)
 
     result = await advance(hass, result, {**PARAMS, CONF_WALK_DURATION_MIN: duration})
 
@@ -256,10 +276,7 @@ async def test_long_walk_warning_is_shown_and_can_be_confirmed(hass: HomeAssista
 
 async def test_long_walk_warning_declined_returns_to_the_parameters(hass: HomeAssistant) -> None:
     """Declining is how the user goes back and lowers the duration."""
-    result = await start(hass)
-    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
-    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
-    result = await advance(hass, result, {"all": ["07:00"]})
+    result = await to_params(hass)
     result = await advance(hass, result, {**PARAMS, CONF_WALK_DURATION_MIN: 90})
 
     result = await advance(hass, result, {CONF_CONFIRM: False})
@@ -289,10 +306,7 @@ async def test_notification_devices_are_offered_from_the_service_registry(
     hass.services.async_register("notify", "mobile_app_phone", lambda call: None)
     hass.services.async_register("notify", "persistent_notification", lambda call: None)
 
-    result = await start(hass)
-    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
-    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
-    result = await advance(hass, result, {"all": ["07:00"]})
+    result = await to_params(hass)
 
     assert selector_config(result["data_schema"], CONF_NOTIFY_SERVICE)["options"] == [
         "mobile_app_phone"
@@ -312,10 +326,7 @@ async def test_a_notify_service_that_is_not_a_companion_app_is_refused(
     hass: HomeAssistant,
 ) -> None:
     """A custom value still has to be a service this integration can actually use."""
-    result = await start(hass)
-    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
-    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
-    result = await advance(hass, result, {"all": ["07:00"]})
+    result = await to_params(hass)
 
     result = await advance(hass, result, {**PARAMS, CONF_NOTIFY_SERVICE: "telegram"})
 
@@ -349,6 +360,129 @@ async def test_only_one_entry_is_allowed(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "single_instance_allowed"
+
+
+async def test_one_notification_step_per_configured_walk(hass: HomeAssistant) -> None:
+    """Every walk gets its own form, in schedule order, and says which one it is."""
+    result = await start(hass)
+    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
+    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_WEEKDAY_WEEKEND})
+    result = await advance(hass, result, {"weekday": ["07:00", "18:30"], "weekend": ["09:00"]})
+
+    seen = []
+    while result["step_id"] == "walk_target":
+        seen.append(result["description_placeholders"])
+        result = await advance(hass, result, {})
+
+    assert result["step_id"] == "params"
+    assert [(place["days"], place["time"]) for place in seen] == [
+        ("Monday to Friday", "07:00"),
+        ("Monday to Friday", "18:30"),
+        ("Saturday and Sunday", "09:00"),
+    ]
+    assert [(place["index"], place["total"]) for place in seen] == [
+        ("1", "3"),
+        ("2", "3"),
+        ("3", "3"),
+    ]
+
+
+async def test_each_walk_stores_its_own_devices_and_mute(hass: HomeAssistant) -> None:
+    """The morning walk wakes one phone, the evening walk another, and one is muted."""
+    result = await run_wizard(
+        hass,
+        times={"all": ["07:00", "18:30"]},
+        targets=[
+            {CONF_TARGET_SERVICES: ["mobile_app_morning"]},
+            {CONF_TARGET_SERVICES: ["mobile_app_evening"], CONF_TARGET_MUTE: True},
+        ],
+    )
+
+    assert result["options"][CONF_WALK_TARGETS] == {
+        target_key("all", "07:00"): {CONF_TARGET_SERVICES: ["mobile_app_morning"]},
+        target_key("all", "18:30"): {
+            CONF_TARGET_SERVICES: ["mobile_app_evening"],
+            CONF_TARGET_MUTE: True,
+        },
+    }
+
+
+async def test_a_walk_left_at_the_defaults_stores_nothing(hass: HomeAssistant) -> None:
+    """`walk_targets` only ever holds walks the user actually said something about."""
+    result = await run_wizard(hass, times={"all": ["07:00"]})
+
+    assert CONF_WALK_TARGETS not in result["options"]
+
+
+async def test_the_notification_step_offers_the_registered_devices(
+    hass: HomeAssistant,
+) -> None:
+    """Same rule as the default device: only companion-app services qualify."""
+    hass.services.async_register("notify", "mobile_app_phone", lambda call: None)
+    hass.services.async_register("notify", "persistent_notification", lambda call: None)
+
+    result = await start(hass)
+    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
+    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
+    result = await advance(hass, result, {"all": ["07:00"]})
+
+    config = selector_config(result["data_schema"], CONF_TARGET_SERVICES)
+    assert config["options"] == ["mobile_app_phone"]
+    assert config["multiple"] is True
+
+
+async def test_a_device_that_is_not_a_companion_app_is_refused(hass: HomeAssistant) -> None:
+    """A typed custom value has to be a service this integration can call."""
+    result = await start(hass)
+    result = await advance(hass, result, {CONF_LOCATION: LOCATION})
+    result = await advance(hass, result, {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY})
+    result = await advance(hass, result, {"all": ["07:00"]})
+
+    result = await advance(hass, result, {CONF_TARGET_SERVICES: ["telegram"]})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "walk_target"
+    assert result["errors"] == {CONF_TARGET_SERVICES: ERROR_INVALID_NOTIFY_SERVICE}
+
+
+async def test_deleting_a_walk_time_drops_its_devices(hass: HomeAssistant) -> None:
+    """A time that no longer exists must not leave a device list to be inherited."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Walk the dog",
+        data={CONF_LOCATION: LOCATION},
+        options={
+            CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY,
+            CONF_SCHEDULE: {"all": ["07:00", "18:30"]},
+            CONF_WALK_TARGETS: {
+                target_key("all", "07:00"): {CONF_TARGET_SERVICES: ["mobile_app_morning"]},
+                target_key("all", "18:30"): {CONF_TARGET_SERVICES: ["mobile_app_evening"]},
+            },
+            **STORED_PARAMS,
+        },
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"all": ["07:00"]}
+    )
+    # The surviving walk still shows what it had, and it is the only step left.
+    assert marker_for(result["data_schema"], CONF_TARGET_SERVICES).default() == [
+        "mobile_app_morning"
+    ]
+    result = await drain_targets(hass.config_entries.options.async_configure, result)
+    await hass.config_entries.options.async_configure(result["flow_id"], PARAMS)
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_WALK_TARGETS] == {
+        target_key("all", "07:00"): {CONF_TARGET_SERVICES: ["mobile_app_morning"]}
+    }
 
 
 async def options_entry(hass: HomeAssistant) -> MockConfigEntry:
@@ -386,6 +520,7 @@ async def test_options_flow_prefills_what_is_stored(hass: HomeAssistant) -> None
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"all": ["07:00"]}
     )
+    result = await drain_targets(hass.config_entries.options.async_configure, result)
     assert suggested(result["data_schema"], CONF_NOTIFY_SERVICE) == "mobile_app_phone"
     assert suggested(result["data_schema"], CONF_WALK_DURATION_MIN) == 30
 
@@ -401,6 +536,7 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"weekday": ["06:45"], "weekend": ["10:00"]}
     )
+    result = await drain_targets(hass.config_entries.options.async_configure, result)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
@@ -454,6 +590,7 @@ async def test_options_flow_warns_about_a_long_walk(hass: HomeAssistant) -> None
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"all": ["07:00"]}
     )
+    result = await drain_targets(hass.config_entries.options.async_configure, result)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {**PARAMS, CONF_WALK_DURATION_MIN: 60}
     )
@@ -479,6 +616,7 @@ async def test_options_flow_can_clear_an_optional_field(hass: HomeAssistant) -> 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"all": ["07:00"]}
     )
+    result = await drain_targets(hass.config_entries.options.async_configure, result)
     result = await hass.config_entries.options.async_configure(result["flow_id"], PARAMS)
     await hass.async_block_till_done()
 
