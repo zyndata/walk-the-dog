@@ -458,6 +458,56 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - Three GitHub settings blocked by the free plan on a private repo, and two ignored HACS checks
     — revisit when the repo goes public in phase 9 (unchanged from phase 2).
 
+## Repository made public — 2026-08-25 (out of phase)
+
+- **Status:** done
+- **What changed:** the repository was flipped to public after phase 5, ahead of the phase 9
+  schedule, and the settings that GitHub's free plan refuses on a private repo were applied.
+  `README.md` and `info.md` gained work-in-progress banners naming exactly what works (install,
+  setup wizard, options flow) and what does not (sensor, switch, notifications, events).
+  `docs/DEVELOPMENT.md` gained a HACS custom-repository deploy route and a HAOS/Samba route.
+  `.github/workflows/validate.yml` dropped two of its three HACS ignores. `PLAN.md` phase 9 was
+  updated to mark tasks 2 and 4 as partly done.
+- **Why (the deviation from PLAN.md, recorded before proceeding):** the test instance runs
+  **Home Assistant OS**, which has no config folder a dev machine can write to, so
+  `scripts/install.py` cannot reach it without adding a Samba share. HACS custom repositories
+  require a public repo. Going public early makes the whole remaining project testable on the
+  real target with a one-click redownload per push — and it *raises* the security bar rather
+  than lowering it, because secret scanning, push protection and rulesets are free only on
+  public repos.
+- **Secrets audit (phase 9 task 2, done early).** Method, over `git rev-list --all`:
+  1. files ever added matching `.env`, `settings.local.json`, `*.pem`, `*.key`, `secrets` — none;
+  2. token-shaped strings (`gh[pousr]_…`, `eyJ…` JWTs, `api_key=…`, `Bearer …`) — none;
+  3. IPv4 addresses, `homeassistant.local`, `duckdns`, `nabu.casa` — none;
+  4. every coordinate in the tree reviewed by hand — all are the documented public landmarks
+     (Warszawa centre 52.2297/21.0122, the Sejny area 54.0191/23.0081) or Open-Meteo's
+     grid-snapped echoes of them. No personal coordinates.
+  The author email in commit metadata is public now; that is expected for a repo owner.
+  **Re-run this audit over the commits added since, before tagging `v1.0.0` in phase 9.**
+- **Decisions:**
+  - **No release tag yet.** With no releases, HACS installs a custom repository from the default
+    branch, so every push to `main` is immediately installable — exactly what is wanted during
+    development. `v1.0.0` in phase 9 remains the first real release.
+  - **`hacsjson` and `integration_manifest` ignores dropped** from the HACS validation workflow.
+    They only ever existed because the action reads repository files through the GitHub API and
+    got nothing back for a private repo. `brands` stays until the phase 9 brands PR.
+  - **The WIP banners are load-bearing** while the repo is public and installable but incomplete.
+    Removing them is now an explicit phase 9 task.
+- **Bug found and fixed while doing this:** `scripts/github_setup.py` enabled secret scanning
+  with `gh api -f "security_and_analysis[secret_scanning][status]=enabled"`. `gh` passes
+  bracketed field names through literally, GitHub ignores the unknown key and still answers
+  **200**, so the script printed `ok` while changing nothing — a false positive that was
+  invisible while the call was expected to fail anyway on a private repo. It now sends nested
+  JSON on stdin, like the ruleset calls do, and both settings verify as `enabled`.
+- **Now active on the repository:** secret scanning, push protection, `main-protection`
+  (blocks deletion and force-push; direct pushes still allowed), `release-tags` (blocks
+  deletion, update and force-push on `v*`), Dependabot alerts and security updates, read-only
+  workflow token.
+- **Open questions carried forward:**
+  - The HACS custom-repository install has not been exercised yet — first run is the phase 5 UI
+    check on the HAOS instance.
+  - Whether the two newly-unignored HACS checks pass for real — the next Validate run answers it.
+
 ## Phase 6 — Coordinator, entities, notifications, events
 
 - **Status:** not started
@@ -482,7 +532,7 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Decisions:**
 - **Open questions carried forward:**
 
-## Phase 9 — Docs, release 1.0.0, go public
+## Phase 9 — Docs, release 1.0.0
 
 - **Status:** not started
 - **Date:**

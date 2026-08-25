@@ -59,6 +59,24 @@ the dependencies can be downloaded, or bake them into an image. On the Linux mac
 
 ## Deploying into a test Home Assistant instance
 
+Which route to use depends on how the test instance runs.
+
+### HACS custom repository (simplest for Home Assistant OS)
+
+Home Assistant OS has no config folder a dev machine can write to directly, so install from
+the repository instead — this is also the closest thing to how real users will install it.
+
+1. In HACS: **⋮ → Custom repositories**, paste `https://github.com/zyndata/walk-the-dog`,
+   category **Integration**, **Add**.
+2. Find **Walk the dog**, **Download**, then restart Home Assistant.
+3. To pick up new work: push to `main`, then **Redownload** in HACS and restart.
+
+There are no releases yet, so HACS installs from the default branch — every push to `main` is
+immediately installable. Once `v1.0.0` is tagged in phase 9, HACS switches to installing
+releases.
+
+### Local config folder (a container or Core install on the same machine)
+
 1. Copy `.env.example` to `.env` and set `HA_CONFIG_DIR` to your HA configuration directory
    (the folder containing `configuration.yaml`). Same variable on both OSes; use a normal
    absolute path for the OS you are on.
@@ -67,6 +85,13 @@ the dependencies can be downloaded, or bake them into an image. On the Linux mac
 
 Alternative on Linux: symlink once and only restart HA afterwards:
 `ln -s "$(pwd)/custom_components/walk_the_dog" /path/to/ha-config/custom_components/walk_the_dog`.
+
+### Home Assistant OS over a network share
+
+If you want `scripts/install.py` against a HAOS instance, install the **Samba share** add-on,
+start it, authenticate to `\\homeassistant` from the dev machine first (otherwise the script
+reports the directory as missing), then set `HA_CONFIG_DIR=\\homeassistant\config`. The `.env`
+parser keeps backslashes literally — no quoting or escaping.
 
 ## Versions and pins
 
@@ -91,5 +116,6 @@ Every push and PR runs two workflows:
 - **Push at the end of every session** — the other machine may pick up next.
 - `STATE.md` is the handover document: read it first, update it at every phase end.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, `test:`, `refactor:`, `ci:`).
-- Never commit secrets, personal coordinates, or HA URLs — the repo goes public at 1.0.0
-  with its full history. Machine-specific values go in `.env`.
+- Never commit secrets, personal coordinates, or HA URLs — **the repository is public**, and
+  its full history with it. Machine-specific values go in `.env`. GitHub secret scanning and
+  push protection are enabled, but they are a backstop, not the rule.

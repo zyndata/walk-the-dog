@@ -105,12 +105,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `scripts/github_setup.py` really enables secret scanning and push protection. It sent them as
+  `gh api -f "security_and_analysis[secret_scanning][status]=enabled"`; `gh` passes bracketed
+  field names through literally, so GitHub ignored the key, answered 200, and the script
+  reported success while changing nothing. It now sends nested JSON on stdin.
 - LibreWXR intensity calibration is now pinned rather than assumed: the rendered grey level of
   colour scheme 0 equals `dBZ + 32`, established from the AGPL-3.0 LibreWXR source and locked
   by a fixture test. `docs/DATA_SOURCES.md` records the derivation.
 
 ### Changed
 
+- **The repository is public** as of 2026-08-25, ahead of the phase 9 schedule, so the
+  integration can be installed for testing as a HACS custom repository. `README.md` and
+  `info.md` carry work-in-progress banners until the 1.0.0 release; a full secrets audit of the
+  git history was run first and came back clean (method recorded in `STATE.md`).
+- HACS validation now runs the `hacsjson` and `integration_manifest` checks for real — they were
+  ignored only because the GitHub API returns nothing for a private repo. Only `brands` is still
+  ignored, until the phase 9 brands PR.
+- `docs/DEVELOPMENT.md` documents deploying through a HACS custom repository (the practical route
+  for a Home Assistant OS test instance) alongside the local-folder and Samba routes.
 - `manifest.json` declares `single_config_entry`: one home, one schedule, one recommendation
   sensor, so a second setup attempt now aborts.
 - `docs/CONFIG.md` describes the implemented flows and pins the config entry data and options

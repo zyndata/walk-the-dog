@@ -55,6 +55,14 @@ TAG_RULESET = {
     "rules": [{"type": "deletion"}, {"type": "update"}, {"type": "non_fast_forward"}],
 }
 
+# Free on public repositories; rejected with HTTP 422 while the repo is private.
+SECURITY_ANALYSIS = {
+    "security_and_analysis": {
+        "secret_scanning": {"status": "enabled"},
+        "secret_scanning_push_protection": {"status": "enabled"},
+    }
+}
+
 dry_run = "--dry-run" in sys.argv
 failures: list[str] = []
 skipped: list[str] = []
@@ -145,16 +153,11 @@ def main() -> int:
 
     # Needs a public repo or a paid plan; expected to skip while the repo is private.
     gh(
-        [
-            "api",
-            "--method",
-            "PATCH",
-            f"repos/{REPO}",
-            "-f",
-            "security_and_analysis[secret_scanning][status]=enabled",
-            "-f",
-            "security_and_analysis[secret_scanning_push_protection][status]=enabled",
-        ],
+        ["api", "--method", "PATCH", f"repos/{REPO}", "--input", "-"],
+        # Sent as nested JSON on stdin, not as `-f a[b][c]=v`: gh passes bracketed
+        # names through literally, GitHub ignores the unknown key and still answers
+        # 200, so the form version reported success while changing nothing.
+        stdin=json.dumps(SECURITY_ANALYSIS),
         label="Secret scanning + push protection",
         optional=True,
     )

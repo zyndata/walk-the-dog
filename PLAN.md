@@ -337,26 +337,37 @@ modules, `tests/*`, `docs/CONFIG.md`, `CHANGELOG.md`, `STATE.md`.
 
 ---
 
-## Phase 9 — Docs, release 1.0.0, go public
+## Phase 9 — Docs, release 1.0.0
 
-**Goal:** first public release.
+**Goal:** first tagged release.
+
+> **The repository was made public early, on 2026-08-25, after phase 5** — so that the
+> integration could be installed for testing as a HACS custom repository from a Home Assistant
+> OS instance, which has no config folder a dev machine can write to. Tasks 2 and 4's
+> "go public" half are therefore already done; see `STATE.md` → *Repository made public*.
+> Everything else in this phase is unchanged.
 
 **Inputs:** `CLAUDE.md`, `STATE.md`, this phase, README, `CHANGELOG.md`.
 
 **Tasks:**
 
 1. Finalize README (installation via HACS + manual, configuration, screenshots from a real HA
-   instance), `info.md`, `docs/*`; verify repo topics for HACS.
-2. **Secrets audit of the entire git history** (e.g. `gitleaks` over all commits + manual review
-   for personal coordinates/HA URLs). If anything is found: remediate before flipping public.
+   instance), `info.md`, `docs/*`; verify repo topics for HACS. **Remove the work-in-progress
+   banners from `README.md` and `info.md`.**
+2. ~~**Secrets audit of the entire git history**~~ — **done 2026-08-25** before the repo was
+   made public (method and result in `STATE.md`). Re-run it over the commits added since, as a
+   final check before tagging.
 3. Set `manifest.json` version to `1.0.0`; finalize `CHANGELOG.md` for 1.0.0.
-4. Flip the repository to public; tag `v1.0.0`; create the GitHub release.
-5. Submit to HACS (default repository inclusion) and open the `home-assistant/brands` PR.
+4. ~~Flip the repository to public~~ — **done 2026-08-25.** Tag `v1.0.0` and create the GitHub
+   release.
+5. Submit to HACS (default repository inclusion) and open the `home-assistant/brands` PR, then
+   drop the last `ignore: brands` from the HACS validation workflow.
 
 **Acceptance criteria:**
 
-- History audit clean and its method recorded in `STATE.md`.
-- Repo public, `v1.0.0` tagged, release notes published, CI green on the tag.
+- History audit clean over the commits added since 2026-08-25, method recorded in `STATE.md`.
+- `v1.0.0` tagged, release notes published, CI green on the tag, WIP banners gone.
+- HACS validation green with **no** ignores once the brands PR lands.
 - HACS and brands submissions opened (acceptance may land later; link the PRs in `STATE.md`).
 - End-of-phase ritual completed.
 
