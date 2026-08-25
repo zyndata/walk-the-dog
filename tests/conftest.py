@@ -7,13 +7,38 @@ Assistant aiohttp mocker against the recorded responses in `tests/fixtures/`.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from custom_components.walk_the_dog.sources.base import SampleGeometry
+from custom_components.walk_the_dog.const import (
+    SOURCE_ICON_EU,
+    SOURCE_KNMI,
+    SOURCE_LIBREWXR,
+    SOURCE_METNO,
+)
+from custom_components.walk_the_dog.sources.base import (
+    CELL_KM,
+    RELIABILITY,
+    STATE_OK,
+    SampleGeometry,
+    SourceSeries,
+    SourceStatus,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+#: Forecast step each adapter publishes on — not the same thing as how often it
+#: republishes, which is what `UPDATE_INTERVAL_S` measures.
+STEP_S = {
+    SOURCE_LIBREWXR: 600,
+    SOURCE_KNMI: 3600,
+    SOURCE_ICON_EU: 3600,
+    SOURCE_METNO: 3600,
+}
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -60,3 +85,38 @@ def wet_geometry() -> SampleGeometry:
 def now() -> datetime:
     """Frozen clock — adapters take `now` as a parameter, never read it."""
     return NOW
+
+
+def make_series(
+    source_id: str,
+    values: Sequence[float],
+    *,
+    start: datetime,
+    step_s: int | None = None,
+    issued_at: datetime | None = None,
+    fetched_at: datetime | None = None,
+) -> SourceSeries:
+    """Build a normalized series from a list of mm/h values, one per step.
+
+    The engine only ever sees `SourceSeries`, so its tests build them directly
+    instead of driving adapters: that is what "pure, hardware-independent" buys.
+    """
+    step = step_s if step_s is not None else STEP_S[source_id]
+    slots = tuple(
+        (start + timedelta(seconds=index * step), float(value))
+        for index, value in enumerate(values)
+    )
+    return SourceSeries(
+        source_id=source_id,
+        issued_at=issued_at if issued_at is not None else start,
+        fetched_at=fetched_at if fetched_at is not None else (issued_at or start),
+        step_s=step,
+        slots=slots,
+        cell_km=CELL_KM[source_id],
+        reliability=RELIABILITY[source_id],
+    )
+
+
+def make_status(source_id: str, state: str = STATE_OK, **kwargs: Any) -> SourceStatus:
+    """An adapter-level status, as the registry would hand it to the engine."""
+    return SourceStatus(source_id, state, **kwargs)

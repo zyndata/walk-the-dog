@@ -213,13 +213,16 @@ starting at `s` covers the slots in `[s, s + D)`.
   that order wins — nearest wins, and at equal distance **earlier beats later** (the dog waits
   less and nearer-term forecasts are more reliable).
 - **Output** (`Recommendation` dataclass): `direction` (`none` = walk as planned / `earlier` /
-  `later` / `no_dry_window`), `recommended_start`, scheduled-window risk + confidence +
+  `later` / `no_dry_window` / `unknown`), `recommended_start`, scheduled-window risk + confidence +
   peak intensity class, per-source breakdown (each source's verdict over the scheduled window +
-  its `SourceStatus`), `degraded` and `horizon_limited` flags.
+  its `SourceStatus`), `degraded` and `horizon_limited` flags. `unknown` is the phase 4 precision
+  of the sensor's `unknown` state: no source reaches the scheduled window at all, so no search
+  runs and no notification may fire — never reported as good news.
 
 **Material change** (gates re-notification after the first dispatch; any one suffices):
 
-1. `direction` changes (any transition between none / earlier / later / no_dry_window);
+1. `direction` changes (any transition between none / earlier / later / no_dry_window /
+   unknown);
 2. `recommended_start` moves by ≥ 20 min (2 slots) from the last **notified** value;
 3. the scheduled-window verdict flips with hysteresis — wet→dry only when window risk < 0.4,
    dry→wet only when ≥ 0.6 (crossing 0.5 alone never re-notifies, preventing flapping);

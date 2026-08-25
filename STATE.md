@@ -313,11 +313,71 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 4 — Sampling + consensus scoring engine
 
-- **Status:** not started
-- **Date:**
-- **What was built:**
+- **Status:** done
+- **Date:** 2026-08-25
+- **What was built:** the decision core, as three pure modules plus their tests.
+  `engine/grid.py` (10-minute UTC grid: `floor_slot` / `ceil_slot` / `slots_between` /
+  `slots_for_window`, and `align()`, which projects any source's own step onto the grid as a
+  step function); `engine/consensus.py` (`freshness`, `source_weight`, `SlotScore`, `Consensus`,
+  `build_consensus` — the weighted vote, the source-count confidence cap, and the restatement of
+  each adapter's status into what it actually contributed); `engine/window.py`
+  (`WindowVerdict`, `SourceBreakdown`, `Recommendation`, `evaluation_slots`, `evaluate_window`,
+  `candidate_starts`, `source_breakdown`, `recommend`, `is_material_change`);
+  `engine/__init__.py` re-exports the public API and documents the three-call sequence the
+  coordinator will use in phase 6. Tests: `tests/test_grid.py`, `tests/test_consensus.py`,
+  `tests/test_window.py`, `tests/test_engine_purity.py`, plus `make_series` / `make_status`
+  factories in `conftest.py` — **84 new tests, 207 in total**, verified green with networking
+  fully disabled (`docker run --network none`).
 - **Decisions:**
+  - **A slot no source covers is absent, never zero.** `align()` returns a mapping, not a dense
+    array, so "we do not know" and "no rain" can never collapse into the same value — the single
+    property the dry/wet verdict, the `out_of_range` status and the `horizon_limited` flag all
+    rest on.
+  - **`direction` gains a fifth value, `unknown`**, for a scheduled window no source reaches at
+    all. The architecture listed four directions but the sensor contract already had an `unknown`
+    state; carrying it on the recommendation makes the mapping 1:1 and keeps "no data" from ever
+    being rendered as "walk as planned". Recorded in `docs/ARCHITECTURE.md` § Output.
+  - **A window is dry only when every one of its slots is *covered* and below the threshold.**
+    A partly covered window is `horizon_limited`, never dry — so a forecast running out mid-walk
+    pushes the recommendation into covered ground instead of silently approving the walk.
+  - **The engine assigns `out_of_range`, the adapters do not.** A source can be perfectly fresh
+    and still say nothing about a distant walk; that is a different fact from being stale, and
+    the sensor shows both. A source's *cycle* status stays `ok` when it covered any scored slot,
+    while its *window* verdict is `unknown` — two questions, two answers.
+  - **Candidate start times sit on the grid, not at exact offsets from the walk.** A 07:15 walk
+    is offered 07:10 and 07:20 — the times the forecast actually resolves. Candidates are then
+    ordered by true distance from the walk with earlier winning ties, which stays correct even
+    when the walk time is not a multiple of 10 minutes.
+  - **`Consensus` carries the aligned per-source values**, not just the scored slots, so the
+    per-source breakdown is computed from the same numbers the vote used rather than re-derived.
+  - **Purity is tested structurally**, not just behaviourally (`tests/test_engine_purity.py`
+    parses the engine's AST): a stray `datetime.now()` would undo the whole testability
+    argument without failing a single behavioural test.
+- **Deviations from PLAN.md (recorded before proceeding):**
+  1. **Phase 4 task 1 (spatial sampling) was already delivered in phase 3.** The architecture's
+     own module layout puts spatial aggregation in the adapters — p90 over the pixel disc for
+     LibreWXR, max over the five sample points for the NWP sources — and phase 3's acceptance
+     criteria required it there. The engine therefore consumes one intensity per source per
+     step and does no spatial work at all; the "≥ 1 full cell of the coarsest source" guarantee
+     is structural, held by the 4 km minimum radius decided in phase 1.
+  2. **Material-change rule 3's dry→wet half is unreachable in practice.** `direction == none`
+     is equivalent to "the scheduled window is dry", so any dry→wet flip already changes
+     `direction` and fires rule 1. The rule is implemented and unit-tested as specified, as a
+     backstop; its wet→dry half *is* reachable (a horizon-limited window is not dry at any
+     risk).
+  3. **The test-series factories take an explicit forecast step.** A source's publication
+     interval (`UPDATE_INTERVAL_S`, used for freshness) and its forecast step are different
+     numbers; `conftest.STEP_S` names the latter so the two are never confused in a fixture.
 - **Open questions carried forward:**
+  - Whether p90 for the LibreWXR disc needs tuning against real events — revisit in phase 8
+    (unchanged since phase 1).
+  - LibreWXR fuses NWP model layers into its tiles outside radar coverage — re-check in phase 8
+    if false alarms show up (unchanged from phase 3).
+  - **Tests cannot run natively on Windows** (HA imports `fcntl`); this phase's suite was run in
+    the documented Linux container with `--network none`, which doubles as the offline proof.
+    Lint and format run natively. Unchanged from phase 3.
+  - Three GitHub settings blocked by the free plan on a private repo, and two ignored HACS
+    checks — revisit when the repo goes public in phase 9 (unchanged from phase 2).
 
 ## Phase 5 — Config flow wizard + options flow
 

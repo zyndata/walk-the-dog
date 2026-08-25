@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 4 decision engine: `engine/grid.py`, `engine/consensus.py` and `engine/window.py` turn
+  the sources' normalized series into a recommendation, as pure functions with no I/O, no Home
+  Assistant imports and no clock of their own.
+- Shared 10-minute UTC grid: each source's own steps are projected onto it as a step function
+  with honest gaps, so an hourly model covers all six slots of its hour and a slot nobody
+  forecasts stays absent instead of reading as "no rain".
+- Weighted consensus vote per slot: risk, confidence and expected intensity from reliability x
+  freshness weights, with stale series dropped, confidence capped by how many sources actually
+  voted, and each source's status restated as `ok` / `stale` / `out_of_range` / what its adapter
+  reported.
+- Window evaluation and recommendation search: the scheduled walk is scored on its worst slot
+  and its weakest slot, and when it is not dry the nearest dry window on the grid within the
+  configured margins wins, earlier beating later at equal distance.
+- Per-source breakdown travelling with every recommendation, plus `degraded`, `horizon_limited`
+  and the material-change test that gates re-notification.
+- 84 further tests (207 total, still green with networking disabled), covering rain at the start
+  and end of a walk, all-dry, all-wet, disagreement, a stale source, single-source degraded
+  mode, walks that outrun the forecast horizon, and a structural check that the engine stays
+  pure.
+
 - Phase 3 source clients: one adapter per recommended provider behind a common interface —
   LibreWXR (frame index, tile fetch, Web-Mercator disc mask, 90th-percentile pixel sampling),
   Open-Meteo (ICON-EU and KNMI HARMONIE from a single five-coordinate request), and MET Norway
