@@ -7,10 +7,10 @@
 > the integration is being built phase by phase in the open.
 >
 > - **Works today:** installation, the full setup wizard (location, walk schedule, alert
->   settings) and the options flow.
-> - **Not yet:** the recommendation sensor, the enable switch, notifications and events.
->   Nothing is fetched and nothing is predicted — installing today gets you configuration
->   screens and no entities.
+>   settings), the options flow, and the whole prediction loop — the recommendation sensor,
+>   the alerting switch, push notifications and the `walk_the_dog_alert` event.
+> - **Not yet:** Polish localization and the integration icon (phase 7), and the performance
+>   pass on low-end hardware (phase 8). Real-world accuracy is untested.
 >
 > Breaking changes land without warning and there is no upgrade path between development
 > versions. See [CHANGELOG.md](CHANGELOG.md) for what has landed and [STATE.md](STATE.md)

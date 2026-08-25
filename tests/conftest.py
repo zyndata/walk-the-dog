@@ -10,15 +10,34 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
 from custom_components.walk_the_dog.const import (
+    CONF_EARLIER_MARGIN_MIN,
+    CONF_FIRE_EVENT,
+    CONF_INTENSITY_THRESHOLD,
+    CONF_LATER_MARGIN_MIN,
+    CONF_LOCATION,
+    CONF_RADIUS_KM,
+    CONF_SCHEDULE,
+    CONF_SCHEDULE_MODE,
+    CONF_WALK_DURATION_MIN,
+    DOMAIN,
+    INTENSITY_THRESHOLD_LIGHT,
+    SCHEDULE_MODE_DAILY,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
     SOURCE_METNO,
 )
+from custom_components.walk_the_dog.sources import SourceRegistry
 from custom_components.walk_the_dog.sources.base import (
     CELL_KM,
     RELIABILITY,
@@ -29,7 +48,7 @@ from custom_components.walk_the_dog.sources.base import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Generator, Sequence
 
 #: Forecast step each adapter publishes on — not the same thing as how often it
 #: republishes, which is what `UPDATE_INTERVAL_S` measures.
@@ -120,3 +139,95 @@ def make_series(
 def make_status(source_id: str, state: str = STATE_OK, **kwargs: Any) -> SourceStatus:
     """An adapter-level status, as the registry would hand it to the engine."""
     return SourceStatus(source_id, state, **kwargs)
+
+
+#: The walk the coordinator/entity tests revolve around: 05:00 UTC, 30 minutes long,
+#: searchable 60 minutes back and 30 forward. Polling therefore opens at 03:30 UTC
+#: and the notification is promised for 04:00 UTC.
+WALK_HHMM = "05:00"
+WALK_START = datetime(2026, 8, 25, 5, 0, tzinfo=UTC)
+WINDOW_START = datetime(2026, 8, 25, 3, 30, tzinfo=UTC)
+ARM_AT = datetime(2026, 8, 25, 4, 0, tzinfo=UTC)
+WALK_END = datetime(2026, 8, 25, 5, 30, tzinfo=UTC)
+
+ENTRY_DATA: dict[str, Any] = {
+    CONF_LOCATION: {"latitude": TEST_GEOMETRY.latitude, "longitude": TEST_GEOMETRY.longitude}
+}
+
+ENTRY_OPTIONS: dict[str, Any] = {
+    CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY,
+    CONF_SCHEDULE: {"all": [WALK_HHMM]},
+    CONF_RADIUS_KM: 5.0,
+    CONF_INTENSITY_THRESHOLD: INTENSITY_THRESHOLD_LIGHT,
+    CONF_EARLIER_MARGIN_MIN: 60,
+    CONF_LATER_MARGIN_MIN: 30,
+    CONF_WALK_DURATION_MIN: 30,
+    CONF_FIRE_EVENT: False,
+}
+
+
+class FakeFetch:
+    """Stands in for `SourceRegistry.async_fetch` and counts what it was asked for.
+
+    The adapters have their own fixture-driven tests; a coordinator test is about
+    *when* a fetch happens, so it answers from a builder instead of the network.
+    """
+
+    def __init__(self) -> None:
+        """Answer with nothing until a test says otherwise."""
+        self.calls = 0
+        self.build: Any = lambda now: ([], [])
+
+    async def __call__(self, session: Any, geometry: Any, now: datetime) -> Any:
+        """Record the call and return whatever the current builder produces."""
+        self.calls += 1
+        return self.build(now)
+
+
+def hourly_sources(
+    now: datetime,
+    values: Sequence[float],
+    *,
+    start: datetime = datetime(2026, 8, 25, 3, 0, tzinfo=UTC),
+    source_ids: Sequence[str] = (SOURCE_ICON_EU, SOURCE_KNMI),
+) -> tuple[list[SourceSeries], list[SourceStatus]]:
+    """Two agreeing hourly models, freshly issued — one mm/h value per hour."""
+    series = [make_series(sid, values, start=start, issued_at=now) for sid in source_ids]
+    return series, [make_status(sid, age_s=0, contributed=True) for sid in source_ids]
+
+
+@pytest.fixture
+def fetch() -> Generator[FakeFetch]:
+    """Replace the source registry's network cycle for the whole test."""
+    fake = FakeFetch()
+    with patch.object(SourceRegistry, "async_fetch", new=fake):
+        yield fake
+
+
+@pytest.fixture
+async def entry(hass: HomeAssistant) -> MockConfigEntry:
+    """A configured entry with the standard walk, not yet set up."""
+    await hass.config.async_set_time_zone("UTC")
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Walk the dog",
+        data=ENTRY_DATA,
+        options=ENTRY_OPTIONS,
+        version=1,
+    )
+    config_entry.add_to_hass(hass)
+    return config_entry
+
+
+async def setup_entry(hass: HomeAssistant, config_entry: MockConfigEntry) -> Any:
+    """Set the entry up and hand back its coordinator."""
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+    return config_entry.runtime_data
+
+
+async def run_cycle(hass: HomeAssistant, freezer: Any, moment: datetime) -> None:
+    """Move the clock to `moment` and let the armed timer fire."""
+    freezer.move_to(moment)
+    async_fire_time_changed(hass, moment)
+    await hass.async_block_till_done()

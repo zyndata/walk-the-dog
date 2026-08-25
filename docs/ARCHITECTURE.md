@@ -27,7 +27,8 @@ custom_components/walk_the_dog/
 ├── coordinator.py     # WalkCoordinator(DataUpdateCoordinator): polling windows, orchestration
 ├── schedule.py        # walk-schedule model (3 modes) → next-walk computation; PURE
 ├── cache.py           # bounded frame/sample cache + persistence via HA Store
-├── notify.py          # notification dispatch, material-change detection, auto-mute check
+├── notifier.py        # notification dispatch, material-change detection, auto-mute check
+├── entity.py          # shared entity base: the one service device both entities sit on
 ├── sensor.py          # the single recommendation sensor
 ├── switch.py          # enable/disable switch (RestoreEntity)
 ├── strings.json       # + translations/ (en base, pl priority) — phases 5 and 7
@@ -72,7 +73,7 @@ schedule.py: next walk T ──► coordinator: inside active window? ──no�
                                         │
               ┌─────────────────────────┼──────────────────────────┐
               ▼                         ▼                          ▼
-        sensor.py (state+attrs)   notify.py (at T−earlier_margin,  event bus
+        sensor.py (state+attrs)   notifier.py (at T−earlier_margin, event bus
                                    re-notify on material change)   (walk_the_dog_alert, opt-in)
 ```
 
@@ -252,10 +253,17 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
 - **Enable switch off:** the timer is cancelled too — no timers, no requests, no cycles. On
   re-enable (or HA start, or options change) the schedule is recomputed immediately and, if
   already inside a window, a cycle runs at once.
-- **Notification dispatch** (`notify.py`): armed at `T − E` via its own time-point listener,
-  fires with the freshest coordinator data **only if** the scheduled window is not dry;
-  afterwards every cycle until `walk end` re-checks material change. Suppressed entirely by:
-  switch off, auto-mute entity not `home`, or 0 contributing sources.
+- **Cycle grid anchoring** (phase 6): the 10-minute cycles are counted from the **window
+  start**, not from the wall clock. Since `lead_time` is a whole number of slots, a cycle
+  therefore falls exactly on `T − E` whatever minute the walk itself is scheduled at — which is
+  what makes "the notification arrives at `T − E`" true for a 07:15 walk as well as a 07:00 one.
+- **Notification dispatch** (`notifier.py`): evaluated on the cycle that lands on `T − E`, fires
+  with the freshest coordinator data **only if** the scheduled window is not dry; afterwards
+  every cycle until `walk end` re-checks material change. Suppressed entirely by: switch off,
+  auto-mute entity not `home`, or 0 contributing sources. A muted alert is suppressed, not
+  queued — the decision state advances either way, so coming home does not release a stale
+  message. The module is `notifier.py`, not `notify.py`: a file named after a platform inside an
+  integration *is* that platform to Home Assistant, and this one is not a notify platform.
 - **Provider failover** (phase 0 rule, owned by the adapter registry): Open-Meteo failed on 2
   consecutive cycles → enable `metno`; Open-Meteo healthy twice in a row → disable it again.
 
@@ -324,10 +332,19 @@ Phase 0 effective resolutions (measured): LibreWXR/OPERA ~2 km; KNMI 5.5 km; ICO
   scheduled time, risk, confidence, recommended time, direction, expected intensity class,
   per-source breakdown (verdict, status, age, contributed), data freshness, `degraded`,
   `horizon_limited`, and the attribution strings required by
-  [DATA_SOURCES.md](DATA_SOURCES.md).
-- **Switch**: enable/disable alerting, `RestoreEntity`, default on.
+  [DATA_SOURCES.md](DATA_SOURCES.md). One serialization (`WalkData.payload()`) feeds both the
+  sensor attributes and the event payload; the exact schema is in [CONFIG.md](CONFIG.md)
+  § Event payload. Scored fields are `null`, never `0`, when no source reaches the scheduled
+  window — "we do not know" must never read as "no rain".
+- **Switch**: enable/disable alerting, `RestoreEntity`, default on. The coordinator starts in
+  the **off** position and the switch restores the real one, so a Home Assistant started with
+  alerting disabled makes no request even once.
 - **Notification**: via the configured `notify.mobile_app_*` service, per the dispatch rules
   above; content localized (phase 7).
 - **Event** `walk_the_dog_alert` (opt-in): fired whenever a notification would fire (even if
-  muted by auto-mute — automations may want it), payload = the `Recommendation` serialized;
-  exact schema documented in [CONFIG.md](CONFIG.md) during phase 6.
+  muted by auto-mute — automations may want it), payload = the `Recommendation` serialized,
+  plus `muted`. Schema in [CONFIG.md](CONFIG.md) § Event payload.
+- **Notification texts** live under the `common` key of `strings.json` with a `notification_`
+  prefix and are read at runtime through `homeassistant.helpers.translation`. That is the only
+  top-level key hassfest allows for user-facing strings that belong to no form and no entity —
+  verified against the real hassfest image, which rejects any other.

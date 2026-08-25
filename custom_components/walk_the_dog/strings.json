@@ -147,5 +147,79 @@
         "heavy": "Heavy rain only (from 7.6 mm/h)"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "recommendation": {
+        "name": "Walk recommendation",
+        "state": {
+          "ok": "Walk as planned",
+          "earlier": "Go earlier",
+          "later": "Go later",
+          "no_dry_window": "No dry window"
+        },
+        "state_attributes": {
+          "direction": {
+            "name": "Direction"
+          },
+          "scheduled_start": {
+            "name": "Scheduled walk"
+          },
+          "recommended_start": {
+            "name": "Suggested walk"
+          },
+          "shift_min": {
+            "name": "Suggested shift"
+          },
+          "duration_min": {
+            "name": "Walk duration"
+          },
+          "risk": {
+            "name": "Rain risk"
+          },
+          "confidence": {
+            "name": "Confidence"
+          },
+          "expected_intensity": {
+            "name": "Expected intensity"
+          },
+          "degraded": {
+            "name": "Single source only"
+          },
+          "horizon_limited": {
+            "name": "Beyond the forecast horizon"
+          },
+          "sources": {
+            "name": "Per source"
+          },
+          "data_age_s": {
+            "name": "Data age"
+          },
+          "alerting": {
+            "name": "Alerting"
+          },
+          "polling": {
+            "name": "Polling"
+          },
+          "failover": {
+            "name": "Backup source in use"
+          },
+          "last_fetch": {
+            "name": "Last fetch"
+          }
+        }
+      }
+    },
+    "switch": {
+      "alerting": {
+        "name": "Alerting"
+      }
+    }
+  },
+  "common": {
+    "notification_title": "Walk the dog",
+    "notification_earlier": "Rain is expected around {scheduled}. Set off at {recommended} instead — {shift} minutes earlier — and the whole {duration}-minute walk should stay dry.",
+    "notification_later": "Rain is expected around {scheduled}. Wait until {recommended} — {shift} minutes later — and the whole {duration}-minute walk should stay dry.",
+    "notification_no_dry_window": "Rain is expected around {scheduled} and there is no dry {duration}-minute window nearby. Take a raincoat."
   }
 }

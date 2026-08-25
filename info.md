@@ -3,9 +3,10 @@
 > ### ⚠️ Work in progress — not ready for use
 >
 > There has been no release yet (version `0.1.0`). **Works today:** installation, the setup
-> wizard and the options flow. **Not yet:** the recommendation sensor, the enable switch,
-> notifications and events — nothing is fetched and nothing is predicted, so installing today
-> gives you configuration screens and no entities.
+> wizard, the options flow, and the whole prediction loop — recommendation sensor, alerting
+> switch, push notifications and the custom event. **Not yet:** Polish localization and the
+> integration icon, and the performance pass on low-end hardware. Real-world accuracy is
+> untested.
 >
 > Breaking changes land without warning, and there is no upgrade path between development
 > versions.

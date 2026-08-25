@@ -1,12 +1,15 @@
 """The walk-schedule model: what the three modes store, and what they mean.
 
 `schedule.py` is pure, so these tests are plain calls — no Home Assistant, no
-clock. The config flow writes exactly what `normalize_schedule` returns, and
-phase 6 reads exactly what `expand` returns; between them nothing else needs to
-know that "weekday_weekend" means Saturday starts the weekend.
+clock. The config flow writes exactly what `normalize_schedule` returns, and the
+coordinator reads exactly what `walks_from` returns; between them nothing else
+needs to know that "weekday_weekend" means Saturday starts the weekend.
 """
 
 from __future__ import annotations
+
+from datetime import UTC, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -26,6 +29,7 @@ from custom_components.walk_the_dog.schedule import (
     normalize_schedule,
     normalize_time,
     normalize_times,
+    walks_from,
 )
 
 
@@ -157,3 +161,125 @@ def test_expand_rejects_an_unknown_mode() -> None:
     """Same guard as normalization: no mode, no meaning."""
     with pytest.raises(ScheduleError):
         expand("fortnightly", {"all": ["07:00"]})
+
+
+#: The integration's home country, and the one whose DST rules matter for it.
+WARSAW = ZoneInfo("Europe/Warsaw")
+
+
+def test_walks_from_returns_the_next_occurrences_in_order() -> None:
+    """Two walks a day, chronologically, starting with the next one due."""
+    result = walks_from(
+        SCHEDULE_MODE_DAILY,
+        {"all": ["07:00", "18:30"]},
+        moment=datetime(2026, 8, 25, 10, 0, tzinfo=UTC),
+        tz=UTC,
+        count=3,
+    )
+
+    assert result == (
+        datetime(2026, 8, 25, 18, 30, tzinfo=UTC),
+        datetime(2026, 8, 26, 7, 0, tzinfo=UTC),
+        datetime(2026, 8, 26, 18, 30, tzinfo=UTC),
+    )
+
+
+def test_walks_from_includes_a_walk_starting_exactly_now() -> None:
+    """A walk due this very second is still ahead of us, not behind."""
+    moment = datetime(2026, 8, 25, 7, 0, tzinfo=UTC)
+
+    result = walks_from(SCHEDULE_MODE_DAILY, {"all": ["07:00"]}, moment=moment, tz=UTC, count=1)
+
+    assert result == (moment,)
+
+
+def test_walks_from_resolves_local_times_to_utc() -> None:
+    """07:00 in Warszawa is 05:00 UTC in August — the engine only ever sees UTC."""
+    result = walks_from(
+        SCHEDULE_MODE_DAILY,
+        {"all": ["07:00"]},
+        moment=datetime(2026, 8, 25, 0, 0, tzinfo=UTC),
+        tz=WARSAW,
+        count=1,
+    )
+
+    assert result == (datetime(2026, 8, 25, 5, 0, tzinfo=UTC),)
+
+
+def test_a_walk_time_survives_the_end_of_summer_time() -> None:
+    """07:00 stays 07:00 local across the October change, so its UTC offset moves."""
+    result = walks_from(
+        SCHEDULE_MODE_DAILY,
+        {"all": ["07:00"]},
+        moment=datetime(2026, 10, 23, 12, 0, tzinfo=UTC),
+        tz=WARSAW,
+        count=3,
+    )
+
+    # Poland leaves summer time in the small hours of Sunday 25 October 2026:
+    # CEST (UTC+2) before, CET (UTC+1) from that morning on.
+    assert result == (
+        datetime(2026, 10, 24, 5, 0, tzinfo=UTC),
+        datetime(2026, 10, 25, 6, 0, tzinfo=UTC),
+        datetime(2026, 10, 26, 6, 0, tzinfo=UTC),
+    )
+    assert [start.astimezone(WARSAW).hour for start in result] == [7, 7, 7]
+
+
+def test_walks_from_crosses_a_local_midnight() -> None:
+    """A late local walk is still ahead of a UTC moment that has rolled over."""
+    result = walks_from(
+        SCHEDULE_MODE_DAILY,
+        {"all": ["23:30"]},
+        moment=datetime(2026, 8, 25, 21, 0, tzinfo=UTC),
+        tz=WARSAW,
+        count=1,
+    )
+
+    assert result == (datetime(2026, 8, 25, 21, 30, tzinfo=UTC),)
+
+
+def test_walks_from_skips_a_day_with_no_walks() -> None:
+    """Weekend walks only: the next one is Saturday, not tomorrow."""
+    result = walks_from(
+        SCHEDULE_MODE_WEEKDAY_WEEKEND,
+        {"weekday": [], "weekend": ["09:00"]},
+        # 25 August 2026 is a Tuesday.
+        moment=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+        tz=UTC,
+        count=2,
+    )
+
+    assert result == (
+        datetime(2026, 8, 29, 9, 0, tzinfo=UTC),
+        datetime(2026, 8, 30, 9, 0, tzinfo=UTC),
+    )
+
+
+def test_walks_from_finds_a_single_weekly_walk() -> None:
+    """One walk a week still resolves — the lookahead covers a full week."""
+    schedule: dict[str, list[str]] = {key: [] for key in DAY_KEYS}
+    schedule["mon"] = ["07:00"]
+
+    result = walks_from(
+        SCHEDULE_MODE_PER_DAY,
+        schedule,
+        # A Tuesday: the next Monday is six days away.
+        moment=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+        tz=UTC,
+        count=1,
+    )
+
+    assert result == (datetime(2026, 8, 31, 7, 0, tzinfo=UTC),)
+
+
+def test_walks_from_returns_nothing_for_an_empty_week() -> None:
+    """No walk times, nothing to predict for — and no timer for the coordinator."""
+    result = walks_from(
+        SCHEDULE_MODE_DAILY,
+        {"all": []},
+        moment=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+        tz=UTC,
+    )
+
+    assert result == ()

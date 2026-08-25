@@ -15,7 +15,9 @@ from typing import Any
 import pytest
 
 from custom_components.walk_the_dog.const import INTENSITY_MM_H
+from custom_components.walk_the_dog.notifier import ALERT_DIRECTIONS, TEXT_PREFIX
 from custom_components.walk_the_dog.schedule import SCHEDULE_MODES
+from custom_components.walk_the_dog.sensor import OPTIONS
 
 COMPONENT = Path(__file__).parents[1] / "custom_components" / "walk_the_dog"
 CONFIG_FLOW = COMPONENT / "config_flow.py"
@@ -105,3 +107,29 @@ def test_schedule_modes_are_translated() -> None:
 def test_intensity_thresholds_are_translated() -> None:
     """Same for the intensity scale."""
     assert set(_selector_options("intensity_threshold")) == set(INTENSITY_MM_H)
+
+
+def test_every_sensor_state_is_translated() -> None:
+    """The sensor shows words, not the identifiers the engine works in."""
+    states = STRINGS["entity"]["sensor"]["recommendation"]["state"]
+
+    assert set(states) == set(OPTIONS)
+
+
+def test_both_entities_are_named() -> None:
+    """An entity without a translated name shows up as a raw placeholder."""
+    assert STRINGS["entity"]["sensor"]["recommendation"]["name"]
+    assert STRINGS["entity"]["switch"]["alerting"]["name"]
+
+
+def test_every_notification_has_a_text() -> None:
+    """A direction the notifier can announce needs something to announce it with.
+
+    They live under `common` because Home Assistant allows no other top-level key
+    for strings that belong to no form and no entity — see `notifier.py`.
+    """
+    expected = {f"{TEXT_PREFIX}title"} | {
+        f"{TEXT_PREFIX}{direction}" for direction in ALERT_DIRECTIONS
+    }
+
+    assert expected <= set(STRINGS["common"])

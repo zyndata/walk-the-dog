@@ -3,8 +3,7 @@
 PURE module: no I/O, no homeassistant imports, `now` is always a parameter.
 Walk times are configured in the HA local timezone and resolved to UTC per
 occurrence here (docs/ARCHITECTURE.md § Data flow, timezone rule) — the
-next-walk computation itself lands in phase 6; phase 5 owns the model the config
-flow writes and reads.
+next-walk computation (`walks_from`) is layered on top in phase 6.
 
 Storage shape (docs/CONFIG.md § Config entry data shape)::
 
@@ -18,6 +17,7 @@ not mean: `daily` keeps one list, `weekday_weekend` two, `per_day` seven.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
 from .const import (
@@ -28,6 +28,7 @@ from .const import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
+    from datetime import date, tzinfo
 
 #: Weekday slot keys in `datetime.weekday()` order — Monday is 0.
 DAY_KEYS: Final = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -53,6 +54,15 @@ _MAX_MINUTE: Final = 59
 
 #: ``HH:MM`` and ``HH:MM:SS`` are the two shapes the frontend's time input sends.
 _WITH_SECONDS: Final = 3
+
+_ONE_DAY: Final = timedelta(days=1)
+
+#: How far ahead `walks_from` looks before giving up. A schedule with a single
+#: walk a week still resolves; anything sparser has nothing to nowcast for.
+_HORIZON_DAYS: Final = 9
+
+#: Enough upcoming walks for the coordinator to find the one whose window is open.
+_DEFAULT_COUNT: Final = 8
 
 #: Error keys — the config flow shows them through `strings.json`.
 ERROR_INVALID_TIME: Final = "invalid_time"
@@ -124,3 +134,52 @@ def expand(mode: str, schedule: Mapping[str, Iterable[str]]) -> dict[int, tuple[
     if mode == SCHEDULE_MODE_PER_DAY:
         return {day: normalize_times(schedule.get(key) or ()) for day, key in enumerate(DAY_KEYS)}
     raise ScheduleError(ERROR_NO_WALK_TIMES)
+
+
+def walk_times_on(
+    per_day: Mapping[int, Iterable[str]], day: date, tz: tzinfo
+) -> tuple[datetime, ...]:
+    """Walk starts (UTC) for one local calendar day.
+
+    Times are configured in the local timezone and resolved to UTC per occurrence,
+    so a 07:00 walk stays at 07:00 local across a DST change instead of drifting by
+    an hour (docs/ARCHITECTURE.md § Data flow, timezone rule). A time that a
+    spring-forward skips resolves through the pre-transition offset, which lands the
+    walk at the first moment the clock actually reaches.
+    """
+    starts = []
+    for text in per_day.get(day.weekday(), ()):
+        hour, minute = (int(part) for part in normalize_time(text).split(":"))
+        starts.append(
+            datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz).astimezone(UTC)
+        )
+    return tuple(sorted(starts))
+
+
+def walks_from(
+    mode: str,
+    schedule: Mapping[str, Iterable[str]],
+    *,
+    moment: datetime,
+    tz: tzinfo,
+    count: int = _DEFAULT_COUNT,
+) -> tuple[datetime, ...]:
+    """The next `count` walk starts (UTC) at or after `moment`, chronologically.
+
+    Returns an empty tuple for a schedule with no walk times at all — there is
+    then nothing to predict for, and the coordinator arms no timer.
+    """
+    per_day = expand(mode, schedule)
+    if not any(per_day.values()):
+        return ()
+
+    # Start a day early: a late-evening local walk can still be ahead of `moment`
+    # in UTC when the local date has already rolled over.
+    day = moment.astimezone(tz).date() - _ONE_DAY
+    found: list[datetime] = []
+    for _ in range(_HORIZON_DAYS):
+        found.extend(start for start in walk_times_on(per_day, day, tz) if start >= moment)
+        if len(found) >= count:
+            break
+        day += _ONE_DAY
+    return tuple(sorted(found)[:count])

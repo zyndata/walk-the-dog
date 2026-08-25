@@ -510,11 +510,117 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 6 — Coordinator, entities, notifications, events
 
-- **Status:** not started
-- **Date:**
-- **What was built:**
+- **Status:** done (one acceptance criterion pending the user's manual smoke test — see below)
+- **Date:** 2026-08-25
+- **What was built:** the whole runtime, wiring phases 3–5 together.
+  `coordinator.py`: `WalkData` (the published result plus `payload()`, the single serialization
+  both outputs use) and `WalkCoordinator` — walk resolution, polling windows, the cycle
+  (registry fetch → cache maintenance → `build_consensus` → `recommend`), timer arming and the
+  enable gate. `schedule.py` gained `walk_times_on` and `walks_from`, still pure. `notifier.py`
+  (renamed from `notify.py`): arming at `T − E`, material-change gating, auto-mute, the event,
+  the translated texts. `entity.py`: the shared service-device base. `sensor.py`: the single
+  enum recommendation sensor. `switch.py`: the `RestoreEntity` alerting switch. `__init__.py`
+  now builds the coordinator, loads the frame cache and forwards both platforms.
+  `strings.json` / `translations/en.json` gained the `entity` section (both names, the sensor's
+  four states, every attribute label) and the notification texts. `docs/CONFIG.md` documents the
+  entities, sensor states and attributes, notification rules and the complete
+  `walk_the_dog_alert` payload; `docs/ARCHITECTURE.md` records the module renames and the
+  anchored cycle grid. Tests: `tests/test_coordinator.py`, `tests/test_notifier.py`,
+  `tests/test_entities.py`, a rewritten `tests/test_init.py`, and `walks_from` coverage in
+  `tests/test_schedule.py` — **48 new tests, 319 in total**, green with networking fully
+  disabled (`docker run --network none`). hassfest was run locally against the real action
+  image and passes.
 - **Decisions:**
+  - **`notify.py` became `notifier.py`.** A module named after a platform inside an integration
+    *is* that platform to Home Assistant. Shipping a non-platform `notify.py` is a trap for
+    anyone who later adds real notify-platform support, so the architecture's filename was
+    changed rather than kept. (Deviation from `docs/ARCHITECTURE.md`, recorded below.)
+  - **There is no `update_interval` at all.** The coordinator holds exactly one
+    `async_track_point_in_time` timer, re-armed in `_async_refresh_finished` after every cycle.
+    That is the only way "zero polling outside the window" can be structurally true rather than
+    a matter of an interval being long; it also makes every scheduling test exact.
+  - **The 10-minute cycle grid is anchored to the window start, not to the wall clock.** Since
+    `lead_time` (30 min) is a whole number of slots, a cycle then lands exactly on `T − E`. The
+    architecture promised "the notification fires at `T − E`"; anchored to the wall clock, a
+    07:15 walk would have been notified up to 10 minutes late. Recorded in
+    `docs/ARCHITECTURE.md` § Coordinator scheduling.
+  - **The coordinator starts disabled and the switch turns it on.** The alternative — start
+    enabled, let the switch turn it off — makes one fetch on every restart before the restored
+    state arrives, which contradicts "zero requests while the switch is off". Consequence,
+    accepted and documented: disabling the switch *entity* in the entity registry leaves the
+    integration permanently idle.
+  - **Notification texts live under the `common` key of `strings.json`.** hassfest rejects any
+    top-level key it does not know (verified: a `notifications` key fails validation), and
+    `common` is the only allowed home for a user-facing string that belongs to no form and no
+    entity. Keys carry a `notification_` prefix and are read at runtime through
+    `homeassistant.helpers.translation`, so phase 7 translates them like everything else.
+  - **One serialization for both outputs.** `WalkData.payload()` produces the sensor attributes
+    and the event payload from the same code, so an automation and the UI can never disagree
+    about what a recommendation said.
+  - **Scored fields are `null`, never `0`, when no source reaches the walk.** `risk`,
+    `confidence` and `expected_intensity` are omitted rather than defaulted — the same principle
+    as phase 4's "a slot no source covers is absent, never zero", carried out to the user-facing
+    contract.
+  - **A muted alert is suppressed, not queued.** The material-change state advances whether or
+    not the push went out, so coming home does not release a message about a decision that has
+    since moved on. `PLAN.md` says auto-mute "suppresses"; this makes that precise.
+  - **The active window is resolved from the current recommendation.** `_walk_end` is
+    `max(T, recommended_start) + D`, so a "go later" recommendation genuinely extends polling
+    past the scheduled walk, and the coordinator moves to the next walk exactly at that end.
+  - **No config-entry update listener is registered.** `OptionsFlowWithReload` (phase 5) forbids
+    combining the two; the entry reload is the only path an option change travels.
+  - **Both entities sit on one service device** named after the config entry, so the sensor and
+    the switch group together in the UI.
+- **Deviations from PLAN.md / earlier phases (recorded before proceeding):**
+  1. **`notify.py` → `notifier.py`** (reason above). `docs/ARCHITECTURE.md` § Module layout and
+     its data-flow diagram were updated to match.
+  2. **`entity.py` is a new module** not in the phase 1 layout — the shared `CoordinatorEntity`
+     base holding the device info. Two entities repeating the same `DeviceInfo` would be the
+     alternative; this is an addition, not a change of intent.
+  3. **The notification is dispatched from the ordinary update cycle, not from its own
+     time-point listener.** `docs/ARCHITECTURE.md` § Coordinator scheduling described a separate
+     listener armed at `T − E`. Anchoring the cycle grid to the window start makes a cycle land
+     exactly on `T − E`, so a second timer would fire at the same instant on the same data —
+     same behaviour, one timer fewer. Recorded in the doc.
+  4. **`walks_from` lives in `schedule.py`**, as phase 1 assigned it, but phase 5 had already
+     moved the rest of the schedule model there; phase 6 only added the next-walk computation on
+     top, as phase 5's deviation note anticipated.
+- **Manual smoke test — still to be run by the user (the one open acceptance criterion).**
+  The test instance is Home Assistant OS, so the deploy route is HACS, not `scripts/install.py`
+  (see *Repository made public*); this session deliberately did not write into the live config
+  folder, because overwriting a HACS-managed copy from a dev machine would confuse HACS's own
+  version tracking. Procedure:
+  1. HACS → **Walk the dog** → **Redownload** (default branch) → restart Home Assistant.
+  2. Settings → Devices & services → **Walk the dog**: the device should carry exactly two
+     entities, `sensor.walk_the_dog_walk_recommendation` and `switch.walk_the_dog_alerting`.
+  3. Outside a walk window the sensor is `unknown` with `polling: false` and `alerting: true`;
+     `scheduled_start` should name the next walk.
+  4. To simulate a risky walk without waiting: in the options flow set a walk time about
+     40 minutes ahead and the earlier margin to 10 minutes, so the polling window opens at once.
+     Within a cycle the sensor should populate `risk`, `confidence` and `sources`; if the
+     forecast is wet, a push notification arrives at `walk − 10 min`.
+  5. Turn the switch off and confirm the sensor's `polling` attribute stays `false` and nothing
+     further is fetched (Settings → System → Logs, debug logging for `walk_the_dog`).
+  Record the result here next session.
 - **Open questions carried forward:**
+  - **The manual smoke test above has not been run.** Everything is verified by the automated
+    suite and by hassfest; nothing has yet run against live providers inside a real Home
+    Assistant. First real-world contact is the item to close at the start of the next session.
+  - **Disabling the switch entity in the entity registry leaves the integration idle for good**
+    (consequence of the coordinator starting disabled). Harmless but surprising; revisit in
+    phase 8 if it proves confusing, e.g. by persisting the enabled flag on the coordinator
+    instead.
+  - The location cannot be changed after setup — `async_step_reconfigure` deferred (unchanged
+    from phase 5).
+  - Whether p90 for the LibreWXR disc needs tuning against real events — revisit in phase 8
+    (unchanged since phase 1).
+  - LibreWXR fuses NWP model layers into its tiles outside radar coverage — re-check in phase 8
+    if false alarms show up (unchanged from phase 3).
+  - **Tests cannot run natively on Windows** (HA imports `fcntl`); this phase was developed on
+    the Windows machine and its suite run in the documented Linux container with
+    `--network none`, which doubles as the offline proof. Lint, format and hassfest run there
+    too. Unchanged from phase 3.
+  - Two HACS ignores and the brands PR — revisit in phase 9 (unchanged).
 
 ## Phase 7 — Localization + branding
 

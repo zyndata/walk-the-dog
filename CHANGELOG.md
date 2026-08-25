@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Phase 6 coordinator: one shared `DataUpdateCoordinator` that runs a cycle every 10 minutes
+  only while a walk window is near — from `walk − earlier margin − 30 min` until the end of the
+  walk it recommends — and holds a single armed timer the rest of the time. No `update_interval`,
+  so an idle day costs zero requests and zero wakeups.
+- Cycle grid anchored to the polling-window start, so one cycle lands exactly on
+  `walk − earlier margin` — the promised notification moment — whatever minute the walk itself
+  is scheduled at.
+- Next-walk computation in `schedule.py` (`walks_from`, still pure): local walk times resolved
+  to UTC per occurrence, so a 07:00 walk stays at 07:00 local across a daylight-saving change.
+- One recommendation sensor for the next upcoming walk (`ok` / `earlier` / `later` /
+  `no_dry_window` / `unknown`), with the scheduled and suggested times, risk, confidence,
+  expected intensity, the per-source breakdown, data freshness and the required source
+  attributions in its attributes.
+- Alerting switch (`RestoreEntity`, default on). While it is off there are no timers, no
+  requests and no cycles; the coordinator starts in the off position and the switch restores
+  the real one, so a Home Assistant started with alerting disabled never reaches a provider.
+- Push notification through the configured `notify.mobile_app_*` service at
+  `walk − earlier margin`, re-sent only on a material change, never sent about a walk that looks
+  dry, and suppressed by the switch, by auto-mute, or by having no contributing source.
+- Optional `walk_the_dog_alert` event, fired whenever a notification would fire — including
+  when auto-mute suppresses the push — with the payload documented in `docs/CONFIG.md`.
+- English strings for both entities, their states and the notification texts.
+- 48 further tests (319 total, still green with networking disabled) covering the polling
+  windows, zero polling while alerting is off, switch persistence across a restart, sensor
+  states and attributes, notification and event dispatch, material change, auto-mute, and the
+  daylight-saving behaviour of the walk schedule.
+
+### Changed
+
+- `notify.py` renamed to `notifier.py`: a module named after a platform inside an integration
+  *is* that platform to Home Assistant, and this one is not a notify platform.
+- `docs/CONFIG.md` documents the entities, the sensor states and attributes, the notification
+  rules and the full `walk_the_dog_alert` payload schema.
+- Work-in-progress banners in `README.md` and `info.md` updated: the prediction loop works;
+  localization, branding and the performance pass are what remain.
+
 - Phase 5 setup wizard: location on a map pre-filled with the Home Assistant home, a walk
   schedule in one of three modes (same times every day, weekday/weekend split, or a full
   per-day schedule) with the times form adapting to the chosen mode, and the alert parameters

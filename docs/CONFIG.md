@@ -1,8 +1,8 @@
 # Configuration
 
-> Option semantics and defaults were finalized in phase 1; **phase 5 implemented the flows and
-> pinned the storage shape** — this document now describes what the code actually does. The
-> `walk_the_dog_alert` payload is still owned by phase 6 (see [PLAN.md](../PLAN.md)).
+> Option semantics and defaults were finalized in phase 1; phase 5 implemented the flows and
+> pinned the storage shape; **phase 6 added the entities, the notification and the
+> `walk_the_dog_alert` payload** below. This document describes what the code actually does.
 
 Only **one** Walk the dog entry can exist per Home Assistant (`single_config_entry` in
 `manifest.json`): one home, one schedule, one recommendation sensor. A second attempt aborts
@@ -50,16 +50,107 @@ Internal, not user-facing: `lead_time` = 30 min — how long before `T − earli
 starts so the decision moment has fresh data (decision in
 [ARCHITECTURE.md](ARCHITECTURE.md) § Coordinator scheduling & polling windows).
 
+## Entities
+
+Exactly two, both on one service device named after the config entry.
+
+| Entity | Id | What it is |
+|---|---|---|
+| Walk recommendation | `sensor.walk_the_dog_walk_recommendation` | What to do about the **next upcoming walk** — the walk the coordinator is currently watching |
+| Alerting | `switch.walk_the_dog_alerting` | Master switch. Off means no timers, no requests, no cycles and no notifications. Default on; the position survives a restart |
+
+### Sensor states
+
+| State | Meaning |
+|---|---|
+| `ok` | The scheduled walk window looks dry — go as planned |
+| `earlier` | Rain during the walk; a dry window of the full duration exists earlier |
+| `later` | Same, but the dry window is later |
+| `no_dry_window` | Rain during the walk and no dry window anywhere within the margins |
+| `unknown` | No source reaches the walk, or there is no walk to reach. **Never good news** |
+
+`unavailable` means the coordinator itself has no data — a bug or a failed setup, not a
+forecast outcome.
+
+### Sensor attributes
+
+Every key of the event payload below, plus four about the integration's own state:
+`alerting` (the switch), `polling` (inside a walk window right now), `failover` (MET Norway is
+standing in for Open-Meteo), `last_fetch` (ISO-8601 UTC), and `attribution` — the licence
+credits of the sources that actually contributed, which [DATA_SOURCES.md](DATA_SOURCES.md)
+obliges the integration to show.
+
 ## Notification behavior
 
-Fires at `T − earlier_margin`; re-notified only on material change (defined precisely in
-[ARCHITECTURE.md](ARCHITECTURE.md) § Walk-window evaluation). Suppressed by the enable switch
-and by auto-mute.
+Fires at `T − earlier_margin` — the last moment at which "go earlier" is still actionable. The
+update cycle grid is anchored to the polling-window start, and `lead_time` is a whole number of
+10-minute slots, so a cycle lands exactly on that moment whatever minute the walk is scheduled
+at.
+
+After the first message, every later cycle re-checks material change (defined precisely in
+[ARCHITECTURE.md](ARCHITECTURE.md) § Material change) and stays silent unless something really
+changed. Nothing is ever sent about a walk that looks dry: silence means "go as planned".
+
+Suppressed entirely by: the enable switch being off, the auto-mute entity not being `home`, or
+zero contributing sources. A muted alert is **suppressed, not queued** — coming home does not
+release a message about a decision that has since moved on.
+
+If the configured `notify.mobile_app_*` service is not registered (a phone configured before
+its companion-app service existed), a warning is logged and the cycle continues.
 
 ## Event payload
 
-TODO (phase 6): documented `walk_the_dog_alert` payload schema — the serialized
-`Recommendation` structure from [ARCHITECTURE.md](ARCHITECTURE.md) § Outputs.
+`walk_the_dog_alert` fires whenever a notification **would** fire — including when auto-mute
+suppresses the push, because an automation may well want to know while nobody is home. It is
+opt-in via the `fire_event` option. Times are ISO-8601 UTC.
+
+```json
+{
+  "direction": "earlier",
+  "scheduled_start": "2026-08-25T05:00:00+00:00",
+  "recommended_start": "2026-08-25T04:30:00+00:00",
+  "shift_min": -30,
+  "duration_min": 30,
+  "risk": 1.0,
+  "confidence": 0.8,
+  "expected_intensity": "moderate",
+  "degraded": false,
+  "horizon_limited": false,
+  "data_age_s": 0,
+  "muted": false,
+  "sources": [
+    {
+      "source_id": "icon_eu",
+      "state": "ok",
+      "verdict": "wet",
+      "contributed": true,
+      "weight": 0.8,
+      "age_s": 0,
+      "peak_mm_h": 3.0,
+      "peak_intensity": "moderate"
+    }
+  ]
+}
+```
+
+| Key | Type | Meaning |
+|---|---|---|
+| `direction` | `none` \| `earlier` \| `later` \| `no_dry_window` \| `unknown` | The engine's word; the sensor renders `none` as `ok` |
+| `scheduled_start` | ISO-8601 UTC \| `null` | The walk as configured |
+| `recommended_start` | ISO-8601 UTC \| `null` | Where to move it; equals `scheduled_start` when the walk is already dry, `null` when there is nowhere to move it |
+| `shift_min` | int \| `null` | Signed minutes; negative means earlier |
+| `duration_min` | int \| `null` | `average_walk_duration` |
+| `risk` | 0.0–1.0 \| `null` | Weighted fraction of sources predicting rain in the worst slot of the scheduled window. **Not a probability of rain** |
+| `confidence` | 0.0–1.0 \| `null` | Agreement between sources, capped by how many actually voted |
+| `expected_intensity` | `none` \| `light` \| `moderate` \| `heavy` \| `null` | Heaviest expected rain over the scheduled window |
+| `degraded` | bool | Some slot rested on a single source |
+| `horizon_limited` | bool | The walk reaches past what the sources forecast |
+| `data_age_s` | int \| `null` | Age of the freshest source that voted |
+| `muted` | bool | Auto-mute suppressed the push for this alert |
+| `sources` | list | One entry per source: its own verdict over the scheduled window, its status, its weight and its peak |
+
+`risk`, `confidence` and `expected_intensity` are `null` — never `0` — when no source reaches
+the scheduled window, so "we do not know" can never be read as "no rain".
 
 ## Config entry data shape
 
