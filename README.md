@@ -2,6 +2,20 @@
 
 *Polish: „Idź już z psem"*
 
+> [!WARNING]
+> **Work in progress — not ready for use.** There has been no release yet (version `0.1.0`);
+> the integration is being built phase by phase in the open.
+>
+> - **Works today:** installation, the full setup wizard (location, walk schedule, alert
+>   settings) and the options flow.
+> - **Not yet:** the recommendation sensor, the enable switch, notifications and events.
+>   Nothing is fetched and nothing is predicted — installing today gets you configuration
+>   screens and no entities.
+>
+> Breaking changes land without warning and there is no upgrade path between development
+> versions. See [CHANGELOG.md](CHANGELOG.md) for what has landed and [STATE.md](STATE.md)
+> for the phase currently in progress.
+
 A [Home Assistant](https://www.home-assistant.io/) custom integration that predicts whether it
 will rain during your recurring dog walks — and, when a walk is at risk, proactively suggests
 going out **earlier or later** so the walk stays dry.

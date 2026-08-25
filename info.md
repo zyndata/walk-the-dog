@@ -1,5 +1,15 @@
 # Walk the dog 🐕🌧️
 
+> ### ⚠️ Work in progress — not ready for use
+>
+> There has been no release yet (version `0.1.0`). **Works today:** installation, the setup
+> wizard and the options flow. **Not yet:** the recommendation sensor, the enable switch,
+> notifications and events — nothing is fetched and nothing is predicted, so installing today
+> gives you configuration screens and no entities.
+>
+> Breaking changes land without warning, and there is no upgrade path between development
+> versions.
+
 **Will it rain on your dog walk?** This integration watches precipitation nowcasts from
 multiple independent weather sources covering Poland, scores how much they agree, and — when
 one of your recurring walk times is at risk — proactively suggests going out **earlier or
