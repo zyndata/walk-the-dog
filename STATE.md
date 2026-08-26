@@ -1295,9 +1295,9 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   a walk window and zero with alerting off. Every figure is inside the budget it was measured
   against.
 
-- **Measured — publication lag** (live, 2026-08-26 18:47–19:42 UTC, 20 s polling, 11 CHMI runs
-  and 5 LibreWXR frames observed): **CHMI 18.2 s on ten runs of eleven and 68.1 s on the
-  eleventh**; **LibreWXR 78.1 / 84.6 / 98.1 / 98.5 / 158.1 s**.
+- **Measured — publication lag** (live, 2026-08-26 18:47–19:42 UTC, 20 s polling): **CHMI 18.2 s
+  minimum and median over 11 runs, 68.1 s on its worst**; **LibreWXR 78.1 s minimum, 91.4 s
+  median, 158.1 s worst over 6 frames**. Both settle margins sit above the worst lag seen.
 
 - **Decisions:**
   - **The budget stands; it was not revised.** Every ceiling in `docs/ARCHITECTURE.md` was met
