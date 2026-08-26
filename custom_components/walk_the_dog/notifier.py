@@ -16,10 +16,16 @@ those extra cycles from talking about the past.
 Nothing is ever sent about a walk that looks dry: silence means "go as planned".
 
 Who is interrupted is decided per walk, not per integration: each configured walk
-carries its own list of companion-app devices and its own mute switch
-(docs/CONFIG.md § Per-walk alerts), because the morning walk and the evening walk
-are often not the same person's job. A walk with no devices of its own falls back
-to the entry-wide default device.
+carries its own list of companion-app devices, its own mute switch and its own
+away entity (docs/CONFIG.md § Per-walk alerts), because the morning walk and the
+evening walk are often not the same person's job. The entry-wide device is added
+to every walk's list — it is the phone that always hears about a walk — and the
+combined list is de-duplicated, so naming that same phone on a walk as well still
+buys exactly one push.
+
+The entry-wide away entity works the other way round: it is a default a walk may
+replace, so the walk Anna is responsible for can fall silent when *Anna* leaves,
+not when whoever the entry names does.
 
 The `walk_the_dog_alert` event fires whenever a notification *would* fire, even
 when auto-mute suppresses the push — an automation may well want to know while
@@ -98,15 +104,21 @@ TAG_PREFIX: Final = "walk_the_dog_"
 class WalkTarget:
     """Who to interrupt about one particular walk, and whether to interrupt at all.
 
-    `services` empty means "use the entry-wide default device"; silencing a walk
-    is what `muted` is for, so an empty list can never be mistaken for one.
+    `services` holds the devices this walk adds to the entry-wide one, which is
+    always notified as well; silencing a walk is what `muted` is for, so an empty
+    list means "only the entry-wide device", never "notify nobody".
+
+    `away_entity` replaces the entry-wide away entity for this walk alone; `None`
+    means the walk is happy with whichever person the entry watches.
     """
 
     services: tuple[str, ...] = ()
     muted: bool = False
+    away_entity: str | None = None
 
 
-#: A walk the user has not given its own devices or mute switch.
+#: A walk the user never opened the notification step for: entry-wide device,
+#: entry-wide away entity, not muted.
 DEFAULT_TARGET: Final = WalkTarget()
 
 
@@ -143,19 +155,34 @@ class WalkNotifier:
         self._notified = None
         self._confirmed = False
 
-    @property
-    def away(self) -> bool:
-        """True while the tracked person or device is away from home."""
-        if not self._mute_entity:
+    def away_entity_for(self, target: WalkTarget) -> str | None:
+        """Whose absence silences this walk — its own person, else the entry's."""
+        return target.away_entity or self._mute_entity
+
+    def is_away(self, target: WalkTarget = DEFAULT_TARGET) -> bool:
+        """True while the person this walk watches is away from home.
+
+        An entity that has no state yet counts as away: a tracker Home Assistant
+        has not restored is not evidence that anybody is in.
+        """
+        entity_id = self.away_entity_for(target)
+        if not entity_id:
             return False
-        state = self.hass.states.get(self._mute_entity)
+        state = self.hass.states.get(entity_id)
         return state is None or state.state != STATE_HOME
 
     def services_for(self, target: WalkTarget) -> tuple[str, ...]:
-        """The devices this walk's push goes to — its own, else the default one."""
-        if target.services:
-            return target.services
-        return (self._default_service,) if self._default_service else ()
+        """Every device this walk's push goes to, each named exactly once.
+
+        The entry-wide device is always among them; a walk's own devices are extra
+        phones, not a replacement. `dict.fromkeys` is the de-duplication: the same
+        service listed on the walk and as the entry-wide default — or twice within
+        one walk — collapses to one recipient, and the order the user chose is kept.
+        """
+        services = [*target.services]
+        if self._default_service:
+            services.append(self._default_service)
+        return tuple(dict.fromkeys(services))
 
     async def async_process(
         self,
@@ -249,7 +276,7 @@ class WalkNotifier:
     ) -> None:
         """Fire the event and, unless muted, push. `key` None means a normal alert."""
         payload = data.payload()
-        muted = target.muted or self.away
+        muted = target.muted or self.is_away(target)
         payload["muted"] = muted
         payload["confirmation"] = key is not None
         if self._fire_event:

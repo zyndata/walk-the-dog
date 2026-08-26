@@ -7,7 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Polish localization.** The integration speaks Polish end to end — the setup wizard, the
+  options flow, every field description and warning, the entity and attribute names, the sensor's
+  states, the service, and the push notifications, which are looked up in the user's language at
+  the moment they are sent. A Polish Home Assistant calls the integration **„Idź już z psem"**,
+  and names its device that too, so entity names read in one language instead of half of each.
+  Home Assistant serves whichever language the user has set; nothing needs configuring. *(After
+  updating, restart Home Assistant — reloading the integration does not clear the frontend's
+  translation cache.)*
+
+- **An icon and a logo.** A rain-blue badge with a paw print under three falling drops, drawn by
+  `scripts/make_branding.py` so a colour or a proportion is a code change rather than a binary
+  edit. They live in [`branding/`](branding/) in exactly the layout the
+  [home-assistant/brands](https://github.com/home-assistant/brands) pull request needs. **Home
+  Assistant will keep showing a placeholder icon until that pull request is submitted and merged**
+  — that is phase 9; everything it needs is ready.
+
+### Changed
+
+- **The device is named from the translations, not from the config entry title.** Its name is the
+  prefix Home Assistant puts in front of every entity's friendly name, so it had to be
+  translatable. English installs see no difference. A device renamed by hand still wins.
+
+### Changed
+
+- **The entry-wide notification device is now notified about every walk**, instead of only the
+  walks that named no devices of their own. Reported from a live install: the field reappeared in
+  the options with no way to tell what it was for, and "fallback" is not a thing a settings screen
+  can convey in a label. "Always notify this device" is, and the per-walk lists are now plainly
+  additive — extra phones for that one walk. **One phone still receives exactly one push**: the
+  recipient list is de-duplicated both where a walk is stored and where the alert is dispatched,
+  so naming the same device in both places, or twice in one place, cannot notify it twice.
+  Anyone who was relying on a per-walk list to *replace* the entry-wide device should clear that
+  device, or mute the walk.
+
+### Added
+
+- **A per-walk away entity** (`away_entity`). "Mute alerts when this is away" watched one person
+  for the whole integration, which is wrong the moment two people share the dog: the morning walk
+  should fall silent when the person who does the morning walk leaves. Each walk's notification
+  step now takes its own optional person or device tracker, falling back to the entry-wide one
+  when left empty.
+
 ### Fixed
+
+- **The setup wizard's per-walk step explained nothing.** It arrived as an unlabelled "Options"
+  dialog — no title, no indication of *which* walk time it was configuring, and no description of
+  the mute switch — and `confirm_margin_min` reached the parameter form as its raw storage key.
+  Every field in both steps now carries a label and a full description, and the per-walk step
+  states the walk it is asking about, which of them it is, and where the always-notified device
+  comes from. (If the old text is still on screen after updating, Home Assistant is serving a
+  cached translation file — restart it, a reload of the integration is not enough.)
 
 - **A notification could recommend a time that had already passed.** Reported from the first live
   install: an alert arrived at 22:31 about a 21:15 walk, saying "rain is expected around 21:15,

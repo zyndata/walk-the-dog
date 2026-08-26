@@ -32,6 +32,7 @@ from custom_components.walk_the_dog.const import (
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
+    CONF_TARGET_AWAY_ENTITY,
     CONF_TARGET_MUTE,
     CONF_TARGET_SERVICES,
     CONF_WALK_DURATION_MIN,
@@ -409,6 +410,34 @@ async def test_each_walk_stores_its_own_devices_and_mute(hass: HomeAssistant) ->
             CONF_TARGET_SERVICES: ["mobile_app_evening"],
             CONF_TARGET_MUTE: True,
         },
+    }
+
+
+async def test_a_walk_stores_its_own_away_entity(hass: HomeAssistant) -> None:
+    """The walk Anna does can watch Anna, whoever the entry-wide person is."""
+    result = await run_wizard(
+        hass,
+        times={"all": ["07:00"]},
+        targets=[{CONF_TARGET_AWAY_ENTITY: "person.anna"}],
+        params={**PARAMS, CONF_AUTO_MUTE_ENTITY: "person.owner"},
+    )
+
+    assert result["options"][CONF_AUTO_MUTE_ENTITY] == "person.owner"
+    assert result["options"][CONF_WALK_TARGETS] == {
+        target_key("all", "07:00"): {CONF_TARGET_AWAY_ENTITY: "person.anna"}
+    }
+
+
+async def test_a_device_named_twice_on_one_walk_is_stored_once(hass: HomeAssistant) -> None:
+    """`notify.mobile_app_x` typed next to a picked `mobile_app_x` is one phone."""
+    result = await run_wizard(
+        hass,
+        times={"all": ["07:00"]},
+        targets=[{CONF_TARGET_SERVICES: ["mobile_app_anna", "notify.mobile_app_anna"]}],
+    )
+
+    assert result["options"][CONF_WALK_TARGETS] == {
+        target_key("all", "07:00"): {CONF_TARGET_SERVICES: ["mobile_app_anna"]}
     }
 
 

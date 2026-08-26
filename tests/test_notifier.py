@@ -21,6 +21,7 @@ from custom_components.walk_the_dog.const import (
     CONF_CONFIRM_MARGIN_MIN,
     CONF_FIRE_EVENT,
     CONF_NOTIFY_SERVICE,
+    CONF_TARGET_AWAY_ENTITY,
     CONF_TARGET_MUTE,
     CONF_TARGET_SERVICES,
     CONF_WALK_TARGETS,
@@ -57,6 +58,7 @@ IDLE = datetime(2026, 8, 25, 0, 0, tzinfo=UTC)
 
 NOTIFY_SERVICE = "mobile_app_test"
 MUTE_ENTITY = "person.owner"
+WALK_MUTE_ENTITY = "person.walker"
 
 #: Two phones that share the dog: the standard walk is addressed to them by name.
 MORNING_PHONE = "mobile_app_morning"
@@ -145,6 +147,32 @@ async def test_the_alert_arrives_at_the_earlier_margin(
     assert len(alerts) == 1
     assert alerts[0].data["direction"] == DIRECTION_EARLIER
     assert alerts[0].data["muted"] is False
+
+
+async def test_the_alert_speaks_the_users_language(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """A Polish Home Assistant is told in Polish, from `translations/pl.json`.
+
+    The whole chain is under test here, not the file: the texts are looked up at
+    dispatch time under `hass.config.language`, and a key that does not resolve is
+    sent as the bare key — which is exactly what would reach the phone if the
+    Polish file were missing, misnamed or missing this string.
+    """
+    await hass.config.async_update(language="pl")
+
+    await run_cycle(hass, freezer, WINDOW_START)
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
+    sent = notifications[0].data
+    assert sent["title"] == "Idź już z psem"
+    assert sent["message"].startswith("Deszcz spodziewany około 05:00.")
+    assert "Wyjdź o 04:30" in sent["message"]
+    assert sent["data"]["actions"][0]["title"] == "Już byliśmy"
 
 
 async def test_an_unchanged_recommendation_is_not_repeated(
@@ -326,23 +354,25 @@ async def setup_with_target(
     fetch: FakeFetch,
     freezer: FrozenDateTimeFactory,
     target: dict[str, object],
+    *,
+    auto_mute: str | None = None,
 ) -> WalkCoordinator:
-    """Set the entry up with a default device and one walk-specific setting."""
-    hass.config_entries.async_update_entry(
-        entry,
-        options={
-            **entry.options,
-            CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
-            CONF_FIRE_EVENT: True,
-            CONF_WALK_TARGETS: {WALK_KEY: target},
-        },
-    )
+    """Set the entry up with an always-notified device and one walk-specific setting."""
+    options: dict[str, object] = {
+        **entry.options,
+        CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
+        CONF_FIRE_EVENT: True,
+        CONF_WALK_TARGETS: {WALK_KEY: target},
+    }
+    if auto_mute:
+        options[CONF_AUTO_MUTE_ENTITY] = auto_mute
+    hass.config_entries.async_update_entry(entry, options=options)
     freezer.move_to(IDLE)
     fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
     return await setup_entry(hass, entry)
 
 
-async def test_a_walk_notifies_its_own_devices_instead_of_the_default(
+async def test_a_walks_own_devices_are_notified_as_well_as_the_default(
     hass: HomeAssistant,
     entry: MockConfigEntry,
     fetch: FakeFetch,
@@ -350,14 +380,103 @@ async def test_a_walk_notifies_its_own_devices_instead_of_the_default(
     notifications: list[ServiceCall],
     morning: list[ServiceCall],
 ) -> None:
-    """The morning walk is one person's job, so only that phone is interrupted."""
+    """A walk's devices are extra phones, not a replacement for the default one."""
     await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE]})
 
     await run_cycle(hass, freezer, ARM_AT)
 
     assert len(morning) == 1
     assert "05:00" in morning[0].data["message"]
+    assert len(notifications) == 1
+    assert notifications[0].data["message"] == morning[0].data["message"]
+
+
+async def test_the_same_device_in_both_places_is_notified_once(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Naming the always-notified phone on a walk as well must not double the push.
+
+    Easy to do by accident now that the two lists are added together rather than
+    chosen between, and two identical alerts on one phone is exactly the noise this
+    integration exists to avoid.
+    """
+    await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [NOTIFY_SERVICE]})
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
+
+
+async def test_one_device_listed_twice_on_a_walk_is_notified_once(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+) -> None:
+    """A stored duplicate — from an older entry or a typed custom value — collapses."""
+    await setup_with_target(
+        hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE, MORNING_PHONE]}
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(morning) == 1
+
+
+async def test_a_walk_follows_its_own_away_entity(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """The walk Anna does falls silent when Anna leaves, not when the entry's person does."""
+    hass.states.async_set(MUTE_ENTITY, STATE_HOME)
+    hass.states.async_set(WALK_MUTE_ENTITY, STATE_NOT_HOME)
+    await setup_with_target(
+        hass,
+        entry,
+        fetch,
+        freezer,
+        {CONF_TARGET_AWAY_ENTITY: WALK_MUTE_ENTITY},
+        auto_mute=MUTE_ENTITY,
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
     assert notifications == []
+    assert len(alerts) == 1
+    assert alerts[0].data["muted"] is True
+
+
+async def test_a_walks_own_away_entity_overrides_the_entry_wide_one(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Away from home himself, Piotr's walk still alerts while Piotr is in."""
+    hass.states.async_set(MUTE_ENTITY, STATE_NOT_HOME)
+    hass.states.async_set(WALK_MUTE_ENTITY, STATE_HOME)
+    await setup_with_target(
+        hass,
+        entry,
+        fetch,
+        freezer,
+        {CONF_TARGET_AWAY_ENTITY: WALK_MUTE_ENTITY},
+        auto_mute=MUTE_ENTITY,
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
 
 
 async def test_a_walk_can_address_several_devices(
@@ -388,7 +507,7 @@ async def test_a_walk_with_no_devices_of_its_own_uses_the_default(
     notifications: list[ServiceCall],
     morning: list[ServiceCall],
 ) -> None:
-    """An empty device list means "the default device", never "nobody"."""
+    """An empty device list means "only the always-notified device", never "nobody"."""
     await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_MUTE: False})
 
     await run_cycle(hass, freezer, ARM_AT)

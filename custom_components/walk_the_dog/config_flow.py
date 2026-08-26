@@ -51,6 +51,7 @@ from .const import (
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
+    CONF_TARGET_AWAY_ENTITY,
     CONF_TARGET_MUTE,
     CONF_TARGET_SERVICES,
     CONF_WALK_DURATION_MIN,
@@ -63,6 +64,7 @@ from .const import (
     DEFAULT_LATER_MARGIN_MIN,
     DEFAULT_RADIUS_KM,
     DOMAIN,
+    INTEGRATION_NAME,
     INTENSITY_MM_H,
     MARGIN_STEP_MIN,
     MAX_CONFIRM_MARGIN_MIN,
@@ -77,6 +79,7 @@ from .const import (
     NOWCAST_HORIZON_MIN,
     RADIUS_STEP_KM,
     SCHEDULE_MODE_DAILY,
+    TITLE_CATEGORY,
     WALK_DURATION_STEP_MIN,
     WALK_DURATION_WARN_MIN,
 )
@@ -106,6 +109,10 @@ ERROR_INVALID_NOTIFY_SERVICE: Final = "invalid_notify_service"
 #: live there and are read back at runtime like the notification texts are.
 SLOT_LABEL_CATEGORY: Final = "common"
 SLOT_LABEL_PREFIX: Final = "walk_slot_"
+
+#: Stands in for the always-notified device in the per-walk step's description while
+#: the wizard has not asked for it yet. Lives in `common` for the same reason.
+DEFAULT_DEVICE_UNSET_KEY: Final = "default_device_unset"
 
 #: Sentinel for "this field has no default" — `None` is a legitimate default.
 _NO_DEFAULT: Final = object()
@@ -193,19 +200,26 @@ def _collect_target(user_input: Mapping[str, Any]) -> dict[str, Any]:
 
     A walk left at the defaults stores nothing at all, so `walk_targets` only ever
     holds walks the user actually said something about.
+
+    The device list is de-duplicated here rather than at dispatch alone: a custom
+    value typed with the `notify.` prefix normalizes to a name already picked from
+    the dropdown, and storing it twice would show the user a list that lies about
+    how many phones this walk reaches.
     """
-    services = [
+    services = dict.fromkeys(
         service
         for service in (
             _validate_notify_service(raw) for raw in user_input.get(CONF_TARGET_SERVICES) or ()
         )
         if service
-    ]
+    )
     target: dict[str, Any] = {}
     if services:
-        target[CONF_TARGET_SERVICES] = services
+        target[CONF_TARGET_SERVICES] = list(services)
     if user_input.get(CONF_TARGET_MUTE):
         target[CONF_TARGET_MUTE] = True
+    if away_entity := user_input.get(CONF_TARGET_AWAY_ENTITY):
+        target[CONF_TARGET_AWAY_ENTITY] = away_entity
     return target
 
 
@@ -366,6 +380,9 @@ class _WalkFlowSteps:
                 vol.Optional(
                     CONF_TARGET_MUTE, default=bool(source.get(CONF_TARGET_MUTE, False))
                 ): BooleanSelector(),
+                _marker(CONF_TARGET_AWAY_ENTITY, source, required=False): EntitySelector(
+                    EntitySelectorConfig(domain=["person", "device_tracker"])
+                ),
             }
         )
         return self.async_show_form(
@@ -377,8 +394,22 @@ class _WalkFlowSteps:
                 "time": time,
                 "index": str(self._walk_index()),
                 "total": str(self._walk_total()),
+                "default_device": await self._async_default_device_label(),
             },
         )
+
+    async def _async_default_device_label(self) -> str:
+        """The always-notified device, named here so this step is not a mystery.
+
+        The wizard asks about walks *before* it asks for that device, so on a fresh
+        install there is nothing to name yet. The placeholder then falls back to a
+        translated phrase pointing at the field the user is about to meet, rather
+        than leaving a hole in the sentence.
+        """
+        current: Mapping[str, Any] = self._params or self._current
+        if device := str(current.get(CONF_NOTIFY_SERVICE) or "").strip():
+            return device
+        return await self._async_common_text(DEFAULT_DEVICE_UNSET_KEY)
 
     def _walk_total(self) -> int:
         """How many walks the notification steps will ask about in total."""
@@ -390,11 +421,14 @@ class _WalkFlowSteps:
 
     async def _async_slot_label(self, slot: str) -> str:
         """The days a walk belongs to, in the user's language."""
+        return await self._async_common_text(f"{SLOT_LABEL_PREFIX}{slot}", fallback=slot)
+
+    async def _async_common_text(self, key: str, fallback: str = "") -> str:
+        """One `common` string in the user's language, for prose that is not a field."""
         texts = await async_get_translations(
             self.hass, self.hass.config.language, SLOT_LABEL_CATEGORY, {DOMAIN}
         )
-        key = f"component.{DOMAIN}.{SLOT_LABEL_CATEGORY}.{SLOT_LABEL_PREFIX}{slot}"
-        return texts.get(key, slot)
+        return texts.get(f"component.{DOMAIN}.{SLOT_LABEL_CATEGORY}.{key}", fallback)
 
     def _params_schema(self) -> vol.Schema:
         """Step 3's schema, in the order docs/CONFIG.md lists the options."""
@@ -570,10 +604,23 @@ class WalkTheDogConfigFlow(_WalkFlowSteps, ConfigFlow, domain=DOMAIN):
     async def _async_finish(self) -> ConfigFlowResult:
         """Create the config entry: location in data, everything else in options."""
         return self.async_create_entry(
-            title="Walk the dog",
+            title=await self._async_entry_title(),
             data={CONF_LOCATION: self._location},
             options=self._options(),
         )
+
+    async def _async_entry_title(self) -> str:
+        """The integration's name in the user's language, for the entry label.
+
+        A title is stored once and never re-translated, so this is the language the
+        entry was created in rather than the language it is read in — but a Polish
+        install listing an English entry under a Polish heading is the worse of the
+        two, and the user can rename the entry either way.
+        """
+        texts = await async_get_translations(
+            self.hass, self.hass.config.language, TITLE_CATEGORY, {DOMAIN}
+        )
+        return texts.get(f"component.{DOMAIN}.{TITLE_CATEGORY}", INTEGRATION_NAME)
 
 
 class WalkTheDogOptionsFlow(_WalkFlowSteps, OptionsFlowWithReload):

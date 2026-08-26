@@ -1,7 +1,15 @@
-"""Shared entity base: the one device both entities belong to.
+"""Shared entity base: the one device every entity belongs to.
 
 There is exactly one config entry (`single_config_entry`), so there is exactly one
-device — the walk location — and the sensor and the switch hang off it together.
+device — the walk location — and the sensor, the binary sensor and the switch hang
+off it together.
+
+The device is named from `strings.json` -> `device.service.name` rather than from
+the config entry title, because that name is what Home Assistant prefixes every
+entity's friendly name with: naming it from a translation is what makes a Polish
+install read "Idź już z psem — Zalecenie spaceru" instead of half-translating it.
+A user who wants a different name can still rename the device itself, which wins
+over both.
 """
 
 from __future__ import annotations
@@ -11,7 +19,7 @@ from typing import TYPE_CHECKING
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DEVICE_TRANSLATION_KEY, DOMAIN, INTEGRATION_NAME
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -32,8 +40,8 @@ class WalkEntity(CoordinatorEntity["WalkCoordinator"]):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             entry_type=DeviceEntryType.SERVICE,
-            manufacturer="Walk the dog",
-            name=entry.title,
+            manufacturer=INTEGRATION_NAME,
+            translation_key=DEVICE_TRANSLATION_KEY,
         )
 
 

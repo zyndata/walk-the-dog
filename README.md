@@ -1,3 +1,5 @@
+<img src="branding/custom_integrations/walk_the_dog/logo.png" alt="Walk the dog" width="420">
+
 # Walk the dog 🐕🌧️
 
 *Polish: „Idź już z psem"*
@@ -7,10 +9,13 @@
 > the integration is being built phase by phase in the open.
 >
 > - **Works today:** installation, the full setup wizard (location, walk schedule, alert
->   settings), the options flow, and the whole prediction loop — the recommendation sensor,
->   the alerting switch, push notifications and the `walk_the_dog_alert` event.
-> - **Not yet:** Polish localization and the integration icon (phase 7), and the performance
->   pass on low-end hardware (phase 8). Real-world accuracy is untested.
+>   settings), the options flow, the whole prediction loop — the recommendation sensor,
+>   the alerting switch, push notifications and the `walk_the_dog_alert` event — and full
+>   English and Polish localization.
+> - **Not yet:** the performance pass on low-end hardware (phase 8), and the
+>   [home-assistant/brands](https://github.com/home-assistant/brands) submission (phase 9),
+>   until which Home Assistant still shows a placeholder icon rather than the one in
+>   [branding/](branding/). Real-world accuracy is untested.
 >
 > Breaking changes land without warning and there is no upgrade path between development
 > versions. See [CHANGELOG.md](CHANGELOG.md) for what has landed and [STATE.md](STATE.md)

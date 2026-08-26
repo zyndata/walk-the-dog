@@ -38,6 +38,7 @@ This creates `.venv/` with Python 3.14, installs the pinned dev dependencies fro
 | `python scripts/test.py [pytest args]` | run the test suite (e.g. `python scripts/test.py -k manifest`) |
 | `python scripts/install.py` | deploy `custom_components/walk_the_dog/` into a local HA instance |
 | `python scripts/make_chmi_fixtures.py` | re-record `tests/fixtures/chmi/` from opendata.chmi.cz |
+| `python scripts/make_branding.py` | redraw the icon and logo in `branding/` |
 
 Tests use `pytest-homeassistant-custom-component` and recorded fixtures — they must pass with
 no network access.
@@ -48,6 +49,22 @@ from opendata.chmi.cz, and synthesizes two extra frames on the same geometry (no
 echo only over Praha) to prove negatives a recorded frame cannot. **The expected mm/h values in
 `tests/test_chmi.py` are pinned to the recorded bytes**, so re-recording means recomputing them —
 which is deliberate, and is why it is a separate script rather than something the suite does.
+
+### Translations
+
+`strings.json` is the source of truth; `translations/en.json` is a byte-identical copy of it and
+`translations/pl.json` is the Polish translation. Editing a user-facing string means editing all
+three — `tests/test_strings.py` fails otherwise, and it is the only check `pl.json` has:
+`hassfest` validates `strings.json` and `en.json` for a custom integration and ignores every
+other language file.
+
+The tests check that the Polish file has every key the English one has, that no value is empty,
+that no value was left in English, and that every `{placeholder}` survived translation — the
+last one matters because a mistyped placeholder reaches the phone as literal `{recommended}`.
+
+In a running Home Assistant, a changed translation needs a **full restart**. Reloading the
+integration re-reads the code but not the frontend's translation cache, which is how a step can
+appear with raw `walk_the_dog::config::step::…` labels next to a fully labelled one.
 
 ### Tests do not run natively on Windows
 

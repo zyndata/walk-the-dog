@@ -11,6 +11,20 @@ from typing import Final
 
 DOMAIN: Final = "walk_the_dog"
 
+#: The untranslated name, exactly as `manifest.json` carries it. A brand, so it is
+#: the same in every language: it labels the device's manufacturer, and it is what
+#: the config entry falls back to when the translated title cannot be read.
+INTEGRATION_NAME: Final = "Walk the dog"
+
+#: `strings.json` -> top-level `title`, the integration's name in the user's
+#: language. Home Assistant exposes it as a translation category of its own.
+TITLE_CATEGORY: Final = "title"
+
+#: `strings.json` -> `device.<key>.name`. The device name is the prefix Home
+#: Assistant puts in front of every entity's friendly name, so it is translated
+#: rather than taken from the config entry title (see `entity.py`).
+DEVICE_TRANSLATION_KEY: Final = "service"
+
 # Config / option keys (semantics in docs/CONFIG.md)
 CONF_LOCATION: Final = "location"
 CONF_RADIUS_KM: Final = "radius_km"
@@ -29,6 +43,7 @@ CONF_CONFIRM_MARGIN_MIN: Final = "confirm_margin_min"
 # Keys inside one walk's entry of `walk_targets` (docs/CONFIG.md § Per-walk alerts)
 CONF_TARGET_SERVICES: Final = "notify_services"
 CONF_TARGET_MUTE: Final = "mute"
+CONF_TARGET_AWAY_ENTITY: Final = "away_entity"
 
 # Schedule modes (docs/CONFIG.md, step 2)
 SCHEDULE_MODE_DAILY: Final = "daily"

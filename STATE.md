@@ -1023,13 +1023,149 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     machine (Windows), only the offline pytest suite. CI covers it on push.
   - Everything else carried forward from the earlier entries is unchanged.
 
+## Config-flow clarity pass (out of phase, from live install feedback)
+
+- **Status:** done
+- **Date:** 2026-08-26
+- **What was built:** rewritten `strings.json` / `translations/en.json` for the `walk_target` and
+  `params` steps, an additive-and-de-duplicated notification model, and a per-walk `away_entity`.
+- **Decisions:**
+  - **`notify_service` is now "Always notify this device", not a fallback.** The maintainer's
+    report was "why is notification device in the options *again*?" — a field whose meaning is
+    "used only when the other field is empty" cannot be made self-evident in a settings screen,
+    because nothing on screen shows the other field's state. Additive can: this device always
+    hears, the per-walk lists add more phones. It is a behaviour change for anyone using an empty
+    per-walk list to mean "replace the default", and the changelog says so.
+  - **De-duplication in two places, deliberately.** `_collect_target` normalizes and de-duplicates
+    what one walk stores (so `notify.mobile_app_x` typed as a custom value collapses onto a picked
+    `mobile_app_x`), and `WalkNotifier.services_for` de-duplicates the union at dispatch. The
+    second is what protects entries stored before this rule existed; the first is what stops the
+    options form from showing the user a list that lies about how many phones a walk reaches.
+  - **Per-walk `away_entity` rather than a per-walk checkbox.** A checkbox can only say "also obey
+    the entry-wide person"; the actual requirement is that the walk Anna does falls silent when
+    *Anna* leaves. The entity picker is a superset and costs one more optional field. It falls back
+    to `auto_mute_entity` when empty, so nothing changes for an existing entry.
+  - **`{default_device}` is a description placeholder with a translated fallback.** The wizard asks
+    about walks *before* it asks for the always-notified device, so on a fresh install there is
+    nothing to name; `common.default_device_unset` fills the hole with a phrase pointing at the
+    field the user is about to meet. Placeholders are used only in `description`, never in `title`
+    or `data_description` — those substitutions are frontend behaviour this repo has not verified,
+    and a literal `{time}` on screen is worse than a slightly longer sentence.
+- **Open questions carried forward:**
+  - **The reported symptom was partly a stale translation cache, not only thin copy.** The
+    screenshots showed an unlabelled `walk_target` step next to a fully labelled `params` step —
+    a combination no commit in this repo produces. Home Assistant was serving a cached
+    `translations/en.json` from before `walk_target` existed; a full restart is needed, an
+    integration reload is not enough. Worth a line in the install docs in phase 9.
+  - `hassfest` still unrun on this machine (Windows); CI covers it on push. Unchanged.
+
 ## Phase 7 — Localization + branding
 
-- **Status:** not started
-- **Date:**
+- **Status:** done
+- **Date:** 2026-08-26
 - **What was built:**
+  - `translations/pl.json` — the whole integration in Polish: both flows (every title,
+    description, field label, `data_description`, warning step and error), both selectors, the
+    device, the entity names, the sensor's four states, all 22 attribute labels, the service and
+    its exception, and the `common` block (notification texts, the **Już byliśmy** button, the
+    day labels the per-walk step's description is built from).
+  - `strings.json` / `translations/en.json` gained a top-level `title` and a `device` section.
+    The top-level `title` is what Home Assistant lets a translation override the integration's
+    name with; `device.service.name` names the one service device.
+  - `entity.py`: the device is now `DeviceInfo(translation_key=...)` instead of
+    `name=entry.title`, and `manufacturer` comes from the new `INTEGRATION_NAME` constant.
+  - `config_flow.py`: the config entry is titled with the translated name (`TITLE_CATEGORY`
+    lookup, falling back to `INTEGRATION_NAME`).
+  - `const.py`: `INTEGRATION_NAME`, `TITLE_CATEGORY`, `DEVICE_TRANSLATION_KEY`.
+  - `scripts/make_branding.py` + `branding/custom_integrations/walk_the_dog/` — `icon.png`
+    (256), `icon@2x.png` (512), `logo.png` / `logo@2x.png` (1140x256 / 2278x512) and a
+    `dark_logo` pair. `branding/README.md` holds the design rationale, the brands size rules
+    checked against the upstream README on 2026-08-26, and the step-by-step for the phase 9
+    pull request.
+  - Docs: `docs/CONFIG.md` § Language (what is translated, what is deliberately not, and why),
+    `docs/DEVELOPMENT.md` § Translations, README/`info.md` banners updated to match reality.
+  - Tests: the Polish parity suite in `tests/test_strings.py` (every key present, nothing empty,
+    nothing left in English, every `{placeholder}` preserved), the translated device name in
+    `tests/test_entities.py`, and an end-to-end Polish notification in `tests/test_notifier.py`.
+    **13 new tests, 465 in total**, green with networking fully disabled
+    (`docker run --network none`). `ruff` clean; hassfest run locally against the real action
+    image and green, with no warnings.
 - **Decisions:**
+  - **The localized name reaches the user through three separate mechanisms, because Home
+    Assistant has no single one.** The top-level `title` renames the integration in the UI;
+    `device.service.name` renames the device, which is the prefix on every entity's friendly
+    name; and `common.notification_title` is the push title. All three carry "Idź już z psem" in
+    `pl.json`, and a test pins that they agree — one of them left in English would produce a
+    screen that is half-translated.
+  - **The device name comes from a translation, not from the config entry title.** An entry
+    title is stored once, in the language it was created in, and can never be re-translated. The
+    device name is what Home Assistant prefixes entity names with, so it is the one that had to
+    move. The cost, accepted: renaming the *entry* no longer renames the device. Renaming the
+    device does, and that is the control the frontend actually offers.
+  - **The config entry is still given a title, now the translated one.** A fresh Polish install
+    gets an entry called "Idź już z psem"; existing entries keep theirs. It is stored, not
+    re-translated later — but an English entry sitting under a Polish heading is the worse of the
+    two states.
+  - **`hassfest` does not check `pl.json` at all** — for a custom integration it validates
+    `strings.json` and `translations/en.json` and ignores every other language file (verified by
+    reading `script/hassfest/translations.py` in the action image). The parity tests are
+    therefore not belt-and-braces, they are the only check that exists: keys, emptiness,
+    placeholders, and "not left in English". The placeholder test is the one that matters most —
+    `notifier.py` falls back to the *unformatted* template when a placeholder does not resolve,
+    so a mistyped `{recommended}` would reach the phone literally.
+  - **A Polish install will get Polish entity IDs.** Home Assistant generates them from the
+    device and entity names in the language the entity was first created in. This is Home
+    Assistant's own behaviour for every integration that translates its entity names, it happens
+    once and never again, and the IDs can be renamed — so it is accepted rather than fought.
+    Everything that is an *identifier* stays English regardless: the domain, the event name, the
+    service name, and every key and value in the event payload and the sensor attributes.
+  - **The audit for hard-coded user-facing strings was run over the AST, not by eye.** Every
+    string constant in `custom_components/walk_the_dog/` that is not a docstring and contains a
+    space was listed and classified. What remains is: log messages (English by convention, and
+    not user-facing), `INTEGRATION_NAME` (a brand), and the five provider attribution strings in
+    `sources/base.py` — those are licence text the providers require verbatim, and Home
+    Assistant's `attribution` attribute is not translatable anyway. `SourceStatus.detail` prose
+    stays internal: it never enters `payload()`, so it cannot leak into the sensor or the event.
+  - **The brand images are generated, not drawn by hand.** `scripts/make_branding.py` composes
+    them from primitives at 4x and reduces with LANCZOS. A committed PNG nobody can regenerate is
+    a dead end the first time a colour needs changing.
+  - **A paw print, not a dog.** The icon is rendered at about 24 px in the integrations list; a
+    dog silhouette does not survive that reduction and a paw plus three drops does, while still
+    saying "pet" and "rain".
+  - **The `icon.png`/`logo.png` "fallback" from `PLAN.md` is served from `branding/`, not from
+    the integration folder.** Home Assistant never loads brand images out of a custom
+    integration's directory — it goes to `brands.home-assistant.io` and shows a placeholder when
+    there is nothing there — so a copy inside `custom_components/walk_the_dog/` would be dead
+    weight that hassfest does not know about and that would drift. The README shows the logo from
+    `branding/` instead, which is the only place either file can actually be seen before the
+    brands pull request lands.
+- **Deviations from PLAN.md (recorded before proceeding):**
+  1. **Brand assets live in `branding/custom_integrations/walk_the_dog/`, not in the integration
+     folder** (reason above). The plan's "ship icon.png/logo.png in the repo as fallback" is met
+     by the files being in the repo and shown in the README.
+  2. **A `dark_logo` pair is shipped in addition to the four required images.** Not asked for;
+     the wordmark's ink is unreadable on a dark theme otherwise. `dark_icon` is deliberately
+     absent — the badge needs no dark variant.
+  3. **The `device` section, the top-level `title` and the translated entry title are additions
+     to phase 5/6 code** that phase 7 needed in order to have anywhere to put the localized name.
 - **Open questions carried forward:**
+  - **The brands pull request is prepared but not opened** — phase 9, along with dropping the
+    last `ignore: brands` from the validation workflow. Until it merges, the frontend shows a
+    placeholder icon. If the brands CI objects to non-interlaced PNGs (Pillow cannot write
+    interlaced) or to a `dark_logo` without a `dark_icon`, `branding/README.md` says what to do
+    in each case.
+  - **Nobody has yet read the Polish strings in a running Home Assistant.** The texts are pinned
+    by tests and the dispatch path is proven end to end, but tone and length on a real phone
+    screen and in a real settings form are worth one pass by a Polish speaker — the maintainer.
+  - **Actionable notification buttons beyond "Already went"** (`walk_the_dog.extend`) — still not
+    built, and the strings are now frozen for it. Unchanged from the previous entries.
+  - **The manual smoke test from phase 6 has still not been recorded here**, and now also covers
+    the language switch and the device name.
+  - `PUBLISH_SETTLE` is still an estimate; measure it in phase 8. Unchanged.
+  - Tests still cannot run natively on Windows (HA imports `fcntl`); this phase was developed on
+    the Windows machine, its suite run in the documented Linux container with `--network none`,
+    and hassfest run against the real action image in Docker. Unchanged.
+  - Everything else carried forward from the earlier entries is unchanged.
 
 ## Phase 8 — Performance pass
 

@@ -47,6 +47,7 @@ from .const import (
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
+    CONF_TARGET_AWAY_ENTITY,
     CONF_TARGET_MUTE,
     CONF_TARGET_SERVICES,
     CONF_WALK_DURATION_MIN,
@@ -356,15 +357,16 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         return data
 
     def _target_for(self, walk: Walk) -> WalkTarget:
-        """This walk's own notification devices and mute switch, if it has any.
+        """This walk's own devices, mute switch and away entity, if it has any.
 
-        Everything absent falls back to the entry-wide default, so a walk the user
+        Everything absent falls back to the entry-wide setting, so a walk the user
         never opened the notification step for behaves exactly as before.
         """
         stored = self._targets.get(walk.target_key) or {}
         return WalkTarget(
             services=tuple(stored.get(CONF_TARGET_SERVICES) or ()),
             muted=bool(stored.get(CONF_TARGET_MUTE, False)),
+            away_entity=stored.get(CONF_TARGET_AWAY_ENTITY) or None,
         )
 
     async def _cycle(self, now: datetime, walk: Walk) -> WalkData:

@@ -16,7 +16,7 @@ with *"Already configured"*.
 | 1 | `user` | **Location** — map picker (HA `LocationSelector`), pre-filled with the HA home coordinates. |
 | 2a | `schedule_mode` | **Schedule type** — *same times daily* / *weekday + weekend* / *per-day*. |
 | 2b | `schedule_times` | **Walk times** — one editable list of times per slot of the chosen mode. |
-| 2c | `walk_target` | **Who gets this walk's alert** — repeated once per configured walk: its notification devices and its own mute switch. See [Per-walk alerts](#per-walk-alerts). |
+| 2c | `walk_target` | **Who is told about this walk** — repeated once per configured walk: the extra devices it notifies, its own mute switch and its own away entity. The step names the days and time it is asking about, so it is always clear which walk is being configured. See [Per-walk alerts](#per-walk-alerts). |
 | 3 | `params` | **Parameters** — the table below. |
 | — | `long_walk` | Shown **only** when the average walk duration exceeds 30 min: a warning that must be confirmed. Declining returns to step 3 with the entered values still in the form. |
 
@@ -47,11 +47,11 @@ config entry. The **location is entry data, not an option**: it is set once in t
 | Earlier margin | `earlier_margin_min` | int minutes, 0–180, 10-min steps | 60 | How far back to search for a dry window — **and when the notification arrives**. Values over 60 min require confirming the `beyond_radar` warning: the radars forecast 60 minutes ahead, so a message sent earlier than that can only rest on hourly models |
 | Later margin | `later_margin_min` | int minutes, 0–180, 10-min steps | 30 | How far forward to search. Needs no warning: a later window is always re-checked as it comes into radar range, so a wide margin costs only a few more requests |
 | Average walk duration | `walk_duration_min` | int minutes, 5–240, 5-min steps | **required, no default** | Values over 30 min require confirming the `long_walk` warning (nowcast reliability) |
-| Confirm before setting off | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, or the rain has gone and the walk is back to its normal time. Only ever sent when something was already said about that walk |
-| Default notification device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. Used for any walk that has no devices of its own. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means no push notification. |
+| Second message shortly before you leave | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, or the rain has gone and the walk is back to its normal time. Goes to the same devices as the first message, and is only ever sent when something was already said about that walk |
+| Always notify this device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. **Receives every walk's alert.** Per-walk devices are notified *in addition* to it, never instead of it, and the combined list is de-duplicated so a device named in both places gets one push. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means only the per-walk devices are notified. |
 | Per-walk alerts | `walk_targets` | map | *(unset)* | One entry per walk the user configured something for. See [Per-walk alerts](#per-walk-alerts). |
 | Fire custom event | `fire_event` | bool | `false` | Emits `walk_the_dog_alert`; payload documented below |
-| Auto-mute entity | `auto_mute_entity` | entity id | *(unset)* | Optional `person`/`device_tracker`; alerts suppressed while it is not `home` |
+| Auto-mute entity | `auto_mute_entity` | entity id | *(unset)* | Optional `person`/`device_tracker`; pushes suppressed for **every** walk while it is not `home`. A walk that sets its own `away_entity` follows that one instead. |
 
 Optional options that are left empty are **absent** from the stored options, never stored as
 `null` — clearing a field in the options flow really removes it.
@@ -87,12 +87,24 @@ in turn.
 
 | Field | Key | Type | Default | Notes |
 |---|---|---|---|---|
-| Notification devices | `notify_services` | list of `mobile_app_*` service names | *(empty)* | Every device in the list receives the same message. **Empty means "use `notify_service`"**, never "notify nobody" — silencing a walk is what the mute switch is for. Validated exactly like `notify_service`, custom values included. |
-| Never alert about this walk | `mute` | bool | `false` | No push is ever sent for this walk. The sensor and the `walk_the_dog_alert` event still update (with `muted: true`), so automations keep working. |
+| Also notify these devices | `notify_services` | list of `mobile_app_*` service names | *(empty)* | Extra devices for this walk, **on top of `notify_service`**, all receiving the same message. Empty means "only the always-notified device", never "notify nobody" — silencing a walk is what the mute switch is for. Validated exactly like `notify_service`, custom values included, and de-duplicated on store. |
+| Never alert about this walk | `mute` | bool | `false` | No push is ever sent for this walk, on any device — the always-notified one included. The sensor and the `walk_the_dog_alert` event still update (with `muted: true`), so automations keep working. |
+| Skip this walk while this person is away | `away_entity` | entity id | *(unset)* | Optional `person`/`device_tracker` that replaces `auto_mute_entity` **for this walk only**, so the walk Anna does falls silent when Anna leaves. Unset means the walk follows the entry-wide `auto_mute_entity`. |
 
-A walk left at both defaults stores **nothing at all**, so `walk_targets` only ever holds walks
-the user actually said something about, and an entry configured before this feature existed keeps
-behaving exactly as it did.
+A walk left at all three defaults stores **nothing at all**, so `walk_targets` only ever holds
+walks the user actually said something about, and an entry configured before this feature existed
+keeps behaving exactly as it did.
+
+### One phone, one notification
+
+The two places a device can be named — `notify_service` and a walk's `notify_services` — are
+**added together**, not chosen between. Setting the same device in both is therefore easy to do
+by accident, so the recipient list is de-duplicated twice over: `config_flow._collect_target`
+normalizes and de-duplicates what one walk stores (a value typed as `notify.mobile_app_x`
+collapses onto a `mobile_app_x` already picked from the dropdown), and
+`WalkNotifier.services_for` de-duplicates the union at dispatch, which is what protects entries
+stored before this rule existed. Either way one phone receives exactly one push, and the order
+the user chose is preserved.
 
 ### Storage key
 
@@ -100,8 +112,8 @@ A walk is identified by the **schedule slot key and the configured local time**,
 
 ```json
 "walk_targets": {
-  "weekday|07:00": { "notify_services": ["mobile_app_anna"] },
-  "weekday|18:30": { "notify_services": ["mobile_app_piotr"] },
+  "weekday|07:00": { "notify_services": ["mobile_app_anna"], "away_entity": "person.anna" },
+  "weekday|18:30": { "notify_services": ["mobile_app_piotr"], "away_entity": "person.piotr" },
   "weekend|09:00": { "mute": true }
 }
 ```
@@ -208,11 +220,13 @@ reason the option exists: a `later` recommendation relaxing to "walk as planned"
 direction, so silence alone would leave you waiting for a window that stopped being necessary.
 It is sent once per walk, and an alert that happens to land at that moment counts as it.
 
-The message goes to the walk's own devices, or to `notify_service` when it has none. Every
+The message goes to `notify_service` together with the walk's own devices, each device named
+once however many places it appears in. Every
 device in the list gets the same message.
 
-Suppressed entirely by: the enable switch being off, the walk's own mute switch, the auto-mute
-entity not being `home`, or zero contributing sources. A muted alert is **suppressed, not
+Suppressed entirely by: the enable switch being off, the walk's own mute switch, the walk's
+away entity — its own `away_entity`, else the entry-wide `auto_mute_entity` — not being `home`,
+or zero contributing sources. A muted alert is **suppressed, not
 queued** — coming home does not release a message about a decision that has since moved on.
 
 If a configured `notify.mobile_app_*` service is not registered (a phone configured before its
@@ -272,7 +286,7 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
 | `horizon_limited` | bool | The walk reaches past what the sources forecast |
 | `provisional` | bool | No radar reaches the recommended window, so the timing rests on hourly models. An early answer the coordinator keeps re-checking, not a final one |
 | `data_age_s` | int \| `null` | Age of the freshest source that voted |
-| `muted` | bool | The push was suppressed for this alert — by the walk's own mute switch or by auto-mute |
+| `muted` | bool | The push was suppressed for this alert — by the walk's own mute switch or by the away entity that applies to it |
 | `confirmation` | bool | This is the pre-departure reassurance rather than a new recommendation |
 | `sources` | list | One entry per source: its own verdict over the scheduled window, its status, its weight and its peak |
 
@@ -283,6 +297,42 @@ the same source is worth less near the edge of its range than in the middle of i
 
 `risk`, `confidence` and `expected_intensity` are `null` — never `0` — when no source reaches
 the scheduled window, so "we do not know" can never be read as "no rain".
+
+## Language
+
+Everything the integration says is translated by Home Assistant itself, from
+`custom_components/walk_the_dog/strings.json` — `translations/en.json` is the base file and
+`translations/pl.json` the Polish one. Home Assistant serves whichever matches the user's own
+language setting, so there is nothing to configure. A newly added translation only appears after
+a **full restart**: reloading the integration does not clear the frontend's translation cache.
+
+Translated:
+
+- every wizard and options-flow title, field label, field description, warning and error;
+- the integration's name — a Polish user sees **Idź już z psem** — and with it the device the
+  entities hang off, because that name is the prefix Home Assistant puts in front of every
+  entity's friendly name;
+- the entity names, the sensor's four states, and the label of every attribute;
+- the `walk_the_dog.walked` service, and the error it raises when there is no entry to act on;
+- the push notification: title, all four message shapes, the provisional sentence and the
+  **Already went** button. These live under the `common` key of `strings.json` — the only
+  top-level key Home Assistant allows for prose belonging to no form and no entity — and are
+  read at dispatch time in the user's language.
+
+Deliberately **not** translated, because it is an identifier rather than prose:
+
+- the domain `walk_the_dog`, the event name `walk_the_dog_alert`, the service name
+  `walk_the_dog.walked`;
+- **every key and every value in the event payload and in the sensor attributes.** `direction`
+  is `earlier` in every language, so an automation written against it keeps working when the
+  user switches language. The sensor's *state* is the one place those values are shown to a
+  person, and Home Assistant translates them for display while the stored state stays English;
+- `min` and `km` on the number fields — symbols, not words;
+- the brand images, which carry the untranslated name (see [../branding/README.md](../branding/README.md)).
+
+Entity IDs are generated by Home Assistant from the device and entity names *in the language the
+integration was set up in*, so a Polish install gets Polish entity IDs. They are assigned once,
+never change afterwards, and can be renamed in the entity registry.
 
 ## Config entry data shape
 
@@ -309,7 +359,7 @@ the scheduled window, so "we do not know" can never be read as "no rain".
   "notify_service": "mobile_app_phone",
   "auto_mute_entity": "person.owner",
   "walk_targets": {
-    "weekday|07:00": { "notify_services": ["mobile_app_anna"] },
+    "weekday|07:00": { "notify_services": ["mobile_app_anna"], "away_entity": "person.anna" },
     "weekend|09:00": { "mute": true }
   }
 }

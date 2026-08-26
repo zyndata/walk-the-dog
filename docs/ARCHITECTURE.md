@@ -388,17 +388,21 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
   worth watching is not the same as advice still worth sending. Every alert about one walk
   carries the same companion-app `tag`, so a revision replaces its predecessor on the phone
   instead of stacking a second, contradictory message underneath it. Suppressed entirely by: switch off,
-  the walk's own mute switch, auto-mute entity not `home`, or 0 contributing sources. A muted alert is suppressed, not
+  the walk's own mute switch, the away entity that applies to that walk not being `home`, or 0 contributing sources. A muted alert is suppressed, not
   queued — the decision state advances either way, so coming home does not release a stale
   message. The module is `notifier.py`, not `notify.py`: a file named after a platform inside an
   integration *is* that platform to Home Assistant, and this one is not a notify platform.
 - **Per-walk targets** (added after the first live test): each walk carries its own list of
-  companion-app devices and its own mute switch, so the morning walk and the evening walk can
-  belong to different people. The coordinator resolves the walk to a `Walk` — the UTC instant
-  **plus** the `(slot key, configured time)` pair that identifies it — and looks the settings up
-  by that pair, not by the instant, so a daylight-saving change cannot detach a walk from its
-  devices. An empty device list falls back to the entry-wide default device; the mute switch is
-  the only way to silence a walk. Details in [CONFIG.md](CONFIG.md) § Per-walk alerts.
+  companion-app devices, its own mute switch and its own away entity, so the morning walk and the
+  evening walk can belong to different people. The coordinator resolves the walk to a `Walk` — the
+  UTC instant **plus** the `(slot key, configured time)` pair that identifies it — and looks the
+  settings up by that pair, not by the instant, so a daylight-saving change cannot detach a walk
+  from its devices. The two settings compose in opposite directions, which is deliberate: devices
+  **add** to the entry-wide `notify_service` (that device always hears, and the union is
+  de-duplicated so one phone gets one push), while a walk's away entity **replaces** the entry-wide
+  `auto_mute_entity` for that walk. Adding recipients is what a per-walk list is for; two people
+  whose absence both silence the same walk is not. The mute switch remains the only way to silence
+  a walk outright. Details in [CONFIG.md](CONFIG.md) § Per-walk alerts.
 - **Confirmation before setting off** (optional, `confirm_margin_min`, default off): one short
   message `confirm_margin` before the departure moment, and only if something was already said
   about this walk. It has two shapes — *the plan still stands*, and *the rain has gone, walk at

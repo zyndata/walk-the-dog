@@ -1,21 +1,31 @@
-"""Every string the flows can show has to exist, in both files.
+"""Every string the integration can show has to exist, in every language file.
 
 A missing key is invisible in Python and shows up in the frontend as a raw
 `walk_the_dog::config::step::…` placeholder, so the check is structural: the step
 ids and error keys are read out of the source, not restated here.
+
+The same applies one level up, to the translations themselves. `hassfest` only
+validates `strings.json` and `translations/en.json` for a custom integration, so
+`translations/pl.json` has no upstream check at all — the parity tests at the end
+of this file are it.
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import string
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from custom_components.walk_the_dog.config_flow import SLOT_LABEL_PREFIX
-from custom_components.walk_the_dog.const import INTENSITY_MM_H
+from custom_components.walk_the_dog.const import (
+    DEVICE_TRANSLATION_KEY,
+    INTEGRATION_NAME,
+    INTENSITY_MM_H,
+)
 from custom_components.walk_the_dog.notifier import ALERT_DIRECTIONS, TEXT_PREFIX
 from custom_components.walk_the_dog.schedule import DAY_KEYS, SCHEDULE_KEYS, SCHEDULE_MODES
 from custom_components.walk_the_dog.sensor import OPTIONS
@@ -23,6 +33,13 @@ from custom_components.walk_the_dog.sensor import OPTIONS
 COMPONENT = Path(__file__).parents[1] / "custom_components" / "walk_the_dog"
 CONFIG_FLOW = COMPONENT / "config_flow.py"
 STRINGS = json.loads((COMPONENT / "strings.json").read_text(encoding="utf-8"))
+
+#: Every language the integration ships beyond the base file.
+TRANSLATED = ("pl",)
+
+#: The Polish name of the integration, used wherever Home Assistant lets a name be
+#: translated: the integration itself, its device, and the notification title.
+POLISH_TITLE = "Idź już z psem"
 
 #: Shown only by the options flow — the wizard has no `init` step, and neither
 #: flow renders a form for it.
@@ -148,3 +165,89 @@ def test_every_schedule_slot_has_a_day_label() -> None:
     expected = {f"{SLOT_LABEL_PREFIX}{slot}" for slot in slots}
 
     assert expected <= set(STRINGS["common"])
+
+
+def _leaves(node: Any, prefix: str = "") -> dict[str, str]:
+    """Every translated string in a language file, keyed by its path.
+
+    Comparing paths rather than nested dicts is what makes a missing key report
+    *which* key is missing instead of dumping two documents side by side.
+    """
+    leaves: dict[str, str] = {}
+    for key, value in node.items():
+        path = f"{prefix}.{key}" if prefix else key
+        if isinstance(value, dict):
+            leaves.update(_leaves(value, path))
+        else:
+            leaves[path] = value
+    return leaves
+
+
+def _placeholders(text: str) -> set[str]:
+    """The `{name}` slots a string expects to be filled with."""
+    return {field for _, field, _, _ in string.Formatter().parse(text) if field}
+
+
+ENGLISH = _leaves(STRINGS)
+
+
+def _language(code: str) -> dict[str, str]:
+    return _leaves(json.loads((COMPONENT / "translations" / f"{code}.json").read_text("utf-8")))
+
+
+def test_the_base_file_names_the_integration() -> None:
+    """The root `title` is what a translation can override; en repeats the manifest."""
+    assert STRINGS["title"] == INTEGRATION_NAME
+    assert STRINGS["device"][DEVICE_TRANSLATION_KEY]["name"] == INTEGRATION_NAME
+
+
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_a_translation_has_every_key(code: str) -> None:
+    """A key missing from a translation shows the user a raw identifier."""
+    assert set(_language(code)) == set(ENGLISH)
+
+
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_a_translation_fills_every_key(code: str) -> None:
+    """An empty string is worse than an English one — it shows nothing at all."""
+    assert [path for path, text in _language(code).items() if not text.strip()] == []
+
+
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_a_translation_keeps_every_placeholder(code: str) -> None:
+    """A renamed or dropped `{slot}` silently leaves the sentence unfinished.
+
+    `notifier.py` falls back to the unformatted template when a placeholder does
+    not resolve, so this failure would reach the phone as literal `{recommended}`.
+    """
+    translated = _language(code)
+    mismatched = {
+        path: (_placeholders(ENGLISH[path]), _placeholders(text))
+        for path, text in translated.items()
+        if path in ENGLISH and _placeholders(ENGLISH[path]) != _placeholders(text)
+    }
+
+    assert mismatched == {}
+
+
+@pytest.mark.parametrize("code", TRANSLATED)
+def test_a_translation_is_not_a_copy(code: str) -> None:
+    """Every string is actually translated, not left in English.
+
+    Nothing in this integration is a brand name that has to stay untranslated —
+    `manifest.json` carries the only such name, and it is not in these files — so
+    any value identical to the English one is an oversight.
+    """
+    translated = _language(code)
+    copied = [path for path, text in translated.items() if ENGLISH.get(path) == text]
+
+    assert copied == []
+
+
+def test_polish_uses_the_localized_title_everywhere() -> None:
+    """The one name a Polish user should see, in all three places it can appear."""
+    polish = json.loads((COMPONENT / "translations" / "pl.json").read_text("utf-8"))
+
+    assert polish["title"] == POLISH_TITLE
+    assert polish["device"][DEVICE_TRANSLATION_KEY]["name"] == POLISH_TITLE
+    assert polish["common"][f"{TEXT_PREFIX}title"] == POLISH_TITLE

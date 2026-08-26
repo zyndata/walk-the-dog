@@ -3,10 +3,10 @@
 > ### ⚠️ Work in progress — not ready for use
 >
 > There has been no release yet (version `0.1.0`). **Works today:** installation, the setup
-> wizard, the options flow, and the whole prediction loop — recommendation sensor, alerting
-> switch, push notifications and the custom event. **Not yet:** Polish localization and the
-> integration icon, and the performance pass on low-end hardware. Real-world accuracy is
-> untested.
+> wizard, the options flow, the whole prediction loop — recommendation sensor, alerting
+> switch, push notifications and the custom event — and full English and Polish localization.
+> **Not yet:** the performance pass on low-end hardware, and the brands submission, until which
+> Home Assistant shows a placeholder icon. Real-world accuracy is untested.
 >
 > Breaking changes land without warning, and there is no upgrade path between development
 > versions.
@@ -26,7 +26,7 @@ later** so the walk stays dry.
 - Designed for low-end hardware: polls only around your walk times, samples only the pixels
   around your location, stays within strict request and memory budgets.
 
-Polish localization ("Idź już z psem") is a first-class goal.
+Fully localized in Polish — the integration calls itself "Idź już z psem" there.
 
 Weather data: LibreWXR (EUMETNET OPERA composite), Open-Meteo (DWD ICON-EU, KNMI HARMONIE
 AROME), MET Norway, and — regionally — the Czech Hydrometeorological Institute's CZRAD composite.

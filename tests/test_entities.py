@@ -13,10 +13,15 @@ from typing import TYPE_CHECKING
 import pytest
 from homeassistant.const import ATTR_ATTRIBUTION, STATE_OFF, STATE_ON, STATE_UNKNOWN, Platform
 from homeassistant.core import State
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import mock_restore_cache
 
-from custom_components.walk_the_dog.const import SOURCE_ICON_EU, SOURCE_KNMI
+from custom_components.walk_the_dog.const import (
+    INTEGRATION_NAME,
+    SOURCE_ICON_EU,
+    SOURCE_KNMI,
+)
 from custom_components.walk_the_dog.coordinator import WalkCoordinator
 from custom_components.walk_the_dog.engine import DIRECTION_EARLIER
 from custom_components.walk_the_dog.sensor import OPTIONS
@@ -78,6 +83,23 @@ async def test_one_entity_per_question_on_one_device(
         Platform.SWITCH,
     }
     assert len({entity.device_id for entity in entities}) == 1
+
+
+async def test_the_device_is_named_from_the_translations(
+    hass: HomeAssistant, entry: MockConfigEntry, coordinator: WalkCoordinator
+) -> None:
+    """The device name comes from `strings.json`, not from the entry title.
+
+    It is the prefix every entity's friendly name carries, so it has to be
+    translatable. The failure mode this pins is silent: an unresolved key leaves
+    the device called `service`, and every entity with it.
+    """
+    registry = dr.async_get(hass)
+    devices = dr.async_entries_for_config_entry(registry, entry.entry_id)
+
+    assert len(devices) == 1
+    assert devices[0].name == "Walk the dog"
+    assert devices[0].manufacturer == INTEGRATION_NAME
 
 
 async def test_the_sensor_is_unknown_before_any_forecast(
