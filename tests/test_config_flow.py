@@ -22,6 +22,7 @@ from custom_components.walk_the_dog.config_flow import (
 )
 from custom_components.walk_the_dog.const import (
     CONF_AUTO_MUTE_ENTITY,
+    CONF_CONFIRM_MARGIN_MIN,
     CONF_EARLIER_MARGIN_MIN,
     CONF_FIRE_EVENT,
     CONF_INTENSITY_THRESHOLD,
@@ -35,6 +36,7 @@ from custom_components.walk_the_dog.const import (
     CONF_TARGET_SERVICES,
     CONF_WALK_DURATION_MIN,
     CONF_WALK_TARGETS,
+    DEFAULT_CONFIRM_MARGIN_MIN,
     DEFAULT_EARLIER_MARGIN_MIN,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
@@ -43,6 +45,7 @@ from custom_components.walk_the_dog.const import (
     INTENSITY_THRESHOLD_MODERATE,
     MAX_RADIUS_KM,
     MIN_RADIUS_KM,
+    NOWCAST_HORIZON_MIN,
     SCHEDULE_MODE_DAILY,
     SCHEDULE_MODE_PER_DAY,
     SCHEDULE_MODE_WEEKDAY_WEEKEND,
@@ -62,6 +65,7 @@ PARAMS: dict[str, Any] = {
     CONF_EARLIER_MARGIN_MIN: DEFAULT_EARLIER_MARGIN_MIN,
     CONF_LATER_MARGIN_MIN: DEFAULT_LATER_MARGIN_MIN,
     CONF_WALK_DURATION_MIN: 30,
+    CONF_CONFIRM_MARGIN_MIN: DEFAULT_CONFIRM_MARGIN_MIN,
     CONF_FIRE_EVENT: False,
 }
 
@@ -266,6 +270,7 @@ async def test_long_walk_warning_is_shown_and_can_be_confirmed(hass: HomeAssista
     assert result["description_placeholders"] == {
         "duration": str(duration),
         "limit": str(WALK_DURATION_WARN_MIN),
+        "horizon": str(NOWCAST_HORIZON_MIN),
     }
 
     result = await advance(hass, result, {CONF_CONFIRM: True})
@@ -545,8 +550,14 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
             CONF_EARLIER_MARGIN_MIN: 90,
             CONF_LATER_MARGIN_MIN: 20,
             CONF_WALK_DURATION_MIN: 25,
+            CONF_CONFIRM_MARGIN_MIN: 15,
             CONF_FIRE_EVENT: True,
         },
+    )
+    # 90 minutes of notice is more than the radar forecasts, so the flow asks first.
+    assert result["step_id"] == "beyond_radar"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_CONFIRM: True}
     )
     await hass.async_block_till_done()
 
@@ -559,6 +570,7 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
         CONF_EARLIER_MARGIN_MIN: 90,
         CONF_LATER_MARGIN_MIN: 20,
         CONF_WALK_DURATION_MIN: 25,
+        CONF_CONFIRM_MARGIN_MIN: 15,
         CONF_FIRE_EVENT: True,
     }
     # The location is entry data, so the options flow never touches it.
@@ -621,3 +633,65 @@ async def test_options_flow_can_clear_an_optional_field(hass: HomeAssistant) -> 
     await hass.async_block_till_done()
 
     assert CONF_NOTIFY_SERVICE not in entry.options
+
+
+async def test_a_notice_period_past_the_radar_horizon_is_confirmed_first(
+    hass: HomeAssistant,
+) -> None:
+    """Asked for two hours of warning, the wizard explains what that costs."""
+    earlier = NOWCAST_HORIZON_MIN + 60
+    result = await to_params(hass)
+
+    result = await advance(hass, result, {**PARAMS, CONF_EARLIER_MARGIN_MIN: earlier})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "beyond_radar"
+    assert result["description_placeholders"] == {
+        "earlier": str(earlier),
+        "horizon": str(NOWCAST_HORIZON_MIN),
+        "over": str(earlier - NOWCAST_HORIZON_MIN),
+    }
+
+    result = await advance(hass, result, {CONF_CONFIRM: True})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_EARLIER_MARGIN_MIN] == earlier
+
+
+async def test_a_notice_period_warning_declined_returns_to_the_parameters(
+    hass: HomeAssistant,
+) -> None:
+    """Declining is how the user goes back and lowers the margin."""
+    result = await to_params(hass)
+    result = await advance(hass, result, {**PARAMS, CONF_EARLIER_MARGIN_MIN: 120})
+
+    result = await advance(hass, result, {CONF_CONFIRM: False})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "params"
+    assert suggested(result["data_schema"], CONF_EARLIER_MARGIN_MIN) == 120
+
+
+async def test_exactly_the_radar_horizon_does_not_warn(hass: HomeAssistant) -> None:
+    """The warning is for notice periods *longer* than the radar reaches."""
+    result = await run_wizard(hass, params={**PARAMS, CONF_EARLIER_MARGIN_MIN: NOWCAST_HORIZON_MIN})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_both_timing_warnings_are_shown_in_turn(hass: HomeAssistant) -> None:
+    """A long walk with a long notice period earns one confirmation each."""
+    result = await to_params(hass)
+
+    result = await advance(
+        hass,
+        result,
+        {**PARAMS, CONF_WALK_DURATION_MIN: 90, CONF_EARLIER_MARGIN_MIN: 120},
+    )
+    assert result["step_id"] == "long_walk"
+
+    result = await advance(hass, result, {CONF_CONFIRM: True})
+    assert result["step_id"] == "beyond_radar"
+
+    result = await advance(hass, result, {CONF_CONFIRM: True})
+    assert result["type"] is FlowResultType.CREATE_ENTRY

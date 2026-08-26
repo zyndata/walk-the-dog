@@ -52,6 +52,7 @@
           "earlier_margin_min": "Search this far earlier",
           "later_margin_min": "Search this far later",
           "walk_duration_min": "Average walk duration",
+          "confirm_margin_min": "Confirm before setting off",
           "notify_service": "Default notification device",
           "fire_event": "Fire a custom event",
           "auto_mute_entity": "Mute alerts when this is away"
@@ -59,9 +60,10 @@
         "data_description": {
           "radius_km": "The circle around the walk location that is checked for rain. The minimum keeps the circle larger than one forecast cell.",
           "intensity_threshold": "A moment counts as rainy once the forecast reaches this intensity.",
-          "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives.",
-          "later_margin_min": "How much later than the scheduled time you are willing to set off.",
-          "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested.",
+          "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives, so keep it at 60 minutes or less: that is as far ahead as the rain radars forecast, and a message sent earlier than that can only be based on hourly models.",
+          "later_margin_min": "How much later than the scheduled time you are willing to set off. Going later is always checked again as the time approaches — the radars will have seen it long before you have to leave — so a wide margin here costs nothing but a few more forecast requests.",
+          "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested, so a walk longer than the 60 minutes the radars forecast can never be fully radar-backed at the moment you are told to go.",
+          "confirm_margin_min": "Sends a second, short message this many minutes before you actually set off, saying that the plan still stands — or that the rain has gone and you can walk at the normal time after all. 0 switches it off, which is the default: no news already means nothing has changed.",
           "notify_service": "The companion app device used for any walk you did not give devices of its own. Leave empty for no push notification.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
           "auto_mute_entity": "While this person or device tracker is not home, no notification is sent."
@@ -69,9 +71,16 @@
       },
       "long_walk": {
         "title": "That is a long walk",
-        "description": "You entered {duration} minutes. Rain forecasts for the next hour are much more reliable than for longer periods, so for walks over {limit} minutes the suggestion will more often be a best guess than a promise. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
+        "description": "You entered {duration} minutes. The rain radars forecast {horizon} minutes ahead, and beyond that only hourly models are left, so for walks over {limit} minutes the suggestion will more often be a best guess than a promise — the whole walk has to stay dry for a time to be offered, and the later half of a long one is the part nothing can see clearly yet. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
         "data": {
           "confirm": "Keep this duration"
+        }
+      },
+      "beyond_radar": {
+        "title": "The alert lands before the radar can see it",
+        "description": "You asked to be told {earlier} minutes before the walk. The rain radars only forecast {horizon} minutes ahead, so at that moment nothing has looked at your walk time yet and the first message rests on hourly weather models — reliable about whether it will rain, vague about the exact minute it starts.\n\nThat is not useless, and the integration keeps watching: as the walk comes within radar range it re-checks and tells you again if the answer changes. But a margin of {horizon} minutes or less gets a radar-backed answer straight away. Confirm to keep {earlier} minutes ({over} minutes past the radar's reach), or leave it unconfirmed to go back and lower it.",
+        "data": {
+          "confirm": "Keep this notice period"
         }
       }
     },
@@ -127,6 +136,7 @@
           "earlier_margin_min": "Search this far earlier",
           "later_margin_min": "Search this far later",
           "walk_duration_min": "Average walk duration",
+          "confirm_margin_min": "Confirm before setting off",
           "notify_service": "Default notification device",
           "fire_event": "Fire a custom event",
           "auto_mute_entity": "Mute alerts when this is away"
@@ -134,9 +144,10 @@
         "data_description": {
           "radius_km": "The circle around the walk location that is checked for rain. The minimum keeps the circle larger than one forecast cell.",
           "intensity_threshold": "A moment counts as rainy once the forecast reaches this intensity.",
-          "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives.",
-          "later_margin_min": "How much later than the scheduled time you are willing to set off.",
-          "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested.",
+          "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives, so keep it at 60 minutes or less: that is as far ahead as the rain radars forecast, and a message sent earlier than that can only be based on hourly models.",
+          "later_margin_min": "How much later than the scheduled time you are willing to set off. Going later is always checked again as the time approaches — the radars will have seen it long before you have to leave — so a wide margin here costs nothing but a few more forecast requests.",
+          "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested, so a walk longer than the 60 minutes the radars forecast can never be fully radar-backed at the moment you are told to go.",
+          "confirm_margin_min": "Sends a second, short message this many minutes before you actually set off, saying that the plan still stands — or that the rain has gone and you can walk at the normal time after all. 0 switches it off, which is the default: no news already means nothing has changed.",
           "notify_service": "The companion app device used for any walk you did not give devices of its own. Leave empty for no push notification.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
           "auto_mute_entity": "While this person or device tracker is not home, no notification is sent."
@@ -144,9 +155,16 @@
       },
       "long_walk": {
         "title": "That is a long walk",
-        "description": "You entered {duration} minutes. Rain forecasts for the next hour are much more reliable than for longer periods, so for walks over {limit} minutes the suggestion will more often be a best guess than a promise. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
+        "description": "You entered {duration} minutes. The rain radars forecast {horizon} minutes ahead, and beyond that only hourly models are left, so for walks over {limit} minutes the suggestion will more often be a best guess than a promise — the whole walk has to stay dry for a time to be offered, and the later half of a long one is the part nothing can see clearly yet. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
         "data": {
           "confirm": "Keep this duration"
+        }
+      },
+      "beyond_radar": {
+        "title": "The alert lands before the radar can see it",
+        "description": "You asked to be told {earlier} minutes before the walk. The rain radars only forecast {horizon} minutes ahead, so at that moment nothing has looked at your walk time yet and the first message rests on hourly weather models — reliable about whether it will rain, vague about the exact minute it starts.\n\nThat is not useless, and the integration keeps watching: as the walk comes within radar range it re-checks and tells you again if the answer changes. But a margin of {horizon} minutes or less gets a radar-backed answer straight away. Confirm to keep {earlier} minutes ({over} minutes past the radar's reach), or leave it unconfirmed to go back and lower it.",
+        "data": {
+          "confirm": "Keep this notice period"
         }
       }
     },
@@ -230,6 +248,34 @@
           },
           "last_fetch": {
             "name": "Last fetch"
+          },
+          "recommended_end": {
+            "name": "Suggested return"
+          },
+          "provisional": {
+            "name": "Awaiting radar confirmation"
+          },
+          "requests_last_hour": {
+            "name": "Requests this hour"
+          },
+          "requests_hourly_cap": {
+            "name": "Request ceiling"
+          },
+          "confirmation": {
+            "name": "Confirmation"
+          }
+        }
+      }
+    },
+    "binary_sensor": {
+      "walk_window": {
+        "name": "Walk window",
+        "state_attributes": {
+          "scheduled_start": {
+            "name": "Scheduled walk"
+          },
+          "alerting": {
+            "name": "Alerting"
           }
         }
       }
@@ -242,8 +288,9 @@
   },
   "common": {
     "notification_title": "Walk the dog",
-    "notification_earlier": "Rain is expected around {scheduled}. Set off at {recommended} instead — {shift} minutes earlier — and the whole {duration}-minute walk should stay dry.",
-    "notification_later": "Rain is expected around {scheduled}. Wait until {recommended} — {shift} minutes later — and the whole {duration}-minute walk should stay dry.",
+    "notification_earlier": "Rain is expected around {scheduled}. Set off at {recommended} instead — {shift} minutes earlier — and the whole {duration}-minute walk should stay dry, back home by {until}.",
+    "notification_later": "Rain is expected around {scheduled}. Wait until {recommended} — {shift} minutes later — and the whole {duration}-minute walk should stay dry, back home by {until}.",
+    "notification_provisional": "The radar does not reach that far ahead yet, so this is a model estimate — I am still watching and will tell you if it changes.",
     "notification_no_dry_window": "Rain is expected around {scheduled} and there is no dry {duration}-minute window nearby. Take a raincoat.",
     "walk_slot_all": "every day",
     "walk_slot_weekday": "Monday to Friday",
@@ -254,6 +301,21 @@
     "walk_slot_thu": "Thursday",
     "walk_slot_fri": "Friday",
     "walk_slot_sat": "Saturday",
-    "walk_slot_sun": "Sunday"
+    "walk_slot_sun": "Sunday",
+    "notification_confirmed": "Still on: set off at {recommended}, back home by {until}. Nothing has changed since the last message.",
+    "notification_stand_down": "Rain is no longer expected around {scheduled} — walk at the normal time after all.",
+    "notification_action_walked": "Already went"
+  },
+  "services": {
+    "walked": {
+      "name": "Already went",
+      "description": "Closes the walk being watched right now: no further advice about it, and no further weather requests for it. Alerting itself stays on, and the next walk is picked up as usual.",
+      "fields": {}
+    }
+  },
+  "exceptions": {
+    "no_loaded_entry": {
+      "message": "Walk the dog is not set up, so there is no walk to close."
+    }
   }
 }

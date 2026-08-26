@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
 from ..const import (
+    SOURCE_CHMI,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
@@ -32,6 +33,12 @@ if TYPE_CHECKING:
 RELIABILITY: dict[str, float] = {
     SOURCE_LIBREWXR: 1.00,
     SOURCE_KNMI: 0.90,
+    #: Radar extrapolation like LibreWXR. Its level->dBZ calibration is CHMI's own
+    #: published scale, verified live (docs/DATA_SOURCES.md § CHMI), so the only
+    #: remaining discount is quantisation: CHMI publishes 15 steps of 4 dBZ where
+    #: LibreWXR's grey ramp carries 1 dBZ, and at the light end one step is the
+    #: difference between 0.06 and 0.12 mm/h - i.e. between voting dry and wet.
+    SOURCE_CHMI: 0.95,
     SOURCE_ICON_EU: 0.80,
     SOURCE_METNO: 0.70,
 }
@@ -40,6 +47,7 @@ RELIABILITY: dict[str, float] = {
 #: series older than 3x it is stale and dropped for the cycle.
 UPDATE_INTERVAL_S: dict[str, int] = {
     SOURCE_LIBREWXR: 10 * 60,
+    SOURCE_CHMI: 5 * 60,
     SOURCE_KNMI: 60 * 60,
     SOURCE_ICON_EU: 3 * 60 * 60,
     SOURCE_METNO: 2 * 60 * 60,
@@ -50,6 +58,9 @@ STALE_FACTOR: int = 3
 #: Effective cell size in km at 52 N (docs/DATA_SOURCES.md § Effective resolution).
 CELL_KM: dict[str, float] = {
     SOURCE_LIBREWXR: 2.0,
+    #: CHMI publishes the CZRAD composite at a stated 1x1 km resolution, which the
+    #: frame's own extent confirms: 1.005 km per pixel east-west at 49.75 N.
+    SOURCE_CHMI: 1.0,
     SOURCE_KNMI: 5.5,
     SOURCE_ICON_EU: 6.95,
     SOURCE_METNO: 10.0,
@@ -64,17 +75,39 @@ ATTRIBUTION: dict[str, str] = {
     SOURCE_ICON_EU: "Weather data by Open-Meteo.com and DWD ICON-EU (CC BY 4.0, modified)",
     SOURCE_KNMI: ("Weather data by Open-Meteo.com and KNMI HARMONIE AROME (CC BY 4.0, modified)"),
     SOURCE_METNO: "Weather data from MET Norway (CC BY 4.0 / NLOD, modified)",
+    SOURCE_CHMI: (
+        "Radar data from the Czech Hydrometeorological Institute (CHMI), CZRAD composite "
+        "via opendata.chmi.cz (CC BY 4.0, modified)"
+    ),
 }
 
 # Status values (docs/ARCHITECTURE.md § Data flow). `out_of_range` is per-slot and
-# assigned by the engine; adapters use the other four.
+# assigned by the engine; adapters use the others.
 STATE_OK = "ok"
 STATE_STALE = "stale"
 STATE_FAILED = "failed"
 STATE_OUT_OF_RANGE = "out_of_range"
 STATE_DISABLED = "disabled"
 
+#: The source cannot serve this location at all — a permanent property of where the
+#: user lives, not of this cycle. Only regional sources report it, and they never
+#: make a request while they do (docs/DATA_SOURCES.md § CHMI). Distinct from
+#: `out_of_range`, which is about a *slot* a fetched source does not reach, and from
+#: `disabled`, which is a dormancy this cycle could end.
+STATE_NOT_APPLICABLE = "not_applicable"
+
 EARTH_RADIUS_KM = 6371.0088
+
+#: Marshall-Palmer `Z = 200 * R^1.6`, inverted (docs/DATA_SOURCES.md § Intensity
+#: mapping). Shared: both radar sources decode a reflectivity scale, and they must
+#: land on the same mm/h or the consensus would be comparing two different scales.
+MP_A = 200.0
+MP_B = 1.6
+
+
+def dbz_to_mm_per_h(dbz: float) -> float:
+    """Reflectivity in dBZ to rain rate in mm/h."""
+    return float((10.0 ** (dbz / 10.0) / MP_A) ** (1.0 / MP_B))
 
 
 def utc_now() -> datetime:
@@ -180,6 +213,11 @@ class SourceAdapter(Protocol):
 
     #: Source ids this adapter produces series for (Open-Meteo speaks for two).
     source_ids: tuple[str, ...]
+
+    @property
+    def budget(self) -> RequestBudget:
+        """The adapter's rolling hourly request budget, for the registry to total."""
+        ...
 
     def should_fetch(self, now: datetime) -> bool:
         """False when the adapter's own cadence or backoff says to reuse cached data."""

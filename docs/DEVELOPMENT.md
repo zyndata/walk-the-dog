@@ -37,9 +37,17 @@ This creates `.venv/` with Python 3.14, installs the pinned dev dependencies fro
 | `python scripts/format.py` | auto-format + auto-fix lint findings |
 | `python scripts/test.py [pytest args]` | run the test suite (e.g. `python scripts/test.py -k manifest`) |
 | `python scripts/install.py` | deploy `custom_components/walk_the_dog/` into a local HA instance |
+| `python scripts/make_chmi_fixtures.py` | re-record `tests/fixtures/chmi/` from opendata.chmi.cz |
 
 Tests use `pytest-homeassistant-custom-component` and recorded fixtures — they must pass with
 no network access.
+
+`tests/fixtures/chmi/` is the one fixture set with a regeneration script,
+`scripts/make_chmi_fixtures.py`: it downloads a real observed composite and one forecast archive
+from opendata.chmi.cz, and synthesizes two extra frames on the same geometry (no echo anywhere, and
+echo only over Praha) to prove negatives a recorded frame cannot. **The expected mm/h values in
+`tests/test_chmi.py` are pinned to the recorded bytes**, so re-recording means recomputing them —
+which is deliberate, and is why it is a separate script rather than something the suite does.
 
 ### Tests do not run natively on Windows
 

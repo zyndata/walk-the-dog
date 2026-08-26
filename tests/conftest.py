@@ -32,6 +32,7 @@ from custom_components.walk_the_dog.const import (
     DOMAIN,
     INTENSITY_THRESHOLD_LIGHT,
     SCHEDULE_MODE_DAILY,
+    SOURCE_CHMI,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
 #: republishes, which is what `UPDATE_INTERVAL_S` measures.
 STEP_S = {
     SOURCE_LIBREWXR: 600,
+    SOURCE_CHMI: 600,
     SOURCE_KNMI: 3600,
     SOURCE_ICON_EU: 3600,
     SOURCE_METNO: 3600,
@@ -68,6 +70,12 @@ TEST_GEOMETRY = SampleGeometry(latitude=52.2297, longitude=21.0122, radius_km=5.
 #: Near Sejny in north-eastern Poland — the disc that `librewxr/tile_wet.png` covers
 #: with continuous precipitation, and the area `open_meteo/wet.json` was recorded for.
 WET_GEOMETRY = SampleGeometry(latitude=54.0191, longitude=23.0081, radius_km=5.0)
+
+#: Bielsko-Biala — inside the CHMI CZRAD composite, and the only geometry in the
+#: suite CHMI will answer for at all. `TEST_GEOMETRY` (Warszawa) is deliberately
+#: outside it, which is what makes the "silent outside its box" tests meaningful.
+#: It is also where the recorded `tests/fixtures/chmi/` frames were sampled.
+CHMI_GEOMETRY = SampleGeometry(latitude=49.8224, longitude=19.0584, radius_km=5.0)
 
 #: Frozen "now" used across the suite, close to when the fixtures were recorded.
 NOW = datetime(2026, 8, 25, 7, 0, tzinfo=UTC)
@@ -84,7 +92,7 @@ def load_fixture(*parts: str) -> Any:
 
 
 def load_bytes(*parts: str) -> bytes:
-    """Read a recorded binary response (a radar tile)."""
+    """Read a recorded binary response (a radar tile, composite or archive)."""
     return FIXTURES.joinpath(*parts).read_bytes()
 
 
@@ -98,6 +106,12 @@ def geometry() -> SampleGeometry:
 def wet_geometry() -> SampleGeometry:
     """A disc that the recorded wet tile covers with rain end to end."""
     return WET_GEOMETRY
+
+
+@pytest.fixture
+def chmi_geometry() -> SampleGeometry:
+    """A disc inside the CHMI composite — that source answers only for this one."""
+    return CHMI_GEOMETRY
 
 
 @pytest.fixture

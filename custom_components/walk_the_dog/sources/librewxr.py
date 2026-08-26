@@ -1,9 +1,9 @@
 """LibreWXR OPERA radar nowcast adapter.
 
 Fetches `weather-maps.json`, then one grayscale tile per not-yet-sampled frame,
-and reduces each tile to a single mm/h value for the configured disc. The only
-module allowed to use Pillow and image-related numpy
-(docs/ARCHITECTURE.md § Frame sampling strategy).
+and reduces each tile to a single mm/h value for the configured disc. One of the
+two image sources allowed to use Pillow and image-related numpy — the other is
+`meteor.py` (docs/ARCHITECTURE.md § Frame sampling strategy).
 
 Intensity calibration (pinned in phase 3 from the AGPL-3.0 LibreWXR source, see
 STATE.md): the renderer encodes reflectivity as
@@ -21,7 +21,7 @@ import asyncio
 import io
 import logging
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -41,6 +41,7 @@ from .base import (
     SampleGeometry,
     SourceSeries,
     SourceStatus,
+    dbz_to_mm_per_h,
     restate,
 )
 
@@ -62,6 +63,10 @@ SNOW = 0  # rain LUT only; the snow LUT would reuse grey levels 128-255
 STEP_S = 600  # 10-minute frames
 NOWCAST_FRAMES = 6  # +10...+60 min
 
+#: One fetch per published frame. LibreWXR's cadence is the grid slot, so this is a
+#: no-op on the standard cycle and a guard against the coordinator's faster one.
+MIN_INTERVAL_S = 10 * 60
+
 #: Self-imposed ceiling from the docs/DATA_SOURCES.md request budget.
 MAX_REQUESTS_PER_HOUR = 20
 
@@ -69,20 +74,11 @@ MAX_REQUESTS_PER_HOUR = 20
 GREY_NODATA = 0
 DBZ_OFFSET = 32  # grey = dBZ + 32
 
-#: Marshall-Palmer Z = 200 * R^1.6, inverted to R = (Z / 200) ** (1 / 1.6).
-MP_A = 200.0
-MP_B = 1.6
-
 #: Spatial aggregation over the disc: robust against single-pixel radar speckle.
 PERCENTILE = 90
 
 _TIMEOUT_S = 20
 _METERS_PER_PIXEL_EQUATOR = 156543.03392804097
-
-
-def dbz_to_mm_per_h(dbz: float) -> float:
-    """Marshall-Palmer reflectivity to rain rate (docs/DATA_SOURCES.md § Intensity mapping)."""
-    return float((10.0 ** (dbz / 10.0) / MP_A) ** (1.0 / MP_B))
 
 
 def grey_to_mm_per_h(grey: int) -> float:
@@ -165,12 +161,29 @@ class LibreWxrAdapter:
         self._mask: DiscMask | None = None
         self._mask_key: str | None = None
         self._last: FetchResult | None = None
+        self._last_fetch_at: datetime | None = None
 
     # --- adapter protocol ---------------------------------------------------
 
+    @property
+    def budget(self) -> RequestBudget:
+        """This adapter's rolling hourly request budget, for the registry to total."""
+        return self._budget
+
     def should_fetch(self, now: datetime) -> bool:
-        """LibreWXR is fetched every cycle; only a backoff can hold it back."""
-        return self._backoff.ready(now)
+        """Once per published frame, and never while a backoff is armed.
+
+        The interval matches the frame cadence rather than the cycle, so the
+        coordinator's sprint — which exists for a source that publishes every five
+        minutes — cannot make this one re-fetch a frame it already has. On the
+        ordinary 10-minute grid the elapsed time is exactly the interval, so this
+        changes nothing there.
+        """
+        if not self._backoff.ready(now):
+            return False
+        if self._last_fetch_at is None:
+            return True
+        return now - self._last_fetch_at >= timedelta(seconds=MIN_INTERVAL_S)
 
     def cached(self, now: datetime) -> FetchResult:
         """Re-present the last successful result, re-stated as stale once too old."""
@@ -194,6 +207,7 @@ class LibreWxrAdapter:
             return self._failed(now, str(err))
         self._backoff.record_success()
         self._last = result
+        self._last_fetch_at = now
         return result
 
     # --- implementation -----------------------------------------------------
@@ -378,6 +392,8 @@ def _is_frame(frame: Any) -> bool:
 __all__ = [
     "DiscMask",
     "LibreWxrAdapter",
+    # Re-exported: the Marshall-Palmer conversion moved to `base` when a second
+    # radar source needed it, and this keeps the phase 3 import path working.
     "dbz_to_mm_per_h",
     "grey_to_mm_per_h",
     "parse_weather_maps",

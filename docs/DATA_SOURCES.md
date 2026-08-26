@@ -45,37 +45,45 @@ rejected. This section is the short answer: **what the integration ships with to
 each source is worth to it. Every figure here is a constant in the code, named in the last row so
 the table can be checked rather than trusted.
 
-Only **one of the four is a radar.** LibreWXR extrapolates the EUMETNET OPERA composite; the other
-three are numerical models. That is why they carry different roles rather than being averaged.
+**Four of the five sources cover all of Poland; CHMI is regional.** LibreWXR and CHMI are
+radar; ICON-EU, KNMI HARMONIE and MET Norway are numerical models. That is why they carry
+different roles rather than being averaged.
+
+CHMI was added after phase 6. The trail started from the app analysis in
+[SOURCE_meteor_androworks.md](SOURCE_meteor_androworks.md), but the source that
+shipped is CHMI's own open-data service — see
+[its own section](#chmi--czrad-regional-radar) below.
 
 ### Time windows and intervals
 
-| | **LibreWXR** | **ICON-EU** | **KNMI HARMONIE** | **MET Norway** |
-|---|---|---|---|---|
-| Source id | `librewxr` | `icon_eu` | `knmi` | `metno` |
-| What it is | OPERA radar, extrapolated | DWD model | KNMI AROME model | ECMWF-driven model |
-| Role | timing precision | reliability baseline | independent model, freshest run | provider-level failover |
-| **Forecast horizon** | now … **+60 min** | **+12 h** | **+12 h** | **+12 h** |
-| **Step of the series** | **10 min** (7 frames) | 60 min | 60 min | 60 min |
-| Publisher's cadence | every 10 min | every 3 h | **every 1 h** | ~every 2 h |
-| **How often we fetch** | every cycle (10 min) | every 30 min | every 30 min (same request) | ≥ 10 min, **only while Open-Meteo is failing** |
-| Dropped as stale after | 30 min | 9 h | 3 h | 6 h |
+| | **LibreWXR** | **CHMI** | **ICON-EU** | **KNMI HARMONIE** | **MET Norway** |
+|---|---|---|---|---|---|
+| Source id | `librewxr` | `chmi` | `icon_eu` | `knmi` | `metno` |
+| What it is | OPERA radar, extrapolated | **CZRAD radar, extrapolated** | DWD model | KNMI AROME model | ECMWF-driven model |
+| Role | timing precision | **second radar, SW Poland only** | reliability baseline | independent model, freshest run | provider-level failover |
+| Covers | all of Poland | **only its own box** | all of Poland | all of Poland | all of Poland |
+| **Forecast horizon** | now … **+60 min** | now … **+60 min** | **+12 h** | **+12 h** | **+12 h** |
+| **Step of the series** | **10 min** (7 frames) | **10 min** (7 frames) | 60 min | 60 min | 60 min |
+| Publisher's cadence | every 10 min | **every 5 min** (measured) | every 3 h | **every 1 h** | ~every 2 h |
+| **How often we fetch** | every cycle (10 min) | every cycle (10 min) | every 30 min | every 30 min (same request) | ≥ 10 min, **only while Open-Meteo is failing** |
+| Dropped as stale after | 30 min | 15 min | 9 h | 3 h | 6 h |
 
-Fetch cadences and horizons live in the adapters (`sources/librewxr.py`, `sources/open_meteo.py`,
-`sources/met_norway.py`); the publisher cadences and the 3× staleness rule live in
-`UPDATE_INTERVAL_S` and `STALE_FACTOR` in `sources/base.py`.
+Fetch cadences and horizons live in the adapters (`sources/librewxr.py`, `sources/chmi.py`,
+`sources/open_meteo.py`, `sources/met_norway.py`); the publisher cadences and the 3× staleness rule
+live in `UPDATE_INTERVAL_S` and `STALE_FACTOR` in `sources/base.py`.
 
 ### Resolution, weight and cost
 
-| | **LibreWXR** | **ICON-EU** | **KNMI HARMONIE** | **MET Norway** |
-|---|---|---|---|---|
-| Effective cell at 52° N | **~2 km** | 6.95 km N-S | 5.5 km | ~10 km |
-| Consensus reliability weight | **1.00** | 0.80 | 0.90 | 0.70 |
-| How the disc is sampled | every pixel inside the disc, p90 | 5 points (centre + N/E/S/W) | 5 points, **one shared request** | 1 point (centre) |
-| Wire format | PNG tiles, z=8, ~376 m/pixel | JSON | JSON | JSON |
-| Self-imposed request ceiling | 20 /h | 6 /h (shared with KNMI) | — | 2 /h |
-| API key | none | none | none | none (identifying `User-Agent` mandatory) |
-| Licence | CC BY 4.0 (OPERA) | CC BY 4.0 (Open-Meteo + DWD) | CC BY 4.0 (Open-Meteo + KNMI) | CC BY 4.0 / NLOD |
+| | **LibreWXR** | **CHMI** | **ICON-EU** | **KNMI HARMONIE** | **MET Norway** |
+|---|---|---|---|---|---|
+| Effective cell at 52° N | **~2 km** | **1 km** (published, and confirmed by the frame extent) | 6.95 km N-S | 5.5 km | ~10 km |
+| Consensus reliability weight | **1.00** | 0.95 **× range factor** (0.67 at Bielsko-Biała) | 0.80 | 0.90 | 0.70 |
+| How the disc is sampled | every pixel inside the disc, p90 | every pixel inside the disc, p90 | 5 points (centre + N/E/S/W) | 5 points, **one shared request** | 1 point (centre) |
+| Wire format | PNG tiles, z=8, ~376 m/pixel | one 680 × 460 PNG composite + one tar of 6 | JSON | JSON | JSON |
+| Self-imposed request ceiling | 20 /h | 18 /h | 6 /h (shared with KNMI) | — | 2 /h |
+| API key | none | none | none | none | none (identifying `User-Agent` mandatory) |
+| Transport | HTTPS | HTTPS | HTTPS | HTTPS | HTTPS |
+| Licence | CC BY 4.0 (OPERA) | CC BY 4.0 (CHMI) | CC BY 4.0 (Open-Meteo + DWD) | CC BY 4.0 (Open-Meteo + KNMI) | CC BY 4.0 / NLOD |
 
 Cell sizes and weights are `CELL_KM` and `RELIABILITY` in `sources/base.py`; the attribution
 strings the sensor must show are `ATTRIBUTION` in the same module.
@@ -90,11 +98,208 @@ strings the sensor must show are `ATTRIBUTION` in the same module.
   up as an independent one.
 - **ICON-EU and KNMI cost one HTTP request between them**, covering both models and all five
   sample points.
+- **CHMI is silent for most of Poland.** It answers only when the whole sampled disc lies inside
+  the CZRAD composite; anywhere else it reports `not_applicable`, makes no request and is simply
+  absent from the vote. For a user in Warszawa the integration behaves exactly as it did before it
+  existed.
+- **CHMI's whole forecast costs one request.** The +10…+60 min frames ship as a single tar per
+  run, so a cycle is 2 requests for a 7-slot radar series.
 - **Zero requests outside a walk window**, and zero while the alerting switch is off. The whole
-  budget is ≤ 28 requests/hour inside a window and ≤ 200/day.
+  budget is ≤ 28 requests/hour inside a window outside CHMI's box, ≤ 58 inside it — the
+  difference being CHMI's own 5-minute publication rate. Every adapter gates its own fetch on its
+  own publication interval, so the request count follows the providers' rates and not how often
+  the coordinator happens to wake (ARCHITECTURE.md § Coordinator scheduling).
 - **No Polish radar is in the set.** IMGW-PIB publishes observations only (11 h stale when
   measured) and RainViewer stopped serving forecast frames publicly. Both are in
-  [Rejected candidates](#rejected-candidates) with the evidence.
+  [Rejected candidates](#rejected-candidates) with the evidence. CHMI's radars are Czech, not
+  Polish; they reach south-western Poland because the CZRAD composite has a margin around
+  Czechia.
+
+---
+
+## CHMI — CZRAD, regional radar
+
+Added after phase 6, outside the phase plan, at the maintainer's request. It is the only source
+here that was **not** part of the phase 0 evaluation.
+
+### How this ended up at CHMI and not at Meteor
+
+The request was to wire in the Meteor app's radar, analysed in
+[SOURCE_meteor_androworks.md](SOURCE_meteor_androworks.md). Probing the live service settled it
+differently **(measured 2026-08-26)**:
+
+- `http://meteor.androworks.org/v2/feed` answers, but returns **`Content-Length: 0`** — the source
+  note's "the response body *is* the newest frame" does not hold. Retried with a stale
+  `X-Frame-Date`, with a `?date=` parameter, and on the `11.` and `111.` frame hosts: always empty.
+- Every documented frame path — `/v2/czrad-z_max3d_masked/…` and `/v2/czrad-z_max3d_fct_masked/…` —
+  answers **404**, on `meteor.androworks.org` and on all three `*.fbck` hosts.
+- `X-Next-Query` is **milliseconds until the next poll** (observed 45 935 and ~240 000 against a
+  5-minute publication cadence), not epoch milliseconds. `X-Future-Levels` is never sent at all.
+
+What the note *did* get right is the product identity: `pacz2gmaps3.z_max3d` is CHMI's own file
+naming. CHMI publishes these products itself, on **`opendata.chmi.cz`**, over HTTPS, with a
+specification document and a published colour scale. That is the better upstream the note itself
+recommended, so the adapter went straight there and Meteor is credited only as the discovery path.
+
+### What it is
+
+`MAX_Z` — column-maximum reflectivity from the CZRAD network (radars Brdy-Praha and Skalky) — plus
+`FCT_MAX_Z`, an extrapolation nowcast of the same field at +10…+60 min in 10-minute steps. Both are
+pre-rendered PNGs this project only decodes and samples. It is a **second radar network with its own
+extrapolation** over the area the maintainer actually walks in, at no key cost.
+
+Endpoints (5-minute run cadence, stamps in UTC):
+
+| Purpose | URL |
+|---|---|
+| Observed composite | `…/composite/maxz/png/pacz2gmaps3.z_max3d.{stamp}.0.png` |
+| Forecast, all 6 frames | `…/composite/fct_maxz/png/pacz2gmaps3.fct_z_max.{stamp}.ft60s10.tar` |
+| Colour scale | `…/radar/scl/scl-dbz-mmh.png` |
+| Specification | `…/radar/radar_description_en.pdf` |
+
+There is no feed and none is needed: runs land on a fixed 5-minute grid, so the adapter computes the
+newest stamp from the clock (allowing ~2 min for publication) and steps back at most three runs.
+**One cycle is two requests** — the tar carries the whole forecast.
+
+### Intensity calibration — verified, not assumed
+
+CHMI's published legend (`scl-dbz-mmh.png`) prints **4, 8, 12 … 60 dBZ** beside the 15 colours: a
+4 dBZ ladder, exactly 15 steps. Its mm/h gridlines for 0.1, 1, 10 and 100 sit one whole dBZ below
+the 8, 24, 40 and 56 labels — which is where `Z = 200·R^1.6` puts them (7.01, 23.01, 39.01, 55.01
+dBZ). So **CHMI's own conversion is the Marshall-Palmer relation this project already uses**, and
+both radar sources land on one scale by construction rather than by coincidence.
+
+The provisional calibration this source shipped with was therefore correct, and the discount it
+carried is gone. What remains is **quantisation**: CHMI publishes 15 steps of 4 dBZ where
+LibreWXR's grey ramp carries 1 dBZ, and at the light end one step separates 0.065 from 0.115 mm/h —
+i.e. voting dry from voting wet against the default `light` threshold. Hence weight 0.95, just
+below LibreWXR.
+
+### Range weighting — the one source whose weight is not a constant
+
+The CZRAD *grid* is a rectangle; the radars' *sight* is not. A beam climbs and widens with range,
+so the same instrument is a different measurement at 40 km and at 170 km. CHMI has exactly two
+radars, and it states its own ceiling for precipitation-intensity estimation as **"approximately
+150–200 km from the radar"**.
+
+| Radar | Position | Antenna |
+|---|---|---|
+| Skalky u Protivanova | 49.501 N, 16.790 E | 767 m |
+| Brdy-Praha | 49.658 N, 13.818 E | 916 m |
+
+Over south-western Poland only Skalky is in range at all — Brdy-Praha is 377 km from
+Bielsko-Biała. And this is the uncomfortable part:
+
+| Over Bielsko-Biała | Range | 0.5° beam centre | Beam width |
+|---|---|---|---|
+| **Skalky (CZ)** — the only CZRAD radar in range | **167 km** | **3.87 km** | 2.9 km |
+| **Ramża (PL)** — feeds OPERA, and therefore LibreWXR | **44 km** | **0.85 km** | 0.76 km |
+
+So around Bielsko-Biała **CHMI is the weaker-sighted of the two radar sources, not the stronger
+one.** At ~3.9 km the beam is above the layer that produces drizzle and shallow orographic rain in
+the Beskids — which is much of the weather this integration exists to catch.
+
+`range_factor()` in `sources/chmi.py` therefore scales the source's weight: full to 120 km (beam
+centre ~2.7 km), then linear decay to **0.5 at 200 km**, floored there. Bielsko-Biała lands at
+0.705, so `chmi` votes at **0.95 × 0.705 = 0.67** — below both NWP models, and low enough that when
+`librewxr` says wet and `chmi` says dry, the slot still comes out wet (1.00 / 1.67 = 0.60).
+Brno, Praha and Ostrava keep the full 0.95.
+
+**What the weighting is and is not based on.** It is based on beam geometry and CHMI's own stated
+limit. It is **not** fitted to a measured error curve — see the comparison below, which establishes
+that the two sources differ a great deal but does not pin the shape of the curve.
+
+### Measured: CZRAD against OPERA across the whole domain
+
+Both composites sampled on the same 5 km discs, same p90, at 08:20–08:25 UTC on 2026-08-26; 286
+grid points inside the box, 64 of which had echo in at least one **(measured)**:
+
+| Distance from a CZ radar | n | CZRAD mean | OPERA mean | only OPERA sees rain | only CZRAD |
+|---|---|---|---|---|---|
+| 0–80 km | 13 | 0.53 mm/h | 1.43 mm/h | 4 | 0 |
+| 80–120 km | 10 | 0.33 | 0.90 | 1 | 0 |
+| 120–150 km | 16 | 0.27 | 0.67 | 5 | 0 |
+| 150+ km | 25 | 0.67 | 1.89 | **8** | 2 |
+
+Two things follow, and only two:
+
+1. **They are not interchangeable.** CZRAD reads roughly 3× lower in mm/h (≈7 dBZ), and the
+   detection asymmetry is stark: **18 points where OPERA saw rain and CZRAD saw none, against 2 the
+   other way.** Swapping one source for the other by region would make the integration reach
+   different verdicts on the same weather depending on which side of an invisible line the user
+   lives — worse than either source alone. Both vote, everywhere both are available.
+2. **Which one is right in absolute terms is still unknown**, and this comparison cannot settle it.
+   The gap persists close to the Czech radars too (0.53 vs 1.43 at 0–80 km), where overshoot does
+   not explain it, and the miss rate does not rise cleanly with range. The other candidate is on
+   the LibreWXR side: it is a standing open question in `STATE.md` that **LibreWXR fuses NWP model
+   layers into its tiles outside radar coverage**, which would inflate it. Settling this needs
+   ground truth — IMGW rain gauges — and belongs in phase 8.
+
+### Geometry — from CHMI's published extent
+
+The frame is **680 × 460 px**, and CHMI publishes two extents for it:
+
+- whole image: E 11.267–20.770, N 48.047–52.167
+- data: E 11.267–19.624, N 48.047–51.458, EPSG:3857, 1 × 1 km
+
+Applying the first to the real frame puts the data rectangle at exactly **(0, 82)–(598, 460)** and
+gives 1.005 km/pixel — which is the check that the projection is being read correctly, since the
+second extent only lands on whole-pixel boundaries if the first is applied right. (The Meteor app's
+"597 × 377 at offset +1,+82" was the same rectangle, inset by a pixel.)
+
+**Coverage gating:** the adapter requires the *whole sampled disc* to sit inside the data
+rectangle, inset by 0.3°. Outside the data rectangle every pixel is transparent, so a disc hanging
+over the edge would read its missing half as "no echo" and quietly drag the percentile down.
+Bielsko-Biała is comfortably inside; Kraków is past the eastern edge; Warszawa is outside entirely.
+
+### Two traps the live check caught
+
+1. **Use the unmasked products.** CHMI also publishes `png_masked` variants ("displayed considering
+   precipitation on the earth's surface"), which is what the Meteor app used and which sounds like
+   the better product for this project. They are rendered **with blending**, so their pixels are not
+   palette colours: sampling one over Bielsko-Biała gave `#B1B1D0`, whose nearest palette neighbour
+   is the white top of the ramp — **205 mm/h reported for light drizzle**. The unmasked frames carry
+   exact palette colours.
+2. **Match colours exactly, never by nearest neighbour.** Following from the above, the adapter
+   treats an unrecognised colour as *no data* and fails the frame when the disc is mostly
+   unrecognised. The grey `#C4C4C4` domain outline drawn into the composite is excluded the same
+   way — under nearest-colour it too resolves to the top of the ramp.
+
+### Cross-check against LibreWXR over Bielsko-Biała
+
+Both adapters, same 5 km disc, same p90, at 07:40–08:50 UTC on 2026-08-26 **(measured)**:
+
+| Slot (UTC) | LibreWXR / OPERA | CHMI / CZRAD |
+|---|---|---|
+| 07:40 observed | grey 44 → **12 dBZ** → 0.205 mm/h | level 3 → **12 dBZ** → 0.205 mm/h |
+| 07:50 → 08:20 | 15, 16, 14, 12 dBZ → 0.32 … 0.21 mm/h | 12 dBZ → 0.205 mm/h |
+| 08:30 → 08:50 | 11 dBZ → 0.18 mm/h, then no echo | 8 dBZ → 0.115 mm/h |
+
+Two independent radar networks, two unrelated colour encodings, and the observed frame agrees to
+the dBZ. Both call it light drizzle easing over the hour. That is the strongest evidence available
+that the calibration and the projection are both right.
+
+### Attribution
+
+CC BY 4.0, and the data is the institute's own: credit the **Czech Hydrometeorological Institute**
+and `opendata.chmi.cz`, and state that the data was modified — which it is, since we resample and
+reclassify it.
+
+### Open items
+
+Carried into `STATE.md` rather than left here:
+
+1. **Establish which of the two radars is right in absolute terms**, against IMGW rain gauges.
+   The ~3× systematic gap above is the largest unexplained thing about this source set, and it is
+   not obviously CHMI's fault: LibreWXR's NWP fusion is an equally good suspect. Phase 8.
+2. **Measure the `librewxr` / `chmi` correlation.** Phase 0's rule is that source independence is
+   established by measurement, and this pair has not been measured. The concern is smaller than it
+   first looked — over Bielsko-Biała the two composites are dominated by *different* radars (Ramża
+   at 44 km for OPERA, Skalky at 167 km for CZRAD), so they are closer to independent there than
+   the shared-OPERA-ingest worry implied. Confirm it rather than assume it.
+3. Confirm the exact CC BY 4.0 attribution wording CHMI prefers before 1.0.0.
+4. Watch the `png_masked` question: it is the meteorologically better product, and decoding it
+   would need un-blending or the HDF5 variant instead. Revisit only with a way to get exact values.
 
 ---
 
@@ -300,11 +505,18 @@ always covers at least one full cell of the coarsest source that is actually con
 ## Fallback strategy
 
 **Roles.** LibreWXR supplies temporal precision; ICON-EU and KNMI HARMONIE supply reliability;
-MET Norway supplies provider-level redundancy and is polled *only* when Open-Meteo has failed.
+MET Norway supplies provider-level redundancy and is polled *only* when Open-Meteo has failed;
+CHMI supplies a second radar opinion, but only inside its own box.
+
+**Regional availability.** A source that cannot serve the configured location reports
+`not_applicable` and is never polled. This is a property of *where the user lives*, decided once,
+and is deliberately distinct from `out_of_range` (a slot a fetched source does not reach) and from
+`disabled` (a dormancy the next cycle could end). Only CHMI uses it today.
 
 **Staleness.** A source is stale when its newest usable frame is older than 3× its nominal update
-interval — LibreWXR > 30 min, ICON-EU > 9 h since the model run, KNMI HARMONIE > 3 h, MET Norway
-`updated_at` > 6 h. Stale data is dropped from consensus for that cycle, not used at reduced weight.
+interval — LibreWXR > 30 min, CHMI > 15 min (it publishes every 5), ICON-EU > 9 h since the model
+run, KNMI HARMONIE > 3 h, MET Norway `updated_at` > 6 h. Stale data is dropped from consensus for that cycle, not
+used at reduced weight.
 
 **Transient failures.** Per source, per cycle: at most 3 attempts with exponential backoff
 (1, 2, 4 min, capped at 15 min). After that the source is marked unavailable for the cycle. The
@@ -317,7 +529,7 @@ again after Open-Meteo succeeds twice in a row. Never poll both routinely.
 
 | Contributing sources | Behaviour |
 |---|---|
-| 3 | Full confidence range available |
+| 3+ | Full confidence range available |
 | 2 | Confidence capped at 0.8 |
 | 1 | Confidence capped at 0.5, result flagged `degraded` |
 | 0 | Sensor `unavailable`, **no notification** — never guess |
@@ -340,7 +552,9 @@ enable switch is off**. That is 10 h/day active, 60 polling cycles/day.
 | Open-Meteo (ICON-EU + KNMI in **one** request) | 1 HTTP request | 6 requests | ≤ 60 | 600/min, 5 000/h, 10 000/day | ≤ 0.12 % of the minutely limit |
 | Open-Meteo, counted as *calls* (worst case: each of 5 sample points counts separately) | 5 calls | 30 calls | ≤ 300 | 10 000/day | **3 % of the daily limit** |
 | MET Norway (failover only, 1 point, honouring `Expires`) | ≤ 0.5 request | ≤ 2 requests | ≤ 20 | 20 req/s; ≥ 10 min between polls | negligible |
-| **Total** | | **≤ 28 HTTP requests/hour while a walk window is near; 0 otherwise** | **≤ 200/day** | | |
+| **CHMI** (only inside its box; 1 forecast tar + 1 observed frame) | 2 requests | ≤ 30 (self-imposed cap; ≤ 24 in practice, one fetch per published 5-minute run) | ≤ 200 | none published; a national met service's open-data host | ~110 KB/fetch |
+| **Total, outside CHMI's box** | | **≤ 28 HTTP requests/hour while a walk window is near; 0 otherwise** | **≤ 200/day** | | |
+| **Total, inside CHMI's box** | | **≤ 46 HTTP requests/hour while a walk window is near; 0 otherwise** | **≤ 320/day** | | |
 
 Notes behind the numbers:
 
@@ -357,6 +571,12 @@ Notes behind the numbers:
   `If-Modified-Since`.
 - LibreWXR's cost is dominated by the frame cache working: frames shift by one per 10-minute cycle,
   so a warm cache fetches only newly published frames.
+- **CHMI's forecast is one tar per run**, holding all six +10…+60 min frames (`ft60s10`), so its
+  whole nowcast costs a single request — 92 KB measured — plus one for the observed frame. The
+  frame cache cannot spare it (a new run every 5 minutes means new content every cycle), but at two
+  requests a cycle it does not need to. This raises the in-window budget beyond the phase 0 figure,
+  a deviation recorded in `STATE.md`; the bandwidth, not the request count, is the thing for the
+  phase 8 performance pass to look at.
 
 Every recommended source fits inside its documented limits with at least an order of magnitude to
 spare, and the integration is silent outside active windows.
@@ -371,8 +591,11 @@ spare, and the integration is silent outside active windows.
   with contact information is mandatory on every request.
 - **LibreWXR** — CC-BY-4.0: "Weather data via LibreWXR (librewxr.net)", preserving the upstream
   attributions (EUMETNET OPERA for Poland).
+- **CHMI** — CC-BY-4.0: credit the **Czech Hydrometeorological Institute** and `opendata.chmi.cz`.
+  ČHMÚ publishes its open data free of charge under CC BY 4.0; confirm the institute's preferred
+  attribution wording before 1.0.0.
 
-All three require stating that the data was modified — which it is, since we resample and
+All of them require stating that the data was modified — which it is, since we resample and
 reclassify it.
 
 ## Sources

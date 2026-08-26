@@ -44,9 +44,10 @@ config entry. The **location is entry data, not an option**: it is set once in t
 |---|---|---|---|---|
 | Alert radius around home | `radius_km` | float, 4–15, 0.5 steps | **5.0 km** | Derived from measured source resolutions — the minimum guarantees the sampled disc spans ≥ 1 full ICON-EU cell; see [ARCHITECTURE.md](ARCHITECTURE.md) § Alert radius decision |
 | Intensity threshold | `intensity_threshold` | `light` \| `moderate` \| `heavy` | **`light`** (≥ 0.1 mm/h) | Scale in [DATA_SOURCES.md](DATA_SOURCES.md); a slot counts as rainy when the consensus intensity reaches the chosen class |
-| Earlier margin | `earlier_margin_min` | int minutes, 0–180, 10-min steps | 60 | How far back to search for a dry window |
-| Later margin | `later_margin_min` | int minutes, 0–180, 10-min steps | 30 | How far forward to search |
+| Earlier margin | `earlier_margin_min` | int minutes, 0–180, 10-min steps | 60 | How far back to search for a dry window — **and when the notification arrives**. Values over 60 min require confirming the `beyond_radar` warning: the radars forecast 60 minutes ahead, so a message sent earlier than that can only rest on hourly models |
+| Later margin | `later_margin_min` | int minutes, 0–180, 10-min steps | 30 | How far forward to search. Needs no warning: a later window is always re-checked as it comes into radar range, so a wide margin costs only a few more requests |
 | Average walk duration | `walk_duration_min` | int minutes, 5–240, 5-min steps | **required, no default** | Values over 30 min require confirming the `long_walk` warning (nowcast reliability) |
+| Confirm before setting off | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, or the rain has gone and the walk is back to its normal time. Only ever sent when something was already said about that walk |
 | Default notification device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. Used for any walk that has no devices of its own. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means no push notification. |
 | Per-walk alerts | `walk_targets` | map | *(unset)* | One entry per walk the user configured something for. See [Per-walk alerts](#per-walk-alerts). |
 | Fire custom event | `fire_event` | bool | `false` | Emits `walk_the_dog_alert`; payload documented below |
@@ -58,6 +59,25 @@ Optional options that are left empty are **absent** from the stored options, nev
 Internal, not user-facing: `lead_time` = 30 min — how long before `T − earlier_margin` polling
 starts so the decision moment has fresh data (decision in
 [ARCHITECTURE.md](ARCHITECTURE.md) § Coordinator scheduling & polling windows).
+
+### Timings and what the radar can see
+
+Both warning steps measure the same thing: the radar nowcasts reach **60 minutes** ahead
+(`NOWCAST_HORIZON_MIN`) and nothing further, while the hourly models reach 12 hours. Past that
+line the answer is still sound about *whether* it will rain, but vague about *when* — and *when*
+is the whole question. So:
+
+- `earlier_margin` ≤ 60 min gets a radar-backed answer the moment the notification is sent.
+  Larger is allowed, and the `beyond_radar` step explains what it costs before storing it.
+- `walk_duration` > 60 min can never be fully radar-backed at the moment you are told to go,
+  because the far end of the walk is past the radar's reach whatever the margin is. The
+  `long_walk` step warns from 30 min upwards.
+- `later_margin` has no such limit. A window an hour ahead is one the radar will have seen long
+  before you have to leave, which is exactly why the integration keeps watching instead of
+  deciding once — see [ARCHITECTURE.md](ARCHITECTURE.md) § Coordinator scheduling.
+
+A recommendation the radar has not yet reached is marked `provisional` in the payload, and the
+push says so in words.
 
 ## Per-walk alerts
 
@@ -96,12 +116,20 @@ same time.
 
 ## Entities
 
-Exactly two, both on one service device named after the config entry.
+Three, on one service device named after the config entry. Each answers a different
+question, which is why they are not one entity with more attributes.
 
 | Entity | Id | What it is |
 |---|---|---|
 | Walk recommendation | `sensor.walk_the_dog_walk_recommendation` | What to do about the **next upcoming walk** — the walk the coordinator is currently watching |
+| Walk window | `binary_sensor.walk_the_dog_walk_window` | Whether a walk window is open right now, i.e. whether cycles are running. `on` is exactly the sensor's `polling` attribute, given an entity of its own so an automation or a dashboard card can react to it without parsing a text state. Attributes: `scheduled_start`, `alerting` |
 | Alerting | `switch.walk_the_dog_alerting` | Master switch. Off means no timers, no requests, no cycles and no notifications. Default on; the position survives a restart |
+
+## Services
+
+| Service | Fields | What it does |
+|---|---|---|
+| `walk_the_dog.walked` | none | Closes the walk being watched right now: no further advice about it, and no further weather requests for it. Alerting itself stays on and the next walk is picked up as usual. The *Already went* button on the notification calls the same thing. Not remembered across a restart — a Home Assistant restarted inside the window picks the walk back up |
 
 ### Sensor states
 
@@ -116,13 +144,35 @@ Exactly two, both on one service device named after the config entry.
 `unavailable` means the coordinator itself has no data — a bug or a failed setup, not a
 forecast outcome.
 
+### Per-source states
+
+`sources[].state` in the attributes and the event payload:
+
+| State | Meaning |
+|---|---|
+| `ok` | Fetched, fresh, and it voted on the walk |
+| `stale` | Its data is older than 3× the publisher's own cadence, so it was dropped this cycle |
+| `failed` | The provider could not be reached, or answered with something unusable |
+| `out_of_range` | Fetched and fresh, but its forecast does not reach the walk — a radar nowcast stops at +60 min |
+| `disabled` | Dormant on purpose: MET Norway while Open-Meteo is healthy |
+| `not_applicable` | The source cannot serve **this location at all** and is never polled. Only the regional `chmi` radar reports it, for everywhere outside the Czech composite — which is most of Poland |
+
+`not_applicable` is not a problem to fix: it is the normal, permanent state of a regional source
+for a location it does not cover, and nothing about the recommendation is worse for it.
+
 ### Sensor attributes
 
-Every key of the event payload below, plus four about the integration's own state:
+Every key of the event payload below, plus these about the integration's own state:
 `alerting` (the switch), `polling` (inside a walk window right now), `failover` (MET Norway is
-standing in for Open-Meteo), `last_fetch` (ISO-8601 UTC), and `attribution` — the licence
-credits of the sources that actually contributed, which [DATA_SOURCES.md](DATA_SOURCES.md)
-obliges the integration to show.
+standing in for Open-Meteo), `last_fetch` (ISO-8601 UTC), `requests_last_hour` and
+`requests_hourly_cap` (see below), and `attribution` — the licence credits of the sources that
+actually contributed, which [DATA_SOURCES.md](DATA_SOURCES.md) obliges the integration to show.
+
+`requests_last_hour` / `requests_hourly_cap` total the per-source rolling budgets every adapter
+polices itself against before it sends anything. A walk window can stay open for hours while a
+"wait until" answer is re-checked, so what that costs the providers is published rather than
+merely promised. The cap is the sum of every adapter's own hourly ceiling, dormant and
+not-applicable sources included.
 
 ## Notification behavior
 
@@ -134,6 +184,29 @@ at.
 After the first message, every later cycle re-checks material change (defined precisely in
 [ARCHITECTURE.md](ARCHITECTURE.md) § Material change) and stays silent unless something really
 changed. Nothing is ever sent about a walk that looks dry: silence means "go as planned".
+
+**Nothing is ever sent about a moment that has passed.** The walk stays under watch after its
+scheduled time — that is how a "wait until" answer given beyond the radar's reach gets confirmed
+— but a suggestion expires when the time it names does, and `no_dry_window` expires when the
+walk begins. A direction that flipped only because the clock moved is not re-announced either
+(ARCHITECTURE.md § Material change, *Actionability*).
+
+Every alert about one walk carries the same companion-app `tag`, keyed on the walk's UTC start,
+so a revised recommendation **replaces** the message it supersedes on the phone rather than
+stacking a second, contradictory one underneath it.
+
+Every push carries one action button, **Already went**, which closes the walk the way the
+`walk_the_dog.walked` service does. The walk's UTC start is encoded in the action identifier —
+the one field both companion apps reliably hand back — so a leftover notification from yesterday
+cannot close today's walk. Tapping it also sends `clear_notification` to the walk's other
+devices; only the phone that was tapped dismisses its own copy.
+
+With `confirm_margin_min` set, one further message goes out that many minutes before you set
+off, provided something was already said about the walk. It says either that the plan still
+stands, or that the rain has gone and the walk is back to its normal time. The second is the
+reason the option exists: a `later` recommendation relaxing to "walk as planned" is not an alert
+direction, so silence alone would leave you waiting for a window that stopped being necessary.
+It is sent once per walk, and an alert that happens to land at that moment counts as it.
 
 The message goes to the walk's own devices, or to `notify_service` when it has none. Every
 device in the list gets the same message.
@@ -157,6 +230,7 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
   "direction": "earlier",
   "scheduled_start": "2026-08-25T05:00:00+00:00",
   "recommended_start": "2026-08-25T04:30:00+00:00",
+  "recommended_end": "2026-08-25T05:00:00+00:00",
   "shift_min": -30,
   "duration_min": 30,
   "risk": 1.0,
@@ -164,8 +238,10 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
   "expected_intensity": "moderate",
   "degraded": false,
   "horizon_limited": false,
+  "provisional": false,
   "data_age_s": 0,
   "muted": false,
+  "confirmation": false,
   "sources": [
     {
       "source_id": "icon_eu",
@@ -185,7 +261,8 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
 |---|---|---|
 | `direction` | `none` \| `earlier` \| `later` \| `no_dry_window` \| `unknown` | The engine's word; the sensor renders `none` as `ok` |
 | `scheduled_start` | ISO-8601 UTC \| `null` | The walk as configured |
-| `recommended_start` | ISO-8601 UTC \| `null` | Where to move it; equals `scheduled_start` when the walk is already dry, `null` when there is nowhere to move it |
+| `recommended_start` | ISO-8601 UTC \| `null` | Where to move it; equals `scheduled_start` when the walk is already dry, `null` when there is nowhere to move it. Never a moment that has already passed |
+| `recommended_end` | ISO-8601 UTC \| `null` | `recommended_start + duration` — when the suggested walk gets home |
 | `shift_min` | int \| `null` | Signed minutes; negative means earlier |
 | `duration_min` | int \| `null` | `average_walk_duration` |
 | `risk` | 0.0–1.0 \| `null` | Weighted fraction of sources predicting rain in the worst slot of the scheduled window. **Not a probability of rain** |
@@ -193,9 +270,16 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
 | `expected_intensity` | `none` \| `light` \| `moderate` \| `heavy` \| `null` | Heaviest expected rain over the scheduled window |
 | `degraded` | bool | Some slot rested on a single source |
 | `horizon_limited` | bool | The walk reaches past what the sources forecast |
+| `provisional` | bool | No radar reaches the recommended window, so the timing rests on hourly models. An early answer the coordinator keeps re-checking, not a final one |
 | `data_age_s` | int \| `null` | Age of the freshest source that voted |
 | `muted` | bool | The push was suppressed for this alert — by the walk's own mute switch or by auto-mute |
+| `confirmation` | bool | This is the pre-departure reassurance rather than a new recommendation |
 | `sources` | list | One entry per source: its own verdict over the scheduled window, its status, its weight and its peak |
+
+`weight` is the source's static reliability decayed by how old its data is — except for `chmi`,
+whose static weight is *also* scaled by how far the location is from the nearest Czech radar, so
+the same source is worth less near the edge of its range than in the middle of it
+([DATA_SOURCES.md](DATA_SOURCES.md) § CHMI).
 
 `risk`, `confidence` and `expected_intensity` are `null` — never `0` — when no source reaches
 the scheduled window, so "we do not know" can never be read as "no rain".

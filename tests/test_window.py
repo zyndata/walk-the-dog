@@ -34,13 +34,16 @@ from custom_components.walk_the_dog.engine.window import (
     VERDICT_UNKNOWN,
     VERDICT_WET,
     Recommendation,
+    Search,
     WindowVerdict,
     candidate_starts,
     evaluate_window,
     evaluation_slots,
+    is_actionable,
     is_material_change,
     recommend,
     source_breakdown,
+    superseded_by_the_clock,
 )
 from custom_components.walk_the_dog.sources.base import STATE_OK, UPDATE_INTERVAL_S
 
@@ -85,7 +88,7 @@ def _consensus(
     return build_consensus(
         series,
         statuses,
-        slots=evaluation_slots(T, duration, EARLIER, LATER),
+        slots=evaluation_slots(T, Search(duration, EARLIER, LATER)),
         threshold=threshold,
         now=now,
     )
@@ -98,14 +101,8 @@ def _agreed(*wet_indices: int, length: int = SLOT_COUNT, **kwargs):
 
 
 def _recommend(consensus, *, duration: timedelta = DURATION, later: timedelta = LATER, **kwargs):
-    return recommend(
-        consensus,
-        scheduled_start=T,
-        duration=duration,
-        earlier_margin=kwargs.pop("earlier", EARLIER),
-        later_margin=later,
-        **kwargs,
-    )
+    search = Search(duration, kwargs.pop("earlier", EARLIER), later)
+    return recommend(consensus, scheduled_start=T, search=search, **kwargs)
 
 
 # --- evaluating a single window -------------------------------------------
@@ -207,7 +204,7 @@ def test_a_stale_source_leaves_the_survivors_to_decide() -> None:
     consensus = build_consensus(
         series,
         [make_status(item.source_id) for item in series],
-        slots=evaluation_slots(T, DURATION, EARLIER, LATER),
+        slots=evaluation_slots(T, Search(DURATION, EARLIER, LATER)),
         threshold=INTENSITY_THRESHOLD_LIGHT,
         now=NOW,
     )
@@ -489,3 +486,141 @@ def test_a_change_of_intensity_class_is_material() -> None:
     assert not is_material_change(
         previous, _rec(DIRECTION_NO_DRY_WINDOW, dry=False, risk=0.9, peak=1.2)
     )
+
+
+# --- the clock ------------------------------------------------------------
+
+
+def test_candidates_that_have_already_started_are_dropped() -> None:
+    """A window is only a candidate while it can still be set off for."""
+    starts = candidate_starts(T, EARLIER, LATER, not_before=T)
+
+    assert starts
+    assert all(start >= T for start in starts)
+
+
+def test_the_search_offers_only_windows_that_have_not_started() -> None:
+    """One forecast, two answers — which one depends on what time it is.
+
+    Rain covers the whole scheduled walk and nothing else. An hour beforehand the
+    nearest dry window is behind the walk; by the walk's own start that window has
+    gone, and the only honest answer is the one still ahead.
+    """
+    consensus = _agreed(SCHEDULED_INDEX, SCHEDULED_INDEX + 1, SCHEDULED_INDEX + 2)
+
+    ahead_of_time = _recommend(consensus, now=NOW)
+    at_the_walk = _recommend(consensus, now=T)
+
+    assert ahead_of_time.direction == DIRECTION_EARLIER
+    assert ahead_of_time.recommended_start == T - 3 * SLOT
+    assert at_the_walk.direction == DIRECTION_LATER
+    assert at_the_walk.recommended_start == T + 3 * SLOT
+
+
+def test_a_walk_with_nothing_left_ahead_of_it_has_no_dry_window() -> None:
+    """Past the last candidate the search has nothing to offer, and says so."""
+    consensus = _agreed(SCHEDULED_INDEX, SCHEDULED_INDEX + 1, SCHEDULED_INDEX + 2)
+
+    assert _recommend(consensus, now=T + LATER + SLOT).direction == DIRECTION_NO_DRY_WINDOW
+
+
+def test_the_recommendation_carries_the_time_the_walk_would_end() -> None:
+    """Half an answer is when to set off; the other half is when you get back."""
+    recommendation = _recommend(_agreed(SCHEDULED_INDEX), now=NOW)
+
+    assert recommendation.recommended_end == recommendation.recommended_start + DURATION
+
+
+# --- how far the radar reaches --------------------------------------------
+
+
+def test_a_window_every_radar_covers_is_nowcast_backed() -> None:
+    """All three sources here reach it, and one of them is a radar."""
+    assert evaluate_window(_agreed(), T, DURATION).nowcast_covered
+
+
+def test_a_window_past_the_radar_horizon_rests_on_the_models() -> None:
+    """The radar stops after six slots; the models carry the rest, and it is recorded."""
+    consensus = _consensus(
+        {
+            SOURCE_LIBREWXR: _pattern(length=6),
+            SOURCE_KNMI: _pattern(),
+            SOURCE_ICON_EU: _pattern(),
+        }
+    )
+
+    within_reach = evaluate_window(consensus, T - 3 * SLOT, DURATION)
+    beyond_reach = evaluate_window(consensus, T, DURATION)
+
+    assert within_reach.nowcast_covered
+    assert beyond_reach.dry
+    assert not beyond_reach.nowcast_covered
+
+
+def test_a_recommendation_no_radar_reaches_is_provisional() -> None:
+    """A walk moved past the radar's hour is an early answer, not a final one.
+
+    Rain runs from 06:00 to 07:30 and clears after it. The radar publishes six
+    slots and stops at 06:50, so the only dry window — 07:30 — is one no radar has
+    looked at yet: exactly the "wait until 14:00, decided at 12:00" case.
+    """
+    models = _pattern(*range(SCHEDULED_INDEX + 3))
+    consensus = _consensus(
+        {
+            SOURCE_LIBREWXR: _pattern(length=6),
+            SOURCE_KNMI: list(models),
+            SOURCE_ICON_EU: list(models),
+        }
+    )
+
+    recommendation = _recommend(consensus, now=NOW)
+
+    assert recommendation.direction == DIRECTION_LATER
+    assert recommendation.recommended_start == T + 3 * SLOT
+    assert recommendation.provisional
+
+
+def test_a_recommendation_the_radar_covers_is_not_provisional() -> None:
+    """The counterpart: when a radar reaches the suggested window, nothing is hedged."""
+    recommendation = _recommend(_agreed(SCHEDULED_INDEX), now=NOW)
+
+    assert recommendation.direction == DIRECTION_LATER
+    assert recommendation.recommended_start == T + SLOT
+    assert not recommendation.provisional
+
+
+# --- advice that has run out of time --------------------------------------
+
+
+def test_advice_expires_when_the_time_it_names_does() -> None:
+    """A suggestion to set off at 07:10 stops being advice at 07:11."""
+    recommendation = _rec(DIRECTION_LATER, dry=False, risk=1.0, recommended=T + SLOT)
+
+    assert is_actionable(recommendation, T)
+    assert is_actionable(recommendation, T + SLOT)
+    assert not is_actionable(recommendation, T + SLOT + timedelta(minutes=1))
+
+
+def test_no_dry_window_expires_when_the_walk_begins() -> None:
+    """It has no time of its own to expire, so the walk's own start is the deadline."""
+    recommendation = _rec(DIRECTION_NO_DRY_WINDOW, dry=False, risk=1.0)
+
+    assert is_actionable(recommendation, T - SLOT)
+    assert not is_actionable(recommendation, T)
+
+
+def test_a_direction_that_changed_only_because_time_passed_is_not_news() -> None:
+    """The user declined "go at 06:30"; that it is now 07:00 is not a new forecast."""
+    previous = _rec(DIRECTION_EARLIER, dry=False, risk=1.0, recommended=T - 3 * SLOT)
+    current = _rec(DIRECTION_NO_DRY_WINDOW, dry=False, risk=1.0)
+
+    assert is_material_change(previous, current)
+    assert superseded_by_the_clock(previous, current, T)
+
+
+def test_a_window_souring_while_it_is_still_ahead_is_news() -> None:
+    """The mirror case: the suggestion has not passed, so this really is a change."""
+    previous = _rec(DIRECTION_LATER, dry=False, risk=1.0, recommended=T + 3 * SLOT)
+    current = _rec(DIRECTION_NO_DRY_WINDOW, dry=False, risk=1.0)
+
+    assert not superseded_by_the_clock(previous, current, T)

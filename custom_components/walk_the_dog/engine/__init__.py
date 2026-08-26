@@ -7,12 +7,15 @@ whole decision reproducible from a recorded set of series.
 
 Typical use from the coordinator, once per update cycle:
 
-    slots = evaluation_slots(walk_start, duration, earlier, later)
+    search = Search(duration, earlier_margin, later_margin)
+    slots = evaluation_slots(walk_start, search)
     consensus = build_consensus(series, statuses, slots=slots,
                                 threshold=threshold, now=now)
     recommendation = recommend(consensus, scheduled_start=walk_start,
-                               duration=duration, earlier_margin=earlier,
-                               later_margin=later)
+                               search=search, now=now)
+
+`now` is not decoration there: without it the search will happily suggest a walk
+time that has already passed.
 """
 
 from __future__ import annotations
@@ -37,14 +40,17 @@ from .window import (
     VERDICT_UNKNOWN,
     VERDICT_WET,
     Recommendation,
+    Search,
     SourceBreakdown,
     WindowVerdict,
     candidate_starts,
     evaluate_window,
     evaluation_slots,
+    is_actionable,
     is_material_change,
     recommend,
     source_breakdown,
+    superseded_by_the_clock,
 )
 
 __all__ = [
@@ -61,6 +67,7 @@ __all__ = [
     "WET_RISK",
     "Consensus",
     "Recommendation",
+    "Search",
     "SlotScore",
     "SourceBreakdown",
     "WindowVerdict",
@@ -72,10 +79,12 @@ __all__ = [
     "evaluation_slots",
     "floor_slot",
     "freshness",
+    "is_actionable",
     "is_material_change",
     "recommend",
     "slots_between",
     "slots_for_window",
     "source_breakdown",
     "source_weight",
+    "superseded_by_the_clock",
 ]

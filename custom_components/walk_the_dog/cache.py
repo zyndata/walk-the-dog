@@ -1,10 +1,12 @@
 """Bounded sample cache with persistence via HA Store.
 
 Stores **sampled floats only** — never raw tiles or responses — which is what keeps
-it tiny: 32 entries of `{slot, mm/h}` fit in well under the 20 KB budget. Keyed by
-LibreWXR frame `path`, because a nowcast frame is re-issued on every model run and
-only the path changes with it; the frame's timestamp alone would collide across runs
-(docs/ARCHITECTURE.md § Frame cache).
+it tiny: 48 entries of `{slot, mm/h}` fit in well under the 20 KB budget. Keyed by
+frame `path`, because a nowcast frame is re-issued on every model run and only the
+path changes with it; the frame's timestamp alone would collide across runs
+(docs/ARCHITECTURE.md § Frame cache). Both image sources share the cache, keyed by
+whatever string identifies a frame for them — a path for LibreWXR, the full URL for
+CHMI — so their entries cannot collide.
 
 The LRU itself is plain Python with no Home Assistant imports, so it can be unit
 tested on its own; `async_load` / `async_schedule_save` are the only parts that
@@ -27,8 +29,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-#: 12 past + 6 nowcast live frames = 18; 32 leaves slack across runs and restarts.
-MAX_ENTRIES = 32
+#: LibreWXR keeps 12 past + 6 nowcast frames live (18) and CHMI one observed frame
+#: per 5-minute run; 48 leaves slack across runs and restarts for both together.
+MAX_ENTRIES = 48
 
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.frame_cache"

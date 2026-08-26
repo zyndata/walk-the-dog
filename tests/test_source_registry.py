@@ -10,6 +10,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.walk_the_dog.const import (
+    SOURCE_CHMI,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
@@ -24,8 +25,10 @@ from custom_components.walk_the_dog.sources import (
 )
 from custom_components.walk_the_dog.sources.base import (
     STATE_DISABLED,
+    STATE_NOT_APPLICABLE,
     SampleGeometry,
 )
+from custom_components.walk_the_dog.sources.chmi import forecast_url, run_candidates
 from custom_components.walk_the_dog.sources.librewxr import (
     BASE_URL,
     WEATHER_MAPS_PATH,
@@ -33,7 +36,8 @@ from custom_components.walk_the_dog.sources.librewxr import (
     parse_weather_maps,
 )
 
-from .conftest import load_bytes, load_fixture
+from .conftest import CHMI_GEOMETRY, load_bytes, load_fixture
+from .test_chmi import RUN, _mock_run
 from .test_librewxr import _tile_urls
 
 INDEX_URL = BASE_URL + WEATHER_MAPS_PATH
@@ -172,7 +176,7 @@ async def test_every_provider_failing_yields_no_series_and_no_exception(
     series, statuses = await registry.async_fetch(async_get_clientsession(hass), geometry, now)
 
     assert series == []
-    assert len(statuses) == 4
+    assert len(statuses) == 5
     assert not any(s.contributed for s in statuses)
 
 
@@ -195,6 +199,98 @@ async def test_attributions_cover_every_contributing_source(
     assert any("Open-Meteo" in a and "DWD" in a for a in attributions)
     assert any("Open-Meteo" in a and "KNMI" in a for a in attributions)
     assert all("modified" in a for a in attributions)
+
+
+async def test_a_regional_source_is_silent_outside_its_box(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """Warszawa is outside the CHMI composite: the source says why and costs nothing.
+
+    "Not applicable" has to be structural rather than an empty answer from the
+    service â€” the request is the thing we must not make.
+    """
+    _mock_librewxr(aioclient_mock, geometry)
+    aioclient_mock.get(open_meteo.URL, json=load_fixture("open_meteo", "dry.json"))
+    registry = SourceRegistry(UA)
+
+    series, statuses = await registry.async_fetch(async_get_clientsession(hass), geometry, now)
+
+    assert SOURCE_CHMI not in {s.source_id for s in series}
+    chmi = next(s for s in statuses if s.source_id == SOURCE_CHMI)
+    assert chmi.state == STATE_NOT_APPLICABLE
+    assert not chmi.contributed
+    assert all("opendata.chmi.cz" not in str(call[1]) for call in aioclient_mock.mock_calls)
+
+
+async def test_a_regional_source_votes_inside_its_box(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """Around Bielsko-Biala the fourth vote joins in â€” the reason it was added."""
+    now = RUN + timedelta(minutes=3)
+    _mock_librewxr(aioclient_mock, CHMI_GEOMETRY)
+    aioclient_mock.get(open_meteo.URL, json=load_fixture("open_meteo", "dry.json"))
+    _mock_run(aioclient_mock)
+    registry = SourceRegistry(UA)
+
+    series, statuses = await registry.async_fetch(async_get_clientsession(hass), CHMI_GEOMETRY, now)
+
+    assert {s.source_id for s in series} == {
+        SOURCE_LIBREWXR,
+        SOURCE_CHMI,
+        SOURCE_ICON_EU,
+        SOURCE_KNMI,
+    }
+    chmi = next(s for s in statuses if s.source_id == SOURCE_CHMI)
+    assert chmi.contributed
+    assert any("opendata.chmi.cz" in str(call[1]) for call in aioclient_mock.mock_calls)
+
+
+async def test_the_regional_source_failing_does_not_stop_the_others(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """A regional extra must never be load-bearing: the others still vote without it."""
+    now = RUN + timedelta(minutes=3)
+    _mock_librewxr(aioclient_mock, CHMI_GEOMETRY)
+    aioclient_mock.get(open_meteo.URL, json=load_fixture("open_meteo", "dry.json"))
+    for candidate in run_candidates(now):
+        aioclient_mock.get(forecast_url(candidate), status=502)
+    registry = SourceRegistry(UA)
+
+    series, statuses = await registry.async_fetch(async_get_clientsession(hass), CHMI_GEOMETRY, now)
+
+    assert {s.source_id for s in series} == {SOURCE_LIBREWXR, SOURCE_ICON_EU, SOURCE_KNMI}
+    # The models still vote, so the cycle still produces a recommendation. (LibreWXR's
+    # recorded frames predate this run's clock and are correctly dropped as stale —
+    # which is itself the point: two unrelated sources going quiet is survivable.)
+    contributing = {s.source_id for s in statuses if s.contributed}
+    assert {SOURCE_ICON_EU, SOURCE_KNMI} <= contributing
+    assert SOURCE_CHMI not in contributing
+
+
+async def test_the_regional_source_credits_chmi_when_it_contributes(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+) -> None:
+    """CC BY 4.0 requires naming the institute and saying the data was modified."""
+    now = RUN + timedelta(minutes=3)
+    _mock_librewxr(aioclient_mock, CHMI_GEOMETRY)
+    aioclient_mock.get(open_meteo.URL, json=load_fixture("open_meteo", "dry.json"))
+    _mock_run(aioclient_mock)
+    registry = SourceRegistry(UA)
+
+    _, statuses = await registry.async_fetch(async_get_clientsession(hass), CHMI_GEOMETRY, now)
+    attributions = registry.attributions(statuses)
+
+    credit = next(a for a in attributions if "CHMI" in a)
+    assert "Czech Hydrometeorological Institute" in credit
+    assert "opendata.chmi.cz" in credit
+    assert "CC BY 4.0" in credit
+    assert "modified" in credit
 
 
 def test_failover_threshold_matches_the_documented_rule() -> None:

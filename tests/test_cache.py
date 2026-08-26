@@ -45,7 +45,7 @@ def test_keyed_by_frame_path_not_timestamp() -> None:
 
 
 def test_evicts_least_recently_used_beyond_the_bound() -> None:
-    """32 entries is the ceiling; the oldest untouched frame goes first."""
+    """`MAX_ENTRIES` is the ceiling; the oldest untouched frame goes first."""
     cache = _cache()
     for index in range(MAX_ENTRIES):
         cache.set(f"/frame/{index}", NOW, float(index))

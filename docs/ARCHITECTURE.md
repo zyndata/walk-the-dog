@@ -14,6 +14,11 @@ Sources referenced throughout (roles fixed in phase 0):
 | `icon_eu` | Open-Meteo DWD ICON-EU | point JSON | hourly | reliability baseline |
 | `knmi` | Open-Meteo KNMI HARMONIE AROME Europe | point JSON | hourly | independent model, freshest run |
 | `metno` | MET Norway Locationforecast 2.0 | point JSON | hourly | provider failover, normally silent |
+| `chmi` | CHMI CZRAD nowcast (opendata.chmi.cz) | full-domain PNG | 10 min, now…+60 min | second radar, **SW Poland only** |
+
+`chmi` was added after phase 6 (see [DATA_SOURCES.md](DATA_SOURCES.md) § CHMI). It is the first
+*regional* source: everything below that says "every source" applies to it only inside its own
+coverage box, and outside that box it reports `not_applicable` and is never polled.
 
 ---
 
@@ -33,9 +38,11 @@ custom_components/walk_the_dog/
 ├── switch.py          # enable/disable switch (RestoreEntity)
 ├── strings.json       # + translations/ (en base, pl priority) — phases 5 and 7
 ├── sources/
-│   ├── __init__.py    # adapter registry: builds the enabled adapter set
-│   ├── base.py        # SourceAdapter protocol + SourceSeries / SourceStatus dataclasses
+│   ├── __init__.py    # adapter registry: builds the enabled adapter set, gates regional ones
+│   ├── base.py        # SourceAdapter protocol + SourceSeries / SourceStatus dataclasses,
+│   │                  #   shared source metadata tables and the Marshall-Palmer dBZ→mm/h
 │   ├── librewxr.py    # weather-maps.json + tile fetch + pixel sampling (Pillow + numpy)
+│   ├── chmi.py        # CHMI CZRAD composite + forecast tar + coverage gate (Pillow + numpy)
 │   ├── open_meteo.py  # icon_eu + knmi in ONE HTTP request, returns two SourceSeries
 │   └── met_norway.py  # failover adapter: 1 point, If-Modified-Since, honours Expires
 └── engine/
@@ -51,8 +58,9 @@ Layering rules (enforced by review, testable by import inspection):
   `now` is always a parameter. This is what phase 4 unit-tests exhaustively.
 - `sources/*` do I/O via one shared `aiohttp.ClientSession` (HA's) and never import `engine`.
 - Only `coordinator.py` wires sources → engine → outputs. Entities read coordinator data only.
-- `Pillow` and image-related `numpy` usage appear in `sources/librewxr.py` only (phase 0
-  deviation: the other sources are point JSON APIs, not tiles).
+- `Pillow` and image-related `numpy` usage appear in `sources/librewxr.py` and
+  `sources/chmi.py` only — the two image sources. The others are point JSON APIs (phase 0
+  deviation; `chmi.py` joined after phase 6, recorded in `STATE.md`).
 
 ## Data flow
 
@@ -82,10 +90,10 @@ Core data structures (defined in `sources/base.py`, consumed by the engine):
 ```python
 @dataclass(frozen=True)
 class SourceSeries:
-    source_id: str            # "librewxr" | "icon_eu" | "knmi" | "metno"
+    source_id: str            # "librewxr" | "chmi" | "icon_eu" | "knmi" | "metno"
     issued_at: datetime       # model run / newest radar frame time (UTC)
     fetched_at: datetime      # when we obtained it (UTC)
-    step_s: int               # 600 for librewxr, 3600 for the NWP sources
+    step_s: int               # 600 for the radar sources, 3600 for the NWP ones
     slots: tuple[tuple[datetime, float], ...]  # (slot start UTC, intensity mm/h), sorted
     cell_km: float            # effective resolution (phase 0 table)
     reliability: float        # static per-source weight, see Consensus scoring
@@ -93,10 +101,16 @@ class SourceSeries:
 @dataclass(frozen=True)
 class SourceStatus:
     source_id: str
-    state: str                # "ok" | "stale" | "failed" | "out_of_range" | "disabled"
+    # "ok" | "stale" | "failed" | "out_of_range" | "disabled" | "not_applicable"
+    state: str
     age_s: int | None         # now − issued_at
     contributed: bool
 ```
+
+`not_applicable` was added with `chmi`: the source cannot serve **this location** at all. It is
+a permanent property of where the user lives, decided once per geometry, and is deliberately
+distinct from `out_of_range` (a *slot* a fetched source does not reach) and `disabled` (a dormancy
+the next cycle could end). A `not_applicable` source is never polled.
 
 Timezone rule: walk times are configured in the HA local timezone and resolved to UTC **per
 occurrence** by `schedule.py` (DST-safe — a walk at 07:00 stays at 07:00 local across DST
@@ -132,6 +146,38 @@ Full-frame decoding of a 256×256 tile is unavoidable (PNG is not partially deco
 accepted: the buffer is 64 KB, three orders of magnitude under budget. What is *never* done:
 fetching tiles beyond the disc, holding more than one decoded tile, or zoom levels above 8.
 
+**CHMI (full-domain composites).** Regional, and gated before anything else happens: the adapter
+projects the disc's five sample points into the CZRAD data rectangle (E 11.267–19.624,
+N 48.047–51.458, inset by 0.3°) and, unless **all** of them fall inside, reports `not_applicable`
+and never makes a request. Requiring the whole disc rather than just its centre is what stops a
+half-covered disc reading its missing half as "no echo" — outside the data rectangle every pixel is
+transparent.
+
+Inside the box, one cycle is:
+
+1. Compute the newest run stamp from the clock. Runs land on a fixed 5-minute grid and publish
+   within about a minute, so there is nothing to ask: `now − 2 min`, floored to 5 minutes, then at
+   most three runs backwards if one 404s.
+2. `GET …/fct_maxz/png/pacz2gmaps3.fct_z_max.{stamp}.ft60s10.tar` — **1 request for the whole
+   forecast**: six PNGs at +10…+60 min, 92 KB measured. Each member's filename carries its target
+   time, so nothing depends on their order in the archive.
+3. `GET …/maxz/png/pacz2gmaps3.z_max3d.{stamp}.0.png` — the observed frame, 19 KB, extending the
+   series backwards by one step. It is optional: a run whose forecast arrived but whose observation
+   did not is still a usable +10…+60 nowcast.
+4. Project home lat/lon into frame pixels through CHMI's published whole-image extent (EPSG:3857,
+   linear in longitude and in Mercator northing) at ~1 km/pixel, so a 5 km disc is about 11 × 11 px.
+   **Only that rectangle is cropped and converted**, never the whole 680 × 460 composite.
+5. Classify each pixel by **exact** match against CHMI's published palette (transparent → level 0 →
+   no echo; the grey `#C4C4C4` domain outline and anything unrecognised → no data), take the
+   **90th percentile** over the disc mask, and convert level → `4·level` dBZ → mm/h with the same
+   Marshall-Palmer inversion LibreWXR uses. A disc that is mostly unrecognised fails the frame
+   rather than producing a number.
+6. Store the resulting float per frame URL in the shared sample cache; discard the decoded buffer
+   immediately.
+
+Peak transient memory is one decoded paletted composite (~313 KB) plus a few hundred RGBA pixels,
+which is why the crop happens before the conversion rather than after.
+
 **Open-Meteo (`icon_eu` + `knmi`).** One `GET /v1/forecast` request with **5 coordinates**
 (centre + 4 points at bearings 0°/90°/180°/270° at distance r) ×
 `models=icon_eu,knmi_harmonie_arome_europe` × `hourly=precipitation`, `forecast_hours=12`,
@@ -161,17 +207,28 @@ slot, not stale.
 |---|---|---|
 | `librewxr` | 1.00 | radar extrapolation beats NWP inside 0–60 min |
 | `knmi` | 0.90 | independent model family, re-run hourly |
+| `chmi` | 0.95 **× range factor** | radar too; discounted for quantisation (4 dBZ steps against LibreWXR's 1 dBZ) and then again by distance from the Czech radars — see below |
 | `icon_eu` | 0.80 | 3-hourly runs, coarser cell |
 | `metno` | 0.70 | ECMWF-derived, coarsest, failover only |
+
+**`chmi` is the one source whose `reliability` is not a constant.** CHMI has exactly two radars,
+and a beam climbs and widens with range, so the same instrument is a different measurement at
+40 km and at 170 km. `sources/chmi.py`'s `range_factor()` scales the static 0.95 by distance to the
+nearest CZRAD radar: full to 120 km, linear decay to 0.5 at 200 km (CHMI's own stated ceiling for
+intensity estimation), floored there. Over Bielsko-Biała — 167 km from Skalky, where the beam
+centre is ~3.9 km up, against the Polish radar 44 km away that feeds OPERA — that gives 0.67, low
+enough that a `librewxr` "wet" outvotes a `chmi` "dry". The adapter puts the adjusted value on the
+`SourceSeries`, so the engine needs no special case. Rationale and the measured comparison behind
+it are in [DATA_SOURCES.md](DATA_SOURCES.md) § CHMI.
 
 `freshness_i`: 1.0 while `age ≤ nominal update interval`; linear decay to 0.5 at 3× the
 interval; at > 3× the source is **stale and dropped** for the cycle (phase 0 staleness rule —
 stale data is excluded, never down-weighted further). Nominal intervals: `librewxr` 10 min,
-`knmi` 1 h, `icon_eu` 3 h, `metno` 2 h (observed publication cadence).
+`chmi` 5 min, `knmi` 1 h, `icon_eu` 3 h, `metno` 2 h (observed publication cadence).
 
 `age` is measured from `issued_at`, which each adapter fills with the best truth available
-(phase 3): `librewxr` uses the newest past frame's timestamp and `metno` uses
-`properties.meta.updated_at`, both real upstream publication times. **Open-Meteo publishes no
+(phase 3): `librewxr` uses the newest past frame's timestamp, `chmi` uses the run stamp it fetched, and
+`metno` uses `properties.meta.updated_at` — all real upstream publication times. **Open-Meteo publishes no
 model-run timestamp in `/v1/forecast`** (checked 2026-08-25), so its adapters set
 `issued_at = fetched_at`; freshness there measures how long ago *we* last got an answer, which is
 what actually degrades when the provider stops responding. Recorded in `STATE.md`, phase 3.
@@ -189,6 +246,15 @@ heavy} mapped to its mm/h lower bound (0.1 / 2.5 / 7.6):
 Correlated sources never both contribute (phase 0 rule): the adapter registry enables at most
 one member of each correlated pair — concretely, `metno` is polled only while Open-Meteo is
 failed, so `metno`+`icon_eu`+`knmi` never all vote at once. `n_t` counts actual contributors.
+
+**`librewxr` and `chmi` are an unmeasured pair, but less alike than they look.** Both are radar
+extrapolations and EUMETNET OPERA ingests the Czech radars, which was the reason to worry. Over
+Bielsko-Biała, though, the two composites are dominated by *different* instruments — Ramża (PL) at
+44 km for OPERA, Skalky (CZ) at 167 km for CZRAD — and a live sweep of the domain found them
+differing by roughly 3× in mm/h, with 18 points where OPERA saw rain and CZRAD saw none against 2
+the other way. That is not one vote counted twice. Phase 0's rule is still that independence is
+established by *measurement*, and this pair has not been measured; the open item stays in
+`STATE.md`, alongside the larger question of which of the two is right in absolute terms.
 
 Slot intensity for display (not for the vote): weighted mean of `intensity_i(t)`, classified on
 the common scale — shown as "expected intensity" in sensor attributes and notifications.
@@ -210,9 +276,22 @@ starting at `s` covers the slots in `[s, s + D)`.
 - A window is **dry** iff every slot has `risk < 0.5` and every slot has `n_t ≥ 1`.
 - **Evaluation:** compute the verdict for the scheduled window `[T, T + D)`.
 - **Search** (only when the scheduled window is not dry): candidate starts on the 10-minute
-  grid at offsets 0, −10, +10, −20, +20, … bounded by `[T − E, T + L]`. First dry candidate in
+  grid at offsets 0, −10, +10, −20, +20, … bounded by `[T − E, T + L]` **and by `now`** — a
+  candidate that has already begun is dropped before it is scored. First dry candidate in
   that order wins — nearest wins, and at equal distance **earlier beats later** (the dog waits
   less and nearer-term forecasts are more reliable).
+- **The search is bounded by the present** (fixed after the first live test). The window a walk is
+  watched in outlives the walk on purpose (see § Coordinator scheduling), so without `now` the
+  search happily answers "set off at 21:20" at 22:31 — every margin is measured from `T`, and
+  nothing else in the engine knows what time it is. `recommend(now=…)` is therefore not optional
+  for the coordinator; omitting it searches the whole margin, past included, which only a test
+  evaluating the geometry in isolation should want.
+- **Nowcast coverage.** Each window verdict records whether a *radar* source reaches every one of
+  its slots (`nowcast_covered`). The radars forecast 60 minutes ahead and the models 12 hours, so
+  a walk moved further out than the radar's reach is answered by the models alone: sound about
+  *whether* it will rain, imprecise about *when*. A recommendation whose window is not
+  nowcast-covered is `provisional` — an early answer the coordinator keeps re-checking, and the
+  notification says so.
 - **Output** (`Recommendation` dataclass): `direction` (`none` = walk as planned / `earlier` /
   `later` / `no_dry_window` / `unknown`), `recommended_start`, scheduled-window risk + confidence +
   peak intensity class, per-source breakdown (each source's verdict over the scheduled window +
@@ -231,6 +310,17 @@ starting at `s` covers the slots in `[s, s + D)`.
 
 Comparison is always against the last *notified* recommendation, not the previous cycle.
 
+**Actionability** (added after the first live test) gates dispatch *after* material change, and is
+about the clock rather than the weather:
+
+1. `is_actionable` — a recommendation with a `recommended_start` expires when that moment does; a
+   `no_dry_window`, which names no time of its own, expires when the walk itself begins. Advice the
+   user can no longer follow is never sent, however material the change that produced it.
+2. `superseded_by_the_clock` — a direction that flipped to `no_dry_window` *only* because the
+   previously notified start has passed is not news. Told at 04:00 to go at 04:30 and having
+   declined, the user does not need to be told at 04:40 that 04:30 has gone. A window that turns
+   wet while it is still ahead is a different matter and is not caught by this rule.
+
 ## Coordinator scheduling & polling windows
 
 **Decision: `lead_time` = 30 min.** Rationale: it covers KNMI HARMONIE's hourly publication
@@ -239,9 +329,15 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
 
 - **Active window** per walk: `[T − E − lead_time, max(T, recommended_start) + D]` — with
   defaults and a 30-min walk that is the budgeted ~2.5 h. A "later" recommendation extends the
-  window's end; overlapping windows of consecutive walks merge.
-- **Inside the active window:** one update cycle every **10 min** (LibreWXR's frame cadence —
-  polling faster cannot observe new data). Per-source fetch cadence within the cycle loop:
+  window's end, bounded by `T + L + D`; overlapping windows of consecutive walks merge.
+- **Why the window outlives the walk.** This is what answers the horizon problem: asked at 12:00
+  about a 13:00 walk, only the hourly models can see 14:00, so a "wait until 14:00" is provisional
+  when it is given. Staying awake through 14:00 is what lets the radars — which see one hour ahead
+  — confirm or correct it in time to matter. The cost is bounded by `L` and counted against the
+  per-source hourly budgets, which every adapter polices itself against and the sensor publishes
+  as `requests_last_hour` / `requests_hourly_cap`.
+- **Inside the active window:** one update cycle every **10 min** — LibreWXR's frame cadence,
+  and the grid slot. Per-source fetch cadence within the cycle loop:
   `librewxr` every cycle; **Open-Meteo every 3rd cycle (30 min)** — its freshest model re-runs
   hourly, so a 10-min fetch cadence is ≥ ⅔ guaranteed-identical responses (refinement of the
   phase 0 budget, which allowed every cycle; recorded in STATE.md); `metno` only in failover,
@@ -257,9 +353,41 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
   start**, not from the wall clock. Since `lead_time` is a whole number of slots, a cycle
   therefore falls exactly on `T − E` whatever minute the walk itself is scheduled at — which is
   what makes "the notification arrives at `T − E`" true for a 07:15 walk as well as a 07:00 one.
+- **Sprint cadence** in the final approach: **5 min** instead of 10 for the
+  `SPRINT_LEAD` = 20 minutes before the moment the user is expected to set off — the recommended
+  start if there is one, otherwise `T`. A convective cell can build and arrive well inside one
+  10-minute slot, so the stretch before the door is worth watching at the fastest rate any source
+  actually publishes at. Two things bound the cost. It only runs where a source *does* publish
+  faster than the grid — today that is CHMI's 5 minutes, inside its composite only
+  (`SourceRegistry.fast_cadence`); elsewhere the extra cycles would re-score identical bytes. And
+  each adapter still gates its own fetch on its own cadence, so LibreWXR (10 min) and Open-Meteo
+  (30 min) are unaffected by it: a sprint cycle costs two CHMI requests and nothing else.
+  `SPRINT` divides `CYCLE`, so the anchored grid is subdivided rather than replaced and the
+  cycle that lands on `T − E` still lands. The sprint can run twice for one walk: once into the
+  recommended start, and again into `T` if that suggestion lapses unused.
+- **Publication alignment.** The cycle grid is anchored to the walk; a provider's frames are not.
+  At a 10-minute cadence the two run at whatever phase they happen to run at, so a frame published
+  a minute after a cycle waits nearly a full slot to be looked at. **The data is no staler for
+  it** — a fetch always returns the newest frame that exists, so what is read *at* a decision
+  moment is the same either way. What waits is the *alert*: a material change contained in that
+  frame is announced up to a cadence later than it could be, and for a shower that builds in
+  twenty minutes those minutes are the answer. So the coordinator also wakes at
+  `issued_at + interval + PUBLISH_SETTLE` of the source whose own publication interval equals the
+  cadence being run — LibreWXR at ten minutes, CHMI at five; hourly sources have nothing to align
+  to at this timescale and a location with no fast source keeps the plain grid.
+  **The alignment may only ever pull a cycle earlier** (`min(grid, aligned)`), which is what makes
+  it safe to have: the grid keeps running underneath at its own rate whatever the provider does,
+  so a wrong guess about when a frame lands costs one cheap extra cycle and can never cost a cycle
+  that was due. `PUBLISH_SETTLE` (60 s) is an estimate, not a measurement — see phase 8.
+  The cost is up to **two cycles per cadence** instead of one, and no extra requests: every
+  adapter gates its own fetch on its own publication interval (`librewxr` 10 min, `chmi` 5 min,
+  Open-Meteo 30 min, `metno` 10 min), so the extra cycle re-scores what is already held.
 - **Notification dispatch** (`notifier.py`): evaluated on the cycle that lands on `T − E`, fires
   with the freshest coordinator data **only if** the scheduled window is not dry; afterwards
-  every cycle until `walk end` re-checks material change. Suppressed entirely by: switch off,
+  every cycle until `walk end` re-checks material change **and actionability** — a window still
+  worth watching is not the same as advice still worth sending. Every alert about one walk
+  carries the same companion-app `tag`, so a revision replaces its predecessor on the phone
+  instead of stacking a second, contradictory message underneath it. Suppressed entirely by: switch off,
   the walk's own mute switch, auto-mute entity not `home`, or 0 contributing sources. A muted alert is suppressed, not
   queued — the decision state advances either way, so coming home does not release a stale
   message. The module is `notifier.py`, not `notify.py`: a file named after a platform inside an
@@ -271,6 +399,20 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
   by that pair, not by the instant, so a daylight-saving change cannot detach a walk from its
   devices. An empty device list falls back to the entry-wide default device; the mute switch is
   the only way to silence a walk. Details in [CONFIG.md](CONFIG.md) § Per-walk alerts.
+- **Confirmation before setting off** (optional, `confirm_margin_min`, default off): one short
+  message `confirm_margin` before the departure moment, and only if something was already said
+  about this walk. It has two shapes — *the plan still stands*, and *the rain has gone, walk at
+  the normal time*. The second is the one that earns the feature: `later` relaxing to `none` is
+  not an alert direction, so silence would leave the user waiting for a window that stopped being
+  necessary. Sent once per walk; an alert dispatched at or after the moment counts as it.
+- **Closing a walk** (`walk_the_dog.walked`, and the *Already went* button on the push): the
+  coordinator records the occurrence in `_dismissed`, `_resolve_walk` skips it, and the watch
+  window ends there — no more advice and no more requests for a decision nobody will make. The
+  button carries the walk's UTC start inside its action identifier, because that is the one field
+  both companion apps hand back, and a leftover notification from yesterday must not close today's
+  walk. Tapping it also pushes `clear_notification` to the walk's other devices, which would
+  otherwise go on showing advice about a walk that is over. In memory only: a restart inside the
+  window resurrects the walk, which is the safe way round to be wrong.
 - **Provider failover** (phase 0 rule, owned by the adapter registry): Open-Meteo failed on 2
   consecutive cycles → enable `metno`; Open-Meteo healthy twice in a row → disable it again.
 
@@ -280,13 +422,14 @@ Estimates to be replaced by measurements in phase 8; these are the ceilings tuni
 
 | Quantity | Budget | Basis |
 |---|---|---|
-| Transient RAM per update cycle | **< 1 MB typical, 5 MB hard cap** | dominated by one decoded tile (64 KB) + Pillow/numpy overhead; JSON bodies < 100 KB parsed |
+| Transient RAM per update cycle | **< 1 MB typical, 5 MB hard cap** | dominated by one decoded image: a 256×256 LibreWXR tile (64 KB) or one paletted CHMI composite (680×460 = 313 KB), plus the 92 KB forecast archive held while it is expanded, plus Pillow/numpy overhead; JSON bodies < 100 KB parsed |
 | Steady-state RAM (cache + series) | **< 100 KB** | ~50 floats of sampled data + last Open-Meteo response (6.5 KB raw) |
 | Persisted storage | **≤ 20 KB** | one HA Store JSON, see Frame cache |
 | CPU per cycle (single-core ARM ~1 GHz) | **< 250 ms** | PNG decode of a ≤ 2 KB tile is ms-scale; masking/percentile over 64 KB uint8 is trivial; engine is arithmetic over ≤ ~90 slots |
 | CPU outside active windows | **0** (one armed timer) | no polling design |
-| HTTP requests, active hour | **≤ 22 typical / ≤ 28 worst** | `librewxr` 6 metadata + ≤ 12 tiles (warm cache: 1–2 new frames/cycle; worst = cold start 7 tiles in cycle 1) ≤ 20/h self-cap; Open-Meteo 2/h; `metno` ≤ 2/h failover-only |
-| HTTP requests, daily (4 walks) | **≤ 200** | matches the phase 0 budget table; ≤ 3 % of Open-Meteo's daily allowance under conservative call counting |
+| Update cycles, active hour | **6 typical, ≤ 24 worst** | one per 10-minute slot, doubled where publication alignment applies, and doubled again over the two 20-minute sprints. A cycle without a fetch is arithmetic over ≤ ~90 slots — the image decode, which is what the CPU budget above is about, only happens when an adapter actually fetches |
+| HTTP requests, active hour | **≤ 22 typical / ≤ 28 worst** outside CHMI's box; **≤ 58** inside it | `librewxr` 6 metadata + ≤ 12 tiles (warm cache: 1–2 new frames/cycle; worst = cold start 7 tiles in cycle 1) ≤ 20/h self-cap; Open-Meteo 2/h; `metno` ≤ 2/h failover-only; `chmi` ≤ 12 fetches/h at its own 5-minute rate = ≤ 24 requests/h, ≤ 30/h capped, and only where it is applicable. **Requests follow the sources' publication rates, not the cycle count**: each adapter gates its own fetch, so neither the sprint nor the publication alignment adds one |
+| HTTP requests, daily (4 walks) | **≤ 200**, or **≤ 380** inside CHMI's box | matches the phase 0 budget table plus the CHMI deviation recorded in `STATE.md`; ≤ 3 % of Open-Meteo's daily allowance under conservative call counting |
 | HTTP requests while idle / switch off | **0** | hard requirement |
 
 All numbers stay consistent with the per-provider limits established in
@@ -298,11 +441,15 @@ Purpose: never refetch or re-sample an already-processed frame; survive a HA res
 active window without a cold refetch. The cache stores **sampled results, never raw tiles or
 responses** — that is what keeps it tiny.
 
-- **LibreWXR sample cache** (the persisted part): map `frame path` (string — the identity that
-  changes when a nowcast frame is re-issued) → `{slot_utc, mm_per_h}`. Bound: **32 entries,
-  LRU** (12 past + 6 nowcast live frames = 18; 32 gives slack across runs). Persisted with
-  `homeassistant.helpers.storage.Store` (version 1, key `walk_the_dog.frame_cache`), written at
-  most once per cycle via delayed save; ≤ 20 KB.
+- **Frame sample cache** (the persisted part): map `frame path` (string — the identity that
+  changes when a nowcast frame is re-issued) → `{slot_utc, mm_per_h}`. Shared by both image
+  sources — a path for LibreWXR, the full URL for CHMI — so their entries cannot collide. Bound:
+  **48 entries, LRU** (LibreWXR 12 past + 6 nowcast = 18, CHMI one observed frame per 5-minute run;
+  48 gives slack across runs). Persisted with `homeassistant.helpers.storage.Store` (version 1, key
+  `walk_the_dog.frame_cache`), written at most once per cycle via delayed save; ≤ 20 KB.
+  **It cannot help CHMI's forecast**: a new run publishes every 5 minutes, so every cycle's archive
+  is genuinely new data rather than a cache miss worth avoiding — which is why that archive being a
+  single request matters more than caching it would.
 - **Open-Meteo cache** (memory only): last parsed per-source series + `fetched_at`; reused for
   the 2 skip-cycles between fetches. Refetching is 508 bytes — not worth persisting.
 - **MET Norway cache** (memory only): last series + `Expires` + `Last-Modified` (drives

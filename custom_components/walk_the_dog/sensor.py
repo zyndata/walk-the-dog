@@ -90,6 +90,10 @@ class WalkRecommendationSensor(WalkEntity, SensorEntity):
                 "polling": data.active,
                 "failover": data.failover,
                 "last_fetch": None if data.fetched_at is None else data.fetched_at.isoformat(),
+                # A walk window may stay open for hours while a "wait until" answer
+                # is checked, so what that costs the providers is worth showing.
+                "requests_last_hour": data.requests_last_hour,
+                "requests_hourly_cap": data.requests_hourly_cap,
             }
         )
         if data.attributions:

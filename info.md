@@ -17,7 +17,8 @@ one of your recurring walk times is at risk — proactively suggests going out *
 later** so the walk stays dry.
 
 - Consensus of independent sources (radar nowcast + two NWP models, with automatic failover),
-  never a single provider's guess.
+  never a single provider's guess. Around south-western Poland a second radar — the Czech CHMI
+  composite — joins in automatically; elsewhere it stays silent.
 - One recommendation sensor for the next upcoming walk: risk, confidence, suggested time,
   per-source breakdown.
 - Push notification at the last actionable moment, re-sent only when the advice materially
@@ -28,4 +29,5 @@ later** so the walk stays dry.
 Polish localization ("Idź już z psem") is a first-class goal.
 
 Weather data: LibreWXR (EUMETNET OPERA composite), Open-Meteo (DWD ICON-EU, KNMI HARMONIE
-AROME), MET Norway — all CC-BY-4.0, processed and reclassified by this integration.
+AROME), MET Norway, and — regionally — the Czech Hydrometeorological Institute's CZRAD composite.
+All CC-BY-4.0, processed and reclassified by this integration.

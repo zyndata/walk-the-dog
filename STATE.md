@@ -681,6 +681,348 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     suite and `ruff` are green. Run it with the phase 7 tooling pass.
   - Everything else carried forward from phase 6 is unchanged.
 
+## Post-phase-6 change — CHMI CZRAD added as a fifth, regional source
+
+- **Status:** done (code, tests and docs; verified against the live services)
+- **Date:** 2026-08-26
+- **Why it exists:** not a phase. The maintainer asked for the Meteor source in
+  [docs/SOURCE_meteor_androworks.md](docs/SOURCE_meteor_androworks.md) to be wired in, and then
+  for the endpoints to be tested and the calibration checked against LibreWXR over
+  Bielsko-Biała. **Deviation from `PLAN.md`, recorded here as workflow rule 3 requires.** No phase
+  was started or advanced; phase 7 is still `not started`.
+
+- **What the live probing established (2026-08-26, ~07:40–07:55 UTC).** This is the part worth
+  reading before touching this source again.
+  1. **Meteor's endpoints do not serve frames.** `http://meteor.androworks.org/v2/feed` answers 200
+     with `Content-Length: 0` — the source note's "the response body *is* the newest frame" is
+     wrong. Retried with a stale `X-Frame-Date` request header, with `?date=`, and against
+     `11.` and `111.meteor.androworks.org`: always empty. Every documented frame path
+     (`/v2/czrad-z_max3d_masked/…`, `/v2/czrad-z_max3d_fct_masked/…`) returns **404** on
+     `meteor.androworks.org` and on all three `*.fbck` hosts.
+  2. **`X-Next-Query` is a delay in milliseconds**, not epoch millis: 45 935 and ~240 000 observed
+     against a 5-minute cadence. **`X-Future-Levels` is never sent.** **`X-Step-Min` is 5**, not 10.
+  3. **The products are CHMI's own and CHMI publishes them directly.** `pacz2gmaps3.z_max3d` is a
+     CHMI filename; `opendata.chmi.cz/meteorology/weather/radar/composite/` serves `maxz/png/`
+     (observation) and `fct_maxz/png/` (forecast) over HTTPS, with `radar_description_en.pdf` and a
+     published colour scale beside them. That is the upstream the source note itself recommended.
+  4. **The frame is 680 × 460**, not 597 × 377 with an 82 px margin. CHMI publishes the extent of
+     the whole image (E 11.267–20.770, N 48.047–52.167) *and* of the data inside it
+     (E 11.267–19.624, N 48.047–51.458); applying the first to the real frame puts the data
+     rectangle at exactly (0, 82)–(598, 460), 1.005 km/px. The app's numbers were that same
+     rectangle inset by a pixel.
+  5. **The calibration assumption was right, and is now a fact.** CHMI's legend prints 4, 8, 12 …
+     60 dBZ against the 15 colours, and its mm/h decades (0.1, 1, 10, 100) sit one dBZ below the 8,
+     24, 40 and 56 labels — where `Z = 200·R^1.6` puts them (7.01, 23.01, 39.01, 55.01). CHMI's own
+     conversion *is* the project's Marshall-Palmer inversion.
+  6. **The `*_masked` products the app used are undecodable.** They render echo with blending, so
+     pixels are off-palette; over Bielsko-Biała one read `#B1B1D0`, whose nearest palette neighbour
+     is the white top of the ramp — **205 mm/h reported for light drizzle**. The unmasked products
+     carry exact palette colours.
+  7. **Cross-check against LibreWXR over the same 5 km disc, same p90, same minute:** OPERA grey 44
+     = 12 dBZ = 0.205 mm/h; CZRAD level 3 = 12 dBZ = 0.205 mm/h. Over the following hour OPERA read
+     0.18–0.37 mm/h and CZRAD 0.115–0.205 mm/h — same class, same trend, CZRAD a step lower.
+  8. **CHMI's forecast is one tar per run** (`ft60s10` = to 60 min, step 10), 92 KB, holding all six
+     frames. A cycle is therefore **2 requests**, not 7.
+
+- **Follow-up question from the maintainer: is OPERA or CHMI more accurate inside the CHMI box, and
+  if they are the same, should each region use just one source?** Answer: no, and the reason is
+  the opposite of what the question assumed.
+  1. **Beam geometry.** Over Bielsko-Biała the only CZRAD radar in range is Skalky at **167 km**,
+     where the 0.5° beam centre is **3.87 km** up and the beam is 2.9 km wide. OPERA gets the
+     Polish radar **Ramża at 44 km**, beam centre **0.85 km**, width 0.76 km. Brdy-Praha is 377 km
+     away and contributes nothing. CHMI's own limit for intensity estimation is
+     "approximately 150–200 km", so Bielsko-Biała sits at its edge. **Around Bielsko-Biała CHMI is
+     the weaker-sighted radar source, not the stronger one** — swapping OPERA out there would trade
+     the best-placed instrument for the worst-placed one.
+  2. **They are not "practically the same".** 286 grid points across the domain, 64 with echo,
+     both composites on the same 5 km discs and the same p90 (2026-08-26 08:20–08:25 UTC): CZRAD
+     reads ~3× lower in mm/h (≈7 dBZ), and **18 points had rain in OPERA and none in CZRAD, against
+     2 the other way.** A region-switched design would therefore reach different verdicts on the
+     same weather either side of an invisible line.
+  3. **The correlation worry is smaller than recorded earlier.** The two composites are dominated
+     by *different* radars over south-western Poland, so they are closer to independent there than
+     "OPERA ingests the Czech radars" implied. That argues for keeping both, not for dropping one.
+  4. **What is still unknown: which of the two is right in absolute terms.** The ~3× gap persists
+     at 0–80 km from the Czech radars, where overshoot cannot explain it, and the miss rate does
+     not rise cleanly with range. LibreWXR's known NWP-layer fusion is an equally good suspect for
+     inflating the other side. Needs rain-gauge ground truth; carried forward.
+
+- **What was built:**
+  - `sources/chmi.py`: the adapter. Run stamps computed from the clock on CHMI's 5-minute grid
+    (no feed exists and none is needed), forecast archive → 6 frames, observed frame → one more,
+    projection from CHMI's published extent, exact palette matching, p90 over the disc, and
+    `range_factor()` — the consensus weight scaled by distance to the nearest CZRAD radar.
+  - `sources/base.py`: `chmi` added to `RELIABILITY` (0.95), `UPDATE_INTERVAL_S` (5 min),
+    `CELL_KM` (1.0) and `ATTRIBUTION`; new `STATE_NOT_APPLICABLE`; the Marshall-Palmer
+    `dbz_to_mm_per_h` moved here from `librewxr.py` (re-exported there) so both radar sources share
+    one reflectivity→mm/h conversion.
+  - `sources/__init__.py`: the registry asks the adapter once whether the location is covered and
+    skips it entirely when it is not.
+  - `cache.py`: 32 → 48 entries, now shared by both image sources.
+  - `const.py`: `SOURCE_CHMI`.
+  - `scripts/make_chmi_fixtures.py` + `tests/fixtures/chmi/` (a real observed frame, a real
+    forecast archive, and two synthesized frames).
+  - Docs: `docs/DATA_SOURCES.md` (a full § CHMI including the probing evidence and the
+    cross-check table), `docs/ARCHITECTURE.md`, `docs/CONFIG.md`, `docs/DEVELOPMENT.md`,
+    `README.md`, `info.md`.
+  - Tests: **67 new (403 total)**, green offline (`docker run --network none`); `ruff` clean and
+    `hassfest` passing against the real action image.
+
+- **Decisions:**
+  - **The source id is `chmi`, not `meteor`.** Meteor turned out to be a delivery path that does
+    not deliver; the data is CHMI's and comes from CHMI. Naming a CHMI source after an app that is
+    not in the request path would be misleading in the sensor attributes, and nothing is released
+    yet, so the rename is free. Meteor is credited as the discovery path in the docs.
+  - **Colour matching is exact, and unrecognised colours are "no data".** Nearest-colour is what
+    turned a blended `png_masked` pixel into 205 mm/h. A frame whose sampled disc is more than 20 %
+    unrecognised fails outright. Producing confident nonsense is the one failure this project must
+    not have, so guessing is refused at the pixel level.
+  - **The unmasked products, despite `png_masked` being meteorologically better.** "Precipitation
+    reaching the ground" is the more relevant field for a dog walk, but it is only published
+    blended. Exact values from a slightly less apt product beat guessed values from the apt one.
+  - **Reliability 0.95, and then scaled by range.** The provisional-calibration discount is gone
+    now that CHMI's scale is verified. What remains as a *static* discount is quantisation: 15
+    steps of 4 dBZ against LibreWXR's 1 dBZ ramp, and at the light end one step separates 0.065
+    from 0.115 mm/h — dry from wet against the default threshold.
+  - **`chmi` is the first source whose weight depends on the user's location.** CHMI has exactly
+    two radars, so unlike every other source its measurement quality varies systematically across
+    its own coverage. `range_factor()`: full weight to 120 km, linear decay to 0.5 at 200 km,
+    floored. Bielsko-Biała → 0.705, so the source votes at 0.67. That is deliberately low enough
+    that `librewxr` wet against `chmi` dry still scores 1.00/1.67 = 0.60, i.e. wet — the
+    better-sighted radar wins the slot.
+    - **The curve is justified by beam geometry and CHMI's own stated 150–200 km ceiling, not
+      fitted to measured error.** The domain sweep showed a large overall gap but no clean
+      range gradient in the miss rate, so it does not pin the shape. Said plainly in the code
+      docstring and in `docs/DATA_SOURCES.md` so nobody later mistakes it for an empirical fit.
+    - Floor is 0.5 rather than 0: past 200 km the source still measures something real, it just
+      must not outweigh a radar standing 44 km away. Coverage gating stays purely geographic.
+    - The adjusted weight goes on the `SourceSeries`, so `engine/consensus.py` needs no special
+      case — it already multiplies `series.reliability` by freshness.
+  - **Run discovery is computed, not fetched.** Runs land on a fixed 5-minute grid, so the adapter
+    floors `now − 2 min` and steps back at most three runs. Parsing the 300 KB directory listing
+    every cycle would be the alternative.
+  - **`not_applicable` is a new source state**, distinct from `disabled` (a dormancy the next cycle
+    could end) and `out_of_range` (a slot a fetched source does not reach). Only the last means
+    "never poll this".
+  - **The coverage gate requires the whole sampled disc**, inset 0.3° from the data rectangle.
+    Outside that rectangle every pixel is transparent, so a half-covered disc would read its
+    missing half as "no echo" — silent wrongness again.
+  - **The observed frame is optional.** A run whose forecast arrived but whose observation 404s is
+    still a usable +10…+60 nowcast, and failing the cycle over "now" would be the wrong trade.
+  - **Fixtures are recorded, not synthesized**, except two frames that prove negatives (no echo
+    anywhere; echo only over Praha). The expected mm/h values in `tests/test_chmi.py` are pinned to
+    the recorded bytes.
+  - **No `X-Inst-Id` and no app version header.** Those were Meteor's; CHMI needs only an honest
+    `User-Agent`. The config-entry-derived install id was removed along with them.
+
+- **Deviations from PLAN.md / earlier phases (recorded before proceeding):**
+  1. **A fifth source, added outside the phase plan** and outside the phase 0 evaluation.
+  2. **`Pillow` is no longer confined to `sources/librewxr.py`.** There are now two image sources;
+     `docs/ARCHITECTURE.md` § Module layout has been updated to say so.
+  3. **The in-window request budget rises from ≤ 28 to ≤ 46 requests/hour, and ≤ 200 to ≤ 320/day
+     — for locations inside the Czech composite only.** Recorded in `docs/DATA_SOURCES.md`
+     § Request budget and `docs/ARCHITECTURE.md` § Resource budget. Bandwidth (~110 KB/cycle), not
+     request count, is what phase 8 should look at here.
+  4. **The frame cache bound changed from 32 to 48 entries.** Still far inside the ≤ 20 KB budget.
+
+- **Open questions carried forward:**
+  - **Which of the two radar sources is right in absolute terms is unknown, and it is the biggest
+    open question about this source set.** CZRAD reads ~3× lower than OPERA in mm/h across the whole
+    domain, including close to the Czech radars where beam overshoot does not explain it. Either
+    CZRAD under-reads, or LibreWXR over-reads — its NWP-layer fusion outside radar coverage is a
+    standing suspicion from phase 3. Settle it against IMGW rain gauges in phase 8; the answer may
+    move `RELIABILITY` for either source, or the `range_factor` curve.
+  - **Measure the `librewxr` / `chmi` correlation.** Phase 0's rule is that independence is
+    established by measurement, and this pair has not been measured. The worry is smaller than first
+    recorded — over Bielsko-Biała the two are dominated by different radars — but "smaller than
+    feared" is not "measured".
+  - **Confirm ČHMÚ's preferred CC BY 4.0 attribution wording** before 1.0.0. The licence itself is
+    settled (ČHMÚ publishes its open data under CC BY 4.0); only the exact credit string is open.
+  - **Revisit `png_masked` only with a way to get exact values** — un-blending, or the HDF5
+    products, which carry numeric reflectivity rather than a rendering.
+  - **CHMI's 5-minute run grid means a run based at :?5 yields forecast slots five minutes off the
+    engine's 10-minute grid.** The step-function alignment handles it correctly; watch whether the
+    offset ever makes CHMI and LibreWXR look like they disagree when they do not.
+  - **The manual smoke test still has not been run**, and now covers this too: with the location
+    near Bielsko-Biała the sensor's `sources` attribute should show a `chmi` entry in state `ok`;
+    with it in Warszawa the same entry should read `not_applicable` and the debug log should show
+    no request to `opendata.chmi.cz`.
+  - Everything else carried forward from phase 6 and the per-walk-targets change is unchanged.
+
+## Post-phase-6 fix — advice that had run out of time
+
+- **Status:** done (code, tests and docs; suite green, ruff clean)
+- **Date:** 2026-08-26
+- **Why it exists:** a bug report from the first live install, not a phase. **Deviation from
+  `PLAN.md`, recorded here as workflow rule 3 requires.** No phase was started or advanced;
+  phase 7 is still `not started`.
+
+- **The report.** A push arrived at 22:31 about a walk scheduled for 21:15, reading "Rain is
+  expected around 21:15. Wait until 21:20 — 5 minutes later — and the whole 15-minute walk should
+  stay dry." Every number in it was internally consistent; all of them were 70-odd minutes stale.
+
+- **Three causes, and none of them is a wrong calculation.**
+  1. `engine.recommend()` had no notion of the present. `candidate_starts()` is bounded by
+     `[T − E, T + L]`, both measured from the walk time, so the search will offer 21:20 at any
+     hour of the day. The engine is deliberately pure and clock-free — the mistake was that `now`
+     was never made a *parameter* of the search, only of the freshness weighting.
+  2. `WalkNotifier.async_process()` gated on `now < arm_at` and nothing else. There was a lower
+     bound on when advice may be sent and no upper one.
+  3. `WalkCoordinator._walk_end()` extends the watch window to `max(T, recommended_start) + D`.
+     That is correct and wanted — it is what lets a "wait until" answer be re-checked — but it is
+     what kept cycles running past the walk and gave (1) and (2) the airtime to speak. Reproduced
+     analytically: with `later_margin` at its 30-minute default the last cycle for a 21:15 walk
+     falls at 21:45, so the reporter's margin must have been ≥ 70 min for a 22:31 cycle to exist
+     at all. Worth confirming against the live entry's options.
+
+- **What was changed.**
+  - `candidate_starts(..., not_before=)` and `recommend(..., now=)`: a window that has already
+    begun is dropped before it is scored.
+  - `engine.is_actionable()`: a recommendation with a target expires when the target does;
+    `no_dry_window`, which names no time of its own, expires when the walk begins. The notifier
+    checks it after the material-change test.
+  - `engine.superseded_by_the_clock()`: a flip to `no_dry_window` caused *only* by the previously
+    notified start having passed is not re-announced. Without this, every "go earlier" alert would
+    be followed ten minutes later by a "there is no dry window" that says nothing new — the
+    regression test `test_nothing_is_said_once_the_advice_has_run_out_of_time` covers exactly that
+    sequence.
+  - `WindowVerdict.nowcast_covered` / `Recommendation.provisional`: whether a *radar* reaches every
+    slot of the window. Radars see 60 min, models 12 h.
+  - `engine.Search` replaces the three loose `duration` / `earlier_margin` / `later_margin`
+    arguments (`recommend` would otherwise have tripped `PLR0913`, and the three had always
+    travelled together anyway). The coordinator holds one `Search` instead of three fields.
+  - Config flow: a `beyond_radar` confirmation when `earlier_margin_min > 60`, plus inline field
+    descriptions on all three timing options. `long_walk` now names the horizon too.
+  - Notification: `{until}` (when the suggested walk gets home), a provisional sentence, and a
+    per-walk `tag` so a revision replaces its predecessor on the phone.
+  - Sensor: `requests_last_hour` / `requests_hourly_cap`, totalled from the per-adapter
+    `RequestBudget`s that already existed.
+
+- **Decisions, with the reasoning worth keeping.**
+  - **The watch window still outlives the walk.** The tempting fix — stop at `T` — would have
+    thrown away the only mechanism that can answer the horizon problem. Asked at 12:00 about a
+    13:00 walk, only the hourly models can see 14:00; staying awake through 14:00 is what lets the
+    radars confirm or correct that answer while it still matters. Bounded by `L`, and now counted.
+  - **`later_margin` gets no config-flow warning, `earlier_margin` does.** Time moves towards a
+    later window and away from an earlier one: a window an hour ahead will have been seen by the
+    radar long before the user has to leave, so a wide `later_margin` costs only requests. A wide
+    `earlier_margin`, by contrast, moves the *decision moment* out of radar range, and that is a
+    real trade-off the user should confirm rather than discover.
+  - **A model-only answer is published, not withheld.** Suppressing it until the radar agrees
+    would mean silence at exactly the moment the user asked to be told. It is sent, labelled
+    `provisional`, and revised if the radar disagrees.
+
+- **Open questions carried forward.**
+  - **Actionable notification buttons** ("stop telling me about this walk" / "I will wait another
+    hour, keep checking") were discussed and are technically straightforward — `data.actions` on
+    the companion-app payload, `mobile_app_notification_action` on the bus — but they were not
+    built, and they need a `walk_the_dog.snooze` / `walk_the_dog.extend` service pair so an
+    automation and a button press share one code path. Decide before phase 7 freezes the strings.
+  - Whether the reporter's `later_margin_min` really is ≥ 70 min, which is what the 22:31 timing
+    implies. Not needed for the fix; needed to close the report.
+  - Everything else carried forward from phase 6, the per-walk-targets change and the CHMI change
+    is unchanged.
+
+## Post-phase-6 change — closing a walk, confirming a plan, and a sprint before the door
+
+- **Status:** done (code, tests and docs; 452 tests green offline, ruff clean)
+- **Date:** 2026-08-26
+- **Why it exists:** the four highest-value items from the improvement list written up in the
+  previous entry, picked by the maintainer. **Deviation from `PLAN.md`, recorded here as workflow
+  rule 3 requires.** No phase was started or advanced; phase 7 is still `not started`.
+
+- **What was built.**
+  1. **`walk_the_dog.walked` and the *Already went* button.** The button is `data.actions` on the
+     companion-app payload; the tap comes back as a `mobile_app_notification_action` event, which
+     the coordinator listens for. `mobile_app` is deliberately *not* a manifest dependency — a
+     user without the app simply never fires the event and everything else works.
+  2. **`confirm_margin_min`** (default 0 = off): one message `confirm_margin` before the departure
+     moment, in two shapes — the plan stands, or the rain has gone.
+  3. **Sprint cadence**: 5-minute cycles for the 20 minutes before setting off, only where a
+     source publishes faster than the grid.
+  4. **`binary_sensor.walk_the_dog_walk_window`.**
+  5. **Publication-aligned cycles** — added after the four above, at the maintainer's request; see
+     its own heading below.
+
+- **Decisions, with the reasoning worth keeping.**
+  - **The walk occurrence is encoded in the action identifier, not passed beside it.** The action
+    string is the one field both companion apps hand back unchanged; extra keys are not
+    guaranteed. It also makes the button self-scoping: a notification left over from yesterday
+    carries yesterday's stamp and closes nothing.
+  - **"I'll wait, keep checking" was *not* built as a button.** It is what the integration already
+    does after the timeline fix, and making the user opt in to it would add friction and a failure
+    mode — miss the tap, get nothing. Only the decision the app cannot infer got a button.
+  - **Closing a walk stops polling, not alerting.** The saving is the point; the switch remains
+    the way to turn the integration off.
+  - **Dismissal is in memory only.** A restart inside the window resurrects the walk. That is the
+    safe way round to be wrong — an extra notification beats silently skipping a walk because of
+    a stale flag — and it avoids a Store write on a hot path.
+  - **The stand-down message is the reason the confirmation exists.** "The plan still stands" is
+    mild reassurance; "the rain has gone, walk at the normal time" closes a real gap, because
+    `later` relaxing to `none` is not an alert direction and silence means "go as planned" — two
+    readings of silence that contradict each other for the one user who was told to wait.
+  - **The sprint is gated on the source, not on the location or the clock alone.**
+    `SourceRegistry.fast_cadence()` asks CHMI whether it covers the disc. Elsewhere the extra
+    cycles would re-score identical bytes: LibreWXR publishes every 10 minutes and Open-Meteo
+    every 30, and both now gate their own fetch on their own cadence, so a sprint cycle costs two
+    CHMI requests and nothing else. `SPRINT` divides `CYCLE`, so the anchored grid is subdivided
+    rather than replaced and the cycle promised at `T − E` still lands.
+  - **The sprint can run twice for one walk** — into the recommended start, and again into `T`
+    once that suggestion lapses unused. Both are moments the user might walk out of the door, so
+    this is wanted rather than tolerated; it is pinned by
+    `test_the_last_stretch_before_setting_off_runs_at_five_minutes`.
+  - **CHMI's hourly cap: 18 → 30.** Its own publication rate is 5 minutes and a cycle is 2
+    requests, so a sustained sprint is 24/h. The active-hour ceiling inside its box rises from 46
+    to 58; outside it nothing changes.
+
+- **Correction to the previous entry.** It said flatly that polling faster than a source publishes
+  "buys nothing". That is true of a single source's *bytes* and it is not the whole story: a
+  convective cell can form and arrive inside one 10-minute slot, and CHMI publishes twice as often
+  as the grid, so there was real information being left on the table around Bielsko-Biała. Hence
+  the sprint, and hence the publication alignment below.
+
+- **Publication alignment (added in the same session, after the sprint).** The open question left
+  above — align the cycle to the provider's clock rather than only to ours — turned out to be
+  worth building, but **not for the reason it was written down**. The note said a fresh frame
+  could "sit unread for up to a full slot", implying stale data at the decision moment. That is
+  wrong: a fetch always returns the newest frame that *exists*, so what is read at `T − E` is the
+  same either way, and no forecast the provider has published is ever missed. What was actually
+  waiting was the **alert**. A material change contained in a frame published at 04:31 was
+  announced at the 04:40 cycle — up to a full cadence late, and precisely in the case the
+  maintainer raised, where a cell builds inside twenty minutes.
+
+  - `_aligned_wake()` returns `issued_at + interval + PUBLISH_SETTLE` for the source whose own
+    publication interval equals the cadence being run (LibreWXR at 10 min, CHMI at 5). Hourly
+    sources have nothing to align to at this timescale; a location with no fast source gets `None`
+    and keeps the plain grid unchanged.
+  - **`min(grid, aligned)`, never a replacement.** This is the decision that makes the feature safe
+    to ship. `PUBLISH_SETTLE` is a guess (60 s) at how long after a frame's stamp it is actually on
+    the server, and a *re-phased* grid built on a wrong guess degrades badly — it converges to
+    fetching one frame behind, permanently worse than no alignment at all. Taking the minimum means
+    the alignment can only ever pull a cycle earlier: the grid keeps running underneath at its own
+    rate, a wrong guess costs one cheap extra cycle, and nothing that was due is ever skipped.
+  - **The notification moment is now pinned explicitly** (`min(wake, arm_at)` while `now < arm_at`)
+    rather than following from the grid arithmetic. It held anyway, but a promise that survives by
+    reasoning about a `min()` chain is one refactor away from not holding.
+  - **The cost is cycles, not requests.** Up to two cycles per cadence instead of one. `chmi`
+    gained a 5-minute fetch gate to match the one `librewxr` got with the sprint, so every adapter
+    now gates on its own publication interval and the request count follows the providers' rates
+    rather than the coordinator's wakeups. A cycle without a fetch is arithmetic over ~90 slots;
+    the image decode the CPU budget is about only happens on a real fetch.
+
+- **Open questions carried forward.**
+  - **`PUBLISH_SETTLE` is an estimate, not a measurement.** 60 s, never observed. Measure the real
+    lag between a LibreWXR frame's stamp and its availability in phase 8 and pin it. Being wrong is
+    cheap by construction (above), but being right is free.
+  - **`walk_the_dog.extend`**, the other half of the service pair sketched in the previous entry:
+    "I have another hour today" when the answer is `no_dry_window`. Deliberately not built —
+    nothing in the current design needs it, and it should wait until there is a real complaint it
+    answers.
+  - Whether dismissal should survive a restart. Needs a Store write; see the decision above.
+  - `hassfest` has not been run against the new `services.yaml` and `strings.json` sections on this
+    machine (Windows), only the offline pytest suite. CI covers it on push.
+  - Everything else carried forward from the earlier entries is unchanged.
+
 ## Phase 7 — Localization + branding
 
 - **Status:** not started

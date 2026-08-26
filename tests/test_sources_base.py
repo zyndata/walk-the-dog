@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from custom_components.walk_the_dog.const import (
+    SOURCE_CHMI,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
@@ -31,7 +32,7 @@ from custom_components.walk_the_dog.sources.base import (
 )
 
 NOW = datetime(2026, 8, 25, 7, 0, tzinfo=UTC)
-ALL_SOURCES = (SOURCE_LIBREWXR, SOURCE_KNMI, SOURCE_ICON_EU, SOURCE_METNO)
+ALL_SOURCES = (SOURCE_LIBREWXR, SOURCE_CHMI, SOURCE_KNMI, SOURCE_ICON_EU, SOURCE_METNO)
 
 
 def _haversine_km(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -58,10 +59,22 @@ def test_reliability_matches_the_architecture_table() -> None:
     """docs/ARCHITECTURE.md § Consensus scoring fixes these weights."""
     assert RELIABILITY == {
         SOURCE_LIBREWXR: 1.00,
+        SOURCE_CHMI: 0.95,
         SOURCE_KNMI: 0.90,
         SOURCE_ICON_EU: 0.80,
         SOURCE_METNO: 0.70,
     }
+
+
+def test_the_regional_radar_is_discounted_only_for_quantisation() -> None:
+    """Its calibration is CHMI's own published scale, so the old provisional discount
+    is gone. What remains is resolution: CHMI publishes 15 steps of 4 dBZ where
+    LibreWXR's grey ramp carries 1 dBZ, and at the light end one step separates
+    0.06 from 0.12 mm/h — i.e. voting dry from voting wet. Hence just below LibreWXR,
+    and still ahead of every NWP model inside the nowcast horizon.
+    """
+    assert RELIABILITY[SOURCE_CHMI] < RELIABILITY[SOURCE_LIBREWXR]
+    assert RELIABILITY[SOURCE_CHMI] > RELIABILITY[SOURCE_KNMI]
 
 
 def test_sample_points_are_the_centre_plus_four_edge_points() -> None:

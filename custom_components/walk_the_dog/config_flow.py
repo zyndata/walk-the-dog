@@ -41,6 +41,7 @@ from homeassistant.helpers.translation import async_get_translations
 
 from .const import (
     CONF_AUTO_MUTE_ENTITY,
+    CONF_CONFIRM_MARGIN_MIN,
     CONF_EARLIER_MARGIN_MIN,
     CONF_FIRE_EVENT,
     CONF_INTENSITY_THRESHOLD,
@@ -54,6 +55,8 @@ from .const import (
     CONF_TARGET_SERVICES,
     CONF_WALK_DURATION_MIN,
     CONF_WALK_TARGETS,
+    CONFIRM_STEP_MIN,
+    DEFAULT_CONFIRM_MARGIN_MIN,
     DEFAULT_EARLIER_MARGIN_MIN,
     DEFAULT_FIRE_EVENT,
     DEFAULT_INTENSITY_THRESHOLD,
@@ -62,6 +65,7 @@ from .const import (
     DOMAIN,
     INTENSITY_MM_H,
     MARGIN_STEP_MIN,
+    MAX_CONFIRM_MARGIN_MIN,
     MAX_MARGIN_MIN,
     MAX_RADIUS_KM,
     MAX_WALK_DURATION_MIN,
@@ -70,6 +74,7 @@ from .const import (
     MIN_WALK_DURATION_MIN,
     NOTIFY_DOMAIN,
     NOTIFY_SERVICE_PREFIX,
+    NOWCAST_HORIZON_MIN,
     RADIUS_STEP_KM,
     SCHEDULE_MODE_DAILY,
     WALK_DURATION_STEP_MIN,
@@ -169,6 +174,9 @@ def _collect_params(user_input: dict[str, Any], *, keep_notify: bool = True) -> 
         CONF_EARLIER_MARGIN_MIN: int(user_input[CONF_EARLIER_MARGIN_MIN]),
         CONF_LATER_MARGIN_MIN: int(user_input[CONF_LATER_MARGIN_MIN]),
         CONF_WALK_DURATION_MIN: int(user_input[CONF_WALK_DURATION_MIN]),
+        CONF_CONFIRM_MARGIN_MIN: int(
+            user_input.get(CONF_CONFIRM_MARGIN_MIN, DEFAULT_CONFIRM_MARGIN_MIN)
+        ),
         CONF_FIRE_EVENT: bool(user_input[CONF_FIRE_EVENT]),
     }
     if auto_mute := user_input.get(CONF_AUTO_MUTE_ENTITY):
@@ -419,6 +427,9 @@ class _WalkFlowSteps:
                 _marker(CONF_WALK_DURATION_MIN, current): _minutes_selector(
                     MIN_WALK_DURATION_MIN, MAX_WALK_DURATION_MIN, WALK_DURATION_STEP_MIN
                 ),
+                _marker(
+                    CONF_CONFIRM_MARGIN_MIN, current, DEFAULT_CONFIRM_MARGIN_MIN
+                ): _minutes_selector(MIN_MARGIN_MIN, MAX_CONFIRM_MARGIN_MIN, CONFIRM_STEP_MIN),
                 _marker(CONF_NOTIFY_SERVICE, current, required=False): SelectSelector(
                     SelectSelectorConfig(
                         options=notify_services,
@@ -444,13 +455,29 @@ class _WalkFlowSteps:
                 self._params = _collect_params(user_input, keep_notify=False)
                 errors[CONF_NOTIFY_SERVICE] = ERROR_INVALID_NOTIFY_SERVICE
             else:
-                if self._params[CONF_WALK_DURATION_MIN] > WALK_DURATION_WARN_MIN:
-                    return await self.async_step_long_walk()
-                return await self._async_finish()
+                return await self._async_check_long_walk()
 
         return self.async_show_form(
             step_id="params", data_schema=self._params_schema(), errors=errors
         )
+
+    async def _async_check_long_walk(self) -> ConfigFlowResult:
+        """First of the two timing warnings: a walk longer than the forecast is good for."""
+        if self._params[CONF_WALK_DURATION_MIN] > WALK_DURATION_WARN_MIN:
+            return await self.async_step_long_walk()
+        return await self._async_check_radar_reach()
+
+    async def _async_check_radar_reach(self) -> ConfigFlowResult:
+        """Second: an alert timed for a moment no radar can see the walk from.
+
+        The radars reach `NOWCAST_HORIZON_MIN` ahead and no further, and the alert
+        is sent `earlier_margin` before the walk. Set the margin wider than that
+        horizon and the message is decided by hourly models alone — which know
+        whether it will rain far better than they know when.
+        """
+        if self._params[CONF_EARLIER_MARGIN_MIN] > NOWCAST_HORIZON_MIN:
+            return await self.async_step_beyond_radar()
+        return await self._async_finish()
 
     async def async_step_long_walk(
         self, user_input: dict[str, Any] | None = None
@@ -462,7 +489,7 @@ class _WalkFlowSteps:
         """
         if user_input is not None:
             if user_input[CONF_CONFIRM]:
-                return await self._async_finish()
+                return await self._async_check_radar_reach()
             return await self.async_step_params()
 
         return self.async_show_form(
@@ -471,6 +498,33 @@ class _WalkFlowSteps:
             description_placeholders={
                 "duration": str(self._params.get(CONF_WALK_DURATION_MIN, "")),
                 "limit": str(WALK_DURATION_WARN_MIN),
+                "horizon": str(NOWCAST_HORIZON_MIN),
+            },
+        )
+
+    async def async_step_beyond_radar(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Warn that the alert lands before any radar can see the walk.
+
+        Like `long_walk` this is a confirmation, not an error: a wide margin is a
+        legitimate choice for someone who needs a lot of notice, as long as they
+        know the first message will be a model-only estimate that the integration
+        will keep re-checking as the walk comes into radar range.
+        """
+        if user_input is not None:
+            if user_input[CONF_CONFIRM]:
+                return await self._async_finish()
+            return await self.async_step_params()
+
+        earlier = int(self._params.get(CONF_EARLIER_MARGIN_MIN, 0))
+        return self.async_show_form(
+            step_id="beyond_radar",
+            data_schema=vol.Schema({vol.Required(CONF_CONFIRM, default=False): BooleanSelector()}),
+            description_placeholders={
+                "earlier": str(earlier),
+                "horizon": str(NOWCAST_HORIZON_MIN),
+                "over": str(earlier - NOWCAST_HORIZON_MIN),
             },
         )
 

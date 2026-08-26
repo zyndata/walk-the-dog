@@ -17,6 +17,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMocker
 
 from custom_components.walk_the_dog.const import (
+    SOURCE_CHMI,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
@@ -30,6 +31,7 @@ from custom_components.walk_the_dog.sources.base import (
     SampleGeometry,
     SourceSeries,
 )
+from custom_components.walk_the_dog.sources.chmi import ChmiAdapter
 from custom_components.walk_the_dog.sources.librewxr import (
     BASE_URL,
     WEATHER_MAPS_PATH,
@@ -40,7 +42,8 @@ from custom_components.walk_the_dog.sources.librewxr import (
 from custom_components.walk_the_dog.sources.met_norway import MetNorwayAdapter
 from custom_components.walk_the_dog.sources.open_meteo import OpenMeteoAdapter
 
-from .conftest import load_bytes, load_fixture
+from .conftest import CHMI_GEOMETRY, load_bytes, load_fixture
+from .test_chmi import RUN, _mock_run
 from .test_librewxr import _tile_urls
 
 UA = build_user_agent("0.1.0")
@@ -54,7 +57,13 @@ async def _all_series(
     geometry: SampleGeometry,
     now: datetime,
 ) -> dict[str, SourceSeries]:
-    """Drive all three adapters against the recorded fixtures."""
+    """Drive every adapter against its fixtures and collect what comes out.
+
+    CHMI is sampled at `CHMI_GEOMETRY` rather than at `geometry`, and on the clock of
+    the run its fixtures were recorded from: it is the one regional source, and
+    outside its composite it correctly returns no series at all. Sampling it where it
+    applies is what lets the contract be checked for it too.
+    """
     index = load_fixture("librewxr", "weather-maps.json")
     aioclient_mock.get(INDEX_URL, json=index)
     mask = DiscMask(geometry)
@@ -65,6 +74,7 @@ async def _all_series(
             aioclient_mock.get(url, content=tile)
     aioclient_mock.get(open_meteo.URL, json=load_fixture("open_meteo", "heavy.json"))
     aioclient_mock.get(met_norway.URL, json=load_fixture("met_norway", "compact.json"))
+    _mock_run(aioclient_mock)
 
     session = async_get_clientsession(hass)
     metno = MetNorwayAdapter(UA)
@@ -75,22 +85,34 @@ async def _all_series(
         result = await adapter.fetch(session, geometry, now)
         for entry in result.series:
             series[entry.source_id] = entry
+
+    chmi = await ChmiAdapter(UA).fetch(session, CHMI_GEOMETRY, RUN + timedelta(minutes=3))
+    for entry in chmi.series:
+        series[entry.source_id] = entry
     return series
 
 
-async def test_all_four_sources_produce_a_series(
+async def test_all_five_sources_produce_a_series(
     hass: HomeAssistant,
     aioclient_mock: AiohttpClientMocker,
     geometry: SampleGeometry,
     now: datetime,
 ) -> None:
-    """One adapter per provider, four normalized series in total."""
+    """One adapter per provider, five normalized series in total."""
     series = await _all_series(hass, aioclient_mock, geometry, now)
 
-    assert set(series) == {SOURCE_LIBREWXR, SOURCE_ICON_EU, SOURCE_KNMI, SOURCE_METNO}
+    assert set(series) == {
+        SOURCE_LIBREWXR,
+        SOURCE_CHMI,
+        SOURCE_ICON_EU,
+        SOURCE_KNMI,
+        SOURCE_METNO,
+    }
 
 
-@pytest.mark.parametrize("source_id", [SOURCE_LIBREWXR, SOURCE_ICON_EU, SOURCE_KNMI, SOURCE_METNO])
+@pytest.mark.parametrize(
+    "source_id", [SOURCE_LIBREWXR, SOURCE_CHMI, SOURCE_ICON_EU, SOURCE_KNMI, SOURCE_METNO]
+)
 async def test_series_satisfies_the_normalized_contract(
     hass: HomeAssistant,
     aioclient_mock: AiohttpClientMocker,
@@ -104,8 +126,15 @@ async def test_series_satisfies_the_normalized_contract(
     assert entry.source_id == source_id
     assert entry.step_s in (600, 3600)
     assert entry.cell_km == CELL_KM[source_id]
-    assert entry.reliability == RELIABILITY[source_id]
-    assert entry.fetched_at == now
+    if source_id == SOURCE_CHMI:
+        # The one source whose weight is not a constant: it is measured from a fixed
+        # pair of radars, so its vote is worth less the further the user is from them
+        # (docs/DATA_SOURCES.md § CHMI). It still never exceeds its static weight.
+        assert 0.0 < entry.reliability <= RELIABILITY[source_id]
+        # ...and it is driven on its recorded run's clock, so only the others see `now`.
+    else:
+        assert entry.reliability == RELIABILITY[source_id]
+        assert entry.fetched_at == now
 
     # Timestamps: aware UTC, sorted, evenly spaced by the declared step.
     assert entry.issued_at.tzinfo is not None
@@ -126,7 +155,7 @@ async def test_series_satisfies_the_normalized_contract(
     assert all(intensity_class(value) in VALID_CLASSES for value in values)
 
 
-async def test_the_tile_source_is_the_only_sub_hourly_one(
+async def test_only_the_radar_sources_are_sub_hourly(
     hass: HomeAssistant,
     aioclient_mock: AiohttpClientMocker,
     geometry: SampleGeometry,
@@ -134,25 +163,29 @@ async def test_the_tile_source_is_the_only_sub_hourly_one(
 ) -> None:
     """Phase 0: no free source gives Poland native sub-hourly NWP, so steps are mixed.
 
-    The engine has to align a 10-minute series against hourly ones — this pins the
-    fact rather than leaving phase 4 to assume a single common step.
+    The engine has to align 10-minute series against hourly ones — this pins the fact
+    rather than leaving the consensus layer to assume a single common step. Both radar
+    sources publish on the 10-minute grid; every model source is hourly.
     """
     series = await _all_series(hass, aioclient_mock, geometry, now)
 
     assert series[SOURCE_LIBREWXR].step_s == 600
+    assert series[SOURCE_CHMI].step_s == 600
     assert series[SOURCE_ICON_EU].step_s == 3600
     assert series[SOURCE_KNMI].step_s == 3600
     assert series[SOURCE_METNO].step_s == 3600
 
 
-async def test_the_radar_source_covers_the_next_hour_precisely(
+@pytest.mark.parametrize("source_id", [SOURCE_LIBREWXR, SOURCE_CHMI])
+async def test_the_radar_sources_cover_the_next_hour_precisely(
     hass: HomeAssistant,
     aioclient_mock: AiohttpClientMocker,
     geometry: SampleGeometry,
     now: datetime,
+    source_id: str,
 ) -> None:
-    """LibreWXR carries the *when*: seven slots from now to +60 minutes."""
-    entry = (await _all_series(hass, aioclient_mock, geometry, now))[SOURCE_LIBREWXR]
+    """Radar carries the *when*: seven slots from now to +60 minutes, either way in."""
+    entry = (await _all_series(hass, aioclient_mock, geometry, now))[source_id]
 
     assert len(entry.slots) == 7
     span = entry.slots[-1][0] - entry.slots[0][0]

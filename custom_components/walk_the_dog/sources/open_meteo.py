@@ -75,6 +75,11 @@ class OpenMeteoAdapter:
 
     # --- adapter protocol ---------------------------------------------------
 
+    @property
+    def budget(self) -> RequestBudget:
+        """This adapter's rolling hourly request budget, for the registry to total."""
+        return self._budget
+
     def should_fetch(self, now: datetime) -> bool:
         """True only every 30 minutes, and never while a backoff is armed."""
         if not self._backoff.ready(now):

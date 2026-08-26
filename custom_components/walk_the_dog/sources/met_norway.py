@@ -73,6 +73,11 @@ class MetNorwayAdapter:
 
     # --- adapter protocol ---------------------------------------------------
 
+    @property
+    def budget(self) -> RequestBudget:
+        """This adapter's rolling hourly request budget, for the registry to total."""
+        return self._budget
+
     def should_fetch(self, now: datetime) -> bool:
         """Respect the enable flag, the backoff, `Expires`, and the 10-minute floor."""
         if not self.enabled or not self._backoff.ready(now):

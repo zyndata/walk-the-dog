@@ -30,6 +30,7 @@ from custom_components.walk_the_dog.sources.librewxr import (
     BASE_URL,
     COLOR_SCHEME,
     MAX_REQUESTS_PER_HOUR,
+    MIN_INTERVAL_S,
     SMOOTH,
     SNOW,
     STEP_S,
@@ -434,3 +435,24 @@ async def test_cached_before_any_fetch_reports_failure(now: datetime) -> None:
     result = LibreWxrAdapter(UA).cached(now)
     assert result.series == ()
     assert result.statuses[0].state == STATE_FAILED
+
+
+async def test_a_published_frame_is_fetched_once_however_often_the_cycle_runs(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """The coordinator sprints to 5 minutes near a walk; LibreWXR publishes every 10.
+
+    Its cadence is its own, not the cycle's, so the faster cycle re-scores the frame
+    it already has instead of asking for it again.
+    """
+    _mock_frames(aioclient_mock, geometry, load_bytes("librewxr", "tile_dry.png"))
+    adapter = LibreWxrAdapter(UA)
+
+    assert adapter.should_fetch(now)
+    await adapter.fetch(async_get_clientsession(hass), geometry, now)
+
+    assert not adapter.should_fetch(now + timedelta(seconds=MIN_INTERVAL_S // 2))
+    assert adapter.should_fetch(now + timedelta(seconds=MIN_INTERVAL_S))

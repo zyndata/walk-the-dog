@@ -5,6 +5,12 @@ recommendation, measured correlations). MET Norway correlates 0.61 with KNMI and
 0.71 with ECMWF-IFS, so it stays dormant while Open-Meteo is healthy and is woken
 only when Open-Meteo has failed twice in a row — the registry is the single place
 that decides this.
+
+It is also where a *regional* source is kept quiet. CHMI's CZRAD composite covers
+only the south-west corner of Poland, so the registry asks it once whether the
+configured location is inside the composite and, if it is not, never calls it again
+— the source reports `not_applicable` and costs nothing
+(docs/DATA_SOURCES.md § CHMI).
 """
 
 from __future__ import annotations
@@ -12,15 +18,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .base import (
     ATTRIBUTION,
     FetchResult,
     SampleGeometry,
+    SourceAdapter,
     SourceSeries,
     SourceStatus,
 )
+from .chmi import ChmiAdapter
 from .librewxr import LibreWxrAdapter
 from .met_norway import MetNorwayAdapter
 from .open_meteo import OpenMeteoAdapter
@@ -54,13 +62,16 @@ class SourceRegistry:
         self.librewxr = LibreWxrAdapter(user_agent, cache=cache)
         self.open_meteo = OpenMeteoAdapter(user_agent)
         self.met_norway = MetNorwayAdapter(user_agent)
+        self.chmi = ChmiAdapter(user_agent, cache=cache)
         self._open_meteo_failures = 0
         self._open_meteo_successes = 0
 
     @property
-    def adapters(self) -> tuple[LibreWxrAdapter, OpenMeteoAdapter, MetNorwayAdapter]:
+    def adapters(
+        self,
+    ) -> tuple[LibreWxrAdapter, ChmiAdapter, OpenMeteoAdapter, MetNorwayAdapter]:
         """Every adapter, in the order their statuses are reported."""
-        return (self.librewxr, self.open_meteo, self.met_norway)
+        return (self.librewxr, self.chmi, self.open_meteo, self.met_norway)
 
     @property
     def failover_active(self) -> bool:
@@ -78,8 +89,14 @@ class SourceRegistry:
         """
         results: dict[str, FetchResult] = {}
 
-        # LibreWXR and Open-Meteo are independent providers: fetch concurrently.
-        primary = [self.librewxr, self.open_meteo]
+        # Three independent providers: fetch concurrently. CHMI is skipped
+        # entirely — not even a cached status lookup costs a request — when the
+        # configured location lies outside its composite.
+        primary: list[Any] = [self.librewxr, self.open_meteo]
+        if self.chmi.applicable(geometry):
+            primary.append(self.chmi)
+        else:
+            results[self.chmi.source_ids[0]] = self.chmi.not_applicable()
         gathered = await asyncio.gather(
             *(self._run(adapter, session, geometry, now) for adapter in primary)
         )
@@ -101,7 +118,7 @@ class SourceRegistry:
 
     async def _run(
         self,
-        adapter: LibreWxrAdapter | OpenMeteoAdapter | MetNorwayAdapter,
+        adapter: SourceAdapter,
         session: ClientSession,
         geometry: SampleGeometry,
         now: datetime,
@@ -126,6 +143,35 @@ class SourceRegistry:
             _LOGGER.info("Open-Meteo healthy again; standing MET Norway down")
             self.met_norway.enabled = False
 
+    def fast_cadence(self, geometry: SampleGeometry) -> bool:
+        """Whether any source here publishes faster than the engine's 10-minute grid.
+
+        Only CHMI does (5 minutes), and only inside its composite. The coordinator
+        asks before shortening its cycle: everywhere else the extra cycles would
+        re-score bytes that have not changed, which costs CPU and buys nothing.
+        """
+        return self.chmi.applicable(geometry)
+
+    def budget(self, now: datetime) -> tuple[int, int]:
+        """Requests spent in the last rolling hour, and the ceiling they count against.
+
+        Every adapter polices its own budget before it sends anything
+        (`base.RequestBudget`), which is what keeps the integration inside the
+        allowances in docs/DATA_SOURCES.md however long a walk window stays open.
+        Totalling them here is what makes that promise visible on the sensor rather
+        than merely true in the code.
+
+        The cap is the sum of every adapter's own cap, including sources that are
+        dormant or not applicable at this location and therefore spend nothing.
+        """
+        spent = 0
+        cap = 0
+        for adapter in self.adapters:
+            budget = adapter.budget
+            cap += budget.limit
+            spent += budget.limit - budget.remaining(now)
+        return spent, cap
+
     def attributions(self, statuses: list[SourceStatus]) -> list[str]:
         """Attribution strings for the sources that actually contributed."""
         return [
@@ -137,6 +183,7 @@ class SourceRegistry:
 
 __all__ = [
     "FAILOVER_THRESHOLD",
+    "ChmiAdapter",
     "LibreWxrAdapter",
     "MetNorwayAdapter",
     "OpenMeteoAdapter",

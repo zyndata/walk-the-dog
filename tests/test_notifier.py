@@ -9,14 +9,16 @@ that nothing was sent.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from homeassistant.const import STATE_HOME, STATE_NOT_HOME
 from pytest_homeassistant_custom_component.common import async_capture_events, async_mock_service
 
 from custom_components.walk_the_dog.const import (
+    CLEAR_NOTIFICATION,
     CONF_AUTO_MUTE_ENTITY,
+    CONF_CONFIRM_MARGIN_MIN,
     CONF_FIRE_EVENT,
     CONF_NOTIFY_SERVICE,
     CONF_TARGET_MUTE,
@@ -24,17 +26,22 @@ from custom_components.walk_the_dog.const import (
     CONF_WALK_TARGETS,
     EVENT_ALERT,
     NOTIFY_DOMAIN,
+    SOURCE_LIBREWXR,
 )
 from custom_components.walk_the_dog.coordinator import CYCLE, WalkCoordinator
 from custom_components.walk_the_dog.engine import DIRECTION_EARLIER
+from custom_components.walk_the_dog.notifier import TAG_PREFIX, walked_action
 from custom_components.walk_the_dog.schedule import KEY_ALL, target_key
 
 from .conftest import (
     ARM_AT,
+    WALK_END,
     WALK_HHMM,
     WALK_START,
     WINDOW_START,
     hourly_sources,
+    make_series,
+    make_status,
     run_cycle,
     setup_entry,
 )
@@ -446,3 +453,252 @@ async def test_another_walks_settings_do_not_leak_into_this_one(
 
     assert len(notifications) == 1
     assert evening == []
+
+
+# --- advice that has run out of time --------------------------------------
+
+
+async def test_nothing_is_said_once_the_advice_has_run_out_of_time(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """The regression: the watch window outlives the walk, the advice must not.
+
+    Told at 04:00 to set off at 04:30, the coordinator keeps cycling to the end of
+    the walk. From 04:40 on, the search can no longer offer 04:30 and the answer
+    flips to `no_dry_window` — a different direction, and so a material change by
+    every other rule. Nothing about the weather changed, so nothing is sent.
+    """
+    moment = ARM_AT
+    while moment < WALK_END:
+        await run_cycle(hass, freezer, moment)
+        moment += CYCLE
+
+    assert len(notifications) == 1
+    assert "04:30" in notifications[0].data["message"]
+
+
+async def test_the_message_says_when_the_walk_would_get_home(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Moving a walk moves its end too, and that is what has to fit the evening."""
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert "05:00" in notifications[0].data["message"]
+
+
+async def test_alerts_about_one_walk_share_a_notification_tag(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """A revised recommendation replaces the one it supersedes on the phone."""
+    await run_cycle(hass, freezer, ARM_AT)
+    fetch.build = lambda now: hourly_sources(now, HEAVY_AT_FIVE)
+    await run_cycle(hass, freezer, ARM_AT + CYCLE)
+
+    assert len(notifications) == 2
+    tags = {call.data["data"]["tag"] for call in notifications}
+    assert tags == {f"{TAG_PREFIX}{WALK_START:%Y%m%dT%H%M}"}
+
+
+# --- how far the radar reaches --------------------------------------------
+
+
+def _with_radar(now: datetime) -> Any:
+    """The two hourly models, plus a radar frame covering the whole search window."""
+    series, statuses = hourly_sources(now, RAIN_AT_FIVE)
+    series.append(
+        make_series(
+            SOURCE_LIBREWXR,
+            [0.0] * 12,
+            start=WINDOW_START,
+            step_s=600,
+            issued_at=now,
+        )
+    )
+    statuses.append(make_status(SOURCE_LIBREWXR, age_s=0, contributed=True))
+    return series, statuses
+
+
+async def test_a_model_only_answer_says_it_is_still_being_checked(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Only the hourly models are answering here, so the timing is an estimate."""
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert "still watching" in notifications[0].data["message"]
+
+
+async def test_a_radar_backed_answer_is_stated_plainly(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """With a radar over the suggested window there is nothing left to hedge."""
+    fetch.build = _with_radar
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
+    assert "04:30" in notifications[0].data["message"]
+    assert "still watching" not in notifications[0].data["message"]
+
+
+# --- the "already went" button --------------------------------------------
+
+
+async def test_the_push_carries_the_already_went_button(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """One button, naming the occurrence it belongs to rather than "the current walk"."""
+    await run_cycle(hass, freezer, ARM_AT)
+
+    actions = notifications[0].data["data"]["actions"]
+
+    assert [action["action"] for action in actions] == [walked_action(WALK_START)]
+    assert actions[0]["title"]
+
+
+async def test_going_out_takes_the_notification_off_every_phone(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Only the phone that was tapped dismisses its own copy; the rest need telling."""
+    await run_cycle(hass, freezer, ARM_AT)
+
+    await coordinator.async_mark_walked()
+
+    assert notifications[-1].data["message"] == CLEAR_NOTIFICATION
+    assert notifications[-1].data["data"]["tag"] == f"{TAG_PREFIX}{WALK_START:%Y%m%dT%H%M}"
+
+
+# --- the confirmation before setting off ----------------------------------
+
+
+@pytest.fixture
+async def confirming(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> WalkCoordinator:
+    """The same entry, asked to say something 15 minutes before setting off."""
+    hass.states.async_set(MUTE_ENTITY, STATE_HOME)
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
+            CONF_FIRE_EVENT: True,
+            CONF_AUTO_MUTE_ENTITY: MUTE_ENTITY,
+            CONF_CONFIRM_MARGIN_MIN: 15,
+        },
+    )
+    freezer.move_to(IDLE)
+    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    return await setup_entry(hass, entry)
+
+
+async def test_no_confirmation_is_sent_unless_it_is_asked_for(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Off by default: no news already means nothing has changed."""
+    for moment in (ARM_AT, ARM_AT + CYCLE, ARM_AT + 2 * CYCLE):
+        await run_cycle(hass, freezer, moment)
+
+    assert len(notifications) == 1
+
+
+async def test_the_confirmation_says_the_plan_still_stands(
+    hass: HomeAssistant,
+    confirming: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Told at 04:00 to go at 04:30, the user hears at 04:15 that it is still on."""
+    await run_cycle(hass, freezer, ARM_AT)
+    assert len(notifications) == 1
+
+    await run_cycle(hass, freezer, ARM_AT + CYCLE)
+    assert len(notifications) == 1
+
+    await run_cycle(hass, freezer, ARM_AT + 2 * CYCLE)
+
+    assert len(notifications) == 2
+    assert "04:30" in notifications[1].data["message"]
+
+
+async def test_the_confirmation_is_sent_once(
+    hass: HomeAssistant,
+    confirming: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """It is reassurance, not a countdown."""
+    moment = ARM_AT
+    while moment <= WALK_START:
+        await run_cycle(hass, freezer, moment)
+        moment += CYCLE
+
+    assert len(notifications) == 2
+
+
+async def test_the_rain_going_away_stands_the_alert_down(
+    hass: HomeAssistant,
+    confirming: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """The case silence handles badly: a walk that no longer needs moving.
+
+    `later` relaxing to `none` is not an alert direction, so without the
+    confirmation the user would go on waiting for a window that stopped being
+    necessary.
+    """
+    await run_cycle(hass, freezer, ARM_AT)
+    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+
+    await run_cycle(hass, freezer, ARM_AT + 2 * CYCLE)
+
+    assert len(notifications) == 2
+    assert "05:00" in notifications[1].data["message"]
+
+
+async def test_nothing_is_confirmed_that_was_never_announced(
+    hass: HomeAssistant,
+    confirming: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """A walk that was fine all along is not worth a message about being fine."""
+    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+
+    moment = ARM_AT
+    while moment <= WALK_START:
+        await run_cycle(hass, freezer, moment)
+        moment += CYCLE
+
+    assert notifications == []

@@ -34,6 +34,7 @@ IDLE = datetime(2026, 8, 25, 0, 0, tzinfo=UTC)
 
 SENSOR = "sensor.walk_the_dog_walk_recommendation"
 SWITCH = "switch.walk_the_dog_alerting"
+WINDOW = "binary_sensor.walk_the_dog_walk_window"
 
 RAIN_AT_FIVE = [0.0, 0.0, 3.0, 3.0, 0.0]
 NO_RAIN = [0.0, 0.0, 0.0, 0.0, 0.0]
@@ -58,15 +59,24 @@ def _state(hass: HomeAssistant, entity_id: str) -> State:
     return state
 
 
-async def test_exactly_one_sensor_and_one_switch(
+async def test_one_entity_per_question_on_one_device(
     hass: HomeAssistant, entry: MockConfigEntry, coordinator: WalkCoordinator
 ) -> None:
-    """One walk, one recommendation — a second sensor would only be ambiguous."""
+    """Three entities, three different questions — and no second recommendation.
+
+    "What should I do about the next walk" is the sensor, "is anything running" is
+    the binary sensor, "should anything run at all" is the switch. A second
+    recommendation sensor would only be ambiguous, which is why there is one.
+    """
     registry = er.async_get(hass)
     entities = er.async_entries_for_config_entry(registry, entry.entry_id)
 
-    assert sorted(entity.entity_id for entity in entities) == [SENSOR, SWITCH]
-    assert {entity.domain for entity in entities} == {Platform.SENSOR, Platform.SWITCH}
+    assert sorted(entity.entity_id for entity in entities) == [WINDOW, SENSOR, SWITCH]
+    assert {entity.domain for entity in entities} == {
+        Platform.BINARY_SENSOR,
+        Platform.SENSOR,
+        Platform.SWITCH,
+    }
     assert len({entity.device_id for entity in entities}) == 1
 
 
@@ -98,7 +108,12 @@ async def test_the_sensor_reports_the_recommendation(
         state.attributes["recommended_start"]
         == datetime(2026, 8, 25, 4, 30, tzinfo=UTC).isoformat()
     )
+    assert (
+        state.attributes["recommended_end"] == datetime(2026, 8, 25, 5, 0, tzinfo=UTC).isoformat()
+    )
     assert state.attributes["shift_min"] == -30
+    # Only the hourly models answered, so no radar has seen the suggested window.
+    assert state.attributes["provisional"] is True
     assert state.attributes["risk"] == 1.0
     assert state.attributes["confidence"] == 0.8
     assert state.attributes["expected_intensity"] == "moderate"
@@ -178,3 +193,39 @@ async def test_entities_are_named_from_the_translations(
     """No hard-coded English in the code: both names come from strings.json."""
     assert _state(hass, SENSOR).attributes["friendly_name"] == "Walk the dog Walk recommendation"
     assert _state(hass, SWITCH).attributes["friendly_name"] == "Walk the dog Alerting"
+
+
+async def test_the_sensor_reports_what_the_cycle_cost(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """A walk window may stay open for hours, so its cost is visible, not implied.
+
+    The fetch itself is faked in this suite, so nothing is actually spent — what is
+    asserted here is that the ceiling every adapter polices itself against is
+    published, and that the counter is a number rather than a placeholder.
+    """
+    await run_cycle(hass, freezer, ARM_AT)
+
+    state = _state(hass, SENSOR)
+
+    assert state.attributes["requests_hourly_cap"] > 0
+    assert state.attributes["requests_last_hour"] == 0
+
+
+async def test_the_window_sensor_follows_the_polling_window(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """ "Is anything running" is a different question from "what should I do"."""
+    assert _state(hass, WINDOW).state == STATE_OFF
+
+    await run_cycle(hass, freezer, WINDOW_START)
+
+    window = _state(hass, WINDOW)
+
+    assert window.state == STATE_ON
+    assert window.attributes["scheduled_start"] == WALK_START.isoformat()
+    assert window.attributes["alerting"] is True

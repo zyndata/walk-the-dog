@@ -30,12 +30,24 @@ when the consensus says your walk window is wet.
   independent NWP models (DWD ICON-EU and KNMI HARMONIE AROME via Open-Meteo), with MET Norway
   as automatic failover. Sources are weighted by reliability and freshness; the sensor reports
   a confidence value and a per-source breakdown.
+- **A second radar where it is available** — around south-western Poland (Bielsko-Biała, the
+  Silesian foothills, the Czech border) the Czech CHMI CZRAD nowcast joins in as an extra vote,
+  on its own 1 km grid. It covers only its own region, so everywhere else it stays silent and
+  costs nothing — no setting to turn on, and nothing changes if you live outside it.
 - **Actionable advice** — "go 20 minutes earlier" or "wait half an hour", searched on a
   10-minute grid within your configured margins; not just "rain expected".
 - **One notification at the right moment** — pushed at the last actionable time
-  (`walk − earlier margin`), re-sent only when the recommendation materially changes. Optional
-  auto-mute while you are away from home, and an optional `walk_the_dog_alert` event for your
-  own automations.
+  (`walk − earlier margin`), re-sent only when the recommendation materially changes, and
+  **never about a time that has already passed**. Optional auto-mute while you are away from
+  home, and an optional `walk_the_dog_alert` event for your own automations.
+- **It keeps watching, and says when it is not sure yet** — the radars see one hour ahead and the
+  hourly models see the day, so "wait until 14:00" decided at 12:00 is marked as an estimate and
+  re-checked as 14:00 comes into radar range. You are told again only if the answer changes. In
+  the last twenty minutes before you set off it looks twice as often, where a radar publishes
+  fast enough for that to mean anything.
+- **One button: *Already went*** — closes that walk, on every phone it was sent to, and stops
+  the requests with it. Optionally, a short "still on" (or "the rain has gone, walk as normal")
+  a few minutes before you actually leave.
 - **Kind to small hardware** — polls only around your walk times (zero requests otherwise),
   samples only the pixels around your location, and stays within strict memory and request
   budgets. Runs comfortably on single-core ARM boxes.
@@ -100,6 +112,10 @@ Weather data, modified (resampled and reclassified) by this integration:
   Meteorological Institute, licensed
   [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) /
   [NLOD](https://data.norge.no/nlod/en/2.0).
+- **CHMI** ([opendata.chmi.cz](https://opendata.chmi.cz/)) — CZRAD radar composite and its
+  extrapolation nowcast from the Czech Hydrometeorological Institute, licensed
+  [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/). Used only for locations inside the
+  Czech composite, which covers south-western Poland but not the rest of the country.
 
 ## Development
 
