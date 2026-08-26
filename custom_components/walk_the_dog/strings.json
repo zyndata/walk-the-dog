@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Where do you walk the dog?",
-        "description": "Rain is predicted for a circle around this point. It starts at your Home Assistant home location — move the marker if you usually walk somewhere else.",
+        "description": "Rain is predicted for a circle around this point. Move the marker from your Home Assistant home location if you usually walk somewhere else.",
         "data": {
           "location": "Walk location"
         }
@@ -34,14 +34,14 @@
       },
       "walk_target": {
         "title": "Who is told about this walk?",
-        "description": "**Walk {index} of {total}: {days} at {time}.**\n\nEverything on this page applies to this walk time only — {days} at {time}, and no other walk. The wizard asks again for each walk you configured.\n\nIts alert always goes to {default_device}. The fields below only add to that: more phones for this one walk, a switch that silences it, and the person whose absence silences it.",
+        "description": "**Walk {index} of {total}: {days} at {time}.**\n\nEverything on this page applies to this walk time only — {days} at {time}. The wizard asks again for each walk you configured.\n\nIts alert always goes to {default_device}. The fields below only add to that: more phones for this one walk, a switch that silences it, and the person whose absence silences it.",
         "data": {
           "notify_services": "Also notify these devices",
           "mute": "Never alert about this walk",
           "away_entity": "Skip this walk while this person is away"
         },
         "data_description": {
-          "notify_services": "Extra companion app devices for this one walk — the morning walk and the evening walk are often not the same person's job. They are notified in addition to the always-notified device from Alert settings, never instead of it. Picking a device that is already the always-notified one still sends a single notification, not two. Leave empty if this walk needs no extra phone.",
+          "notify_services": "Phones notified about this one walk on top of the always-notified device. Leave empty if this walk needs no extra phone.",
           "mute": "No push is ever sent for this walk, on any device — not even the always-notified one. The sensor and the walk_the_dog_alert event still update, so your own automations keep working. Use it for a walk somebody else always handles.",
           "away_entity": "While this person or device tracker is not home, this walk sends no push. Leave empty to use the person from \"Mute alerts when this is away\" in Alert settings; set it so this walk follows whoever actually does it."
         }
@@ -61,7 +61,7 @@
           "auto_mute_entity": "Mute alerts when this is away"
         },
         "data_description": {
-          "radius_km": "The circle around the walk location that is checked for rain. The minimum keeps the circle larger than one forecast cell.",
+          "radius_km": "The circle around the walk location that is checked for rain.",
           "intensity_threshold": "A moment counts as rainy once the forecast reaches this intensity.",
           "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives, so keep it at 60 minutes or less: that is as far ahead as the rain radars forecast, and a message sent earlier than that can only be based on hourly models.",
           "later_margin_min": "How much later than the scheduled time you are willing to set off. Going later is always checked again as the time approaches — the radars will have seen it long before you have to leave — so a wide margin here costs nothing but a few more forecast requests.",
@@ -69,12 +69,12 @@
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
           "notify_service": "The companion app device that receives every walk's alert, whichever walk it is. Devices you added to an individual walk are notified as well as this one, never instead of it — and a device set in both places still receives a single notification, not two. Leave empty to notify only the per-walk devices, or nobody at all if you set none.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
-          "auto_mute_entity": "While this person or device tracker is not home, no push is sent for any walk. A walk that named its own person on its notification step follows that person instead of this one. The sensor and the custom event keep updating either way."
+          "auto_mute_entity": "While the chosen person or device tracker is not home, no walk sends a push. If a different person was set for a walk time on the \"Who is told about this walk?\" step, that walk follows the person instead. The sensor and the walk_the_dog_alert event keep updating either way."
         }
       },
       "long_walk": {
         "title": "That is a long walk",
-        "description": "You entered {duration} minutes. The rain radars forecast {horizon} minutes ahead, and beyond that only hourly models are left, so for walks over {limit} minutes the suggestion will more often be a best guess than a promise — the whole walk has to stay dry for a time to be offered, and the later half of a long one is the part nothing can see clearly yet. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
+        "description": "You entered {duration} minutes. The rain radars forecast {horizon} minutes ahead, and beyond that only hourly models are left, so for walks over {limit} minutes the suggestion will more often be a best guess. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
         "data": {
           "confirm": "Keep this duration"
         }
@@ -120,14 +120,14 @@
       },
       "walk_target": {
         "title": "Who is told about this walk?",
-        "description": "**Walk {index} of {total}: {days} at {time}.**\n\nEverything on this page applies to this walk time only — {days} at {time}, and no other walk. The wizard asks again for each walk you configured.\n\nIts alert always goes to {default_device}. The fields below only add to that: more phones for this one walk, a switch that silences it, and the person whose absence silences it.",
+        "description": "**Walk {index} of {total}: {days} at {time}.**\n\nEverything on this page applies to this walk time only — {days} at {time}. The wizard asks again for each walk you configured.\n\nIts alert always goes to {default_device}. The fields below only add to that: more phones for this one walk, a switch that silences it, and the person whose absence silences it.",
         "data": {
           "notify_services": "Also notify these devices",
           "mute": "Never alert about this walk",
           "away_entity": "Skip this walk while this person is away"
         },
         "data_description": {
-          "notify_services": "Extra companion app devices for this one walk — the morning walk and the evening walk are often not the same person's job. They are notified in addition to the always-notified device from Alert settings, never instead of it. Picking a device that is already the always-notified one still sends a single notification, not two. Leave empty if this walk needs no extra phone.",
+          "notify_services": "Phones notified about this one walk on top of the always-notified device. Leave empty if this walk needs no extra phone.",
           "mute": "No push is ever sent for this walk, on any device — not even the always-notified one. The sensor and the walk_the_dog_alert event still update, so your own automations keep working. Use it for a walk somebody else always handles.",
           "away_entity": "While this person or device tracker is not home, this walk sends no push. Leave empty to use the person from \"Mute alerts when this is away\" in Alert settings; set it so this walk follows whoever actually does it."
         }
@@ -147,7 +147,7 @@
           "auto_mute_entity": "Mute alerts when this is away"
         },
         "data_description": {
-          "radius_km": "The circle around the walk location that is checked for rain. The minimum keeps the circle larger than one forecast cell.",
+          "radius_km": "The circle around the walk location that is checked for rain.",
           "intensity_threshold": "A moment counts as rainy once the forecast reaches this intensity.",
           "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives, so keep it at 60 minutes or less: that is as far ahead as the rain radars forecast, and a message sent earlier than that can only be based on hourly models.",
           "later_margin_min": "How much later than the scheduled time you are willing to set off. Going later is always checked again as the time approaches — the radars will have seen it long before you have to leave — so a wide margin here costs nothing but a few more forecast requests.",
@@ -155,12 +155,12 @@
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
           "notify_service": "The companion app device that receives every walk's alert, whichever walk it is. Devices you added to an individual walk are notified as well as this one, never instead of it — and a device set in both places still receives a single notification, not two. Leave empty to notify only the per-walk devices, or nobody at all if you set none.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
-          "auto_mute_entity": "While this person or device tracker is not home, no push is sent for any walk. A walk that named its own person on its notification step follows that person instead of this one. The sensor and the custom event keep updating either way."
+          "auto_mute_entity": "While the chosen person or device tracker is not home, no walk sends a push. If a different person was set for a walk time on the \"Who is told about this walk?\" step, that walk follows the person instead. The sensor and the walk_the_dog_alert event keep updating either way."
         }
       },
       "long_walk": {
         "title": "That is a long walk",
-        "description": "You entered {duration} minutes. The rain radars forecast {horizon} minutes ahead, and beyond that only hourly models are left, so for walks over {limit} minutes the suggestion will more often be a best guess than a promise — the whole walk has to stay dry for a time to be offered, and the later half of a long one is the part nothing can see clearly yet. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
+        "description": "You entered {duration} minutes. The rain radars forecast {horizon} minutes ahead, and beyond that only hourly models are left, so for walks over {limit} minutes the suggestion will more often be a best guess. Confirm to keep this duration, or leave it unconfirmed to go back and change it.",
         "data": {
           "confirm": "Keep this duration"
         }

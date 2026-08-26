@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefix Home Assistant puts in front of every entity's friendly name, so it had to be
   translatable. English installs see no difference. A device renamed by hand still wins.
 
+- **Shorter field descriptions in both languages.** Reviewing the Polish copy showed several
+  descriptions explaining more than the field needs — the extra-devices field, the alert radius,
+  the away entity and the long-walk warning. They now say the one thing that matters, and the
+  away entity's description names the wizard step where a walk can override it.
+
 ### Changed
 
 - **The entry-wide notification device is now notified about every walk**, instead of only the
