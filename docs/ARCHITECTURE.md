@@ -33,7 +33,8 @@ custom_components/walk_the_dog/
 ├── schedule.py        # walk-schedule model (3 modes) → Walk identity + next-walk computation; PURE
 ├── cache.py           # bounded frame/sample cache + persistence via HA Store
 ├── notifier.py        # notification dispatch, material-change detection, per-walk target + mute
-├── entity.py          # shared entity base: the one service device both entities sit on
+├── entity.py          # shared entity base: the one service device every entity sits on,
+│                      #   named from strings.json -> device.service.name (translated)
 ├── sensor.py          # the single recommendation sensor
 ├── switch.py          # enable/disable switch (RestoreEntity)
 ├── strings.json       # + translations/ (en base, pl priority) — phases 5 and 7
