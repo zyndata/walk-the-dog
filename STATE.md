@@ -1161,6 +1161,14 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     built, and the strings are now frozen for it. Unchanged from the previous entries.
   - **The manual smoke test from phase 6 has still not been recorded here**, and now also covers
     the language switch and the device name.
+  - **CI has not run for this phase's commits.** GitHub Actions was in a major outage on
+    2026-08-26 (githubstatus.com, checked at the time of the push): no workflow run or check
+    suite was created for any of them. Everything CI does was run locally instead — `ruff`
+    check and format, the full suite in the same container image with `--network none`, and
+    hassfest against the real action image — all green. The one job that cannot be reproduced
+    locally is HACS validation, which reads the repository through the GitHub API and which
+    nothing in this phase touches. **Confirm both workflows went green before starting phase
+    8**; re-run them from the Actions tab if the outage swallowed the events.
   - `PUBLISH_SETTLE` is still an estimate; measure it in phase 8. Unchanged.
   - Tests still cannot run natively on Windows (HA imports `fcntl`); this phase was developed on
     the Windows machine, its suite run in the documented Linux container with `--network none`,
