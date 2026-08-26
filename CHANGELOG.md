@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **One person being out no longer silences everybody else.** Presence is now a property of each
+  phone rather than of the walk: a companion app device is tracked by
+  `device_tracker.<its own name>`, so a walk addressed to two phones still reaches the one whose
+  owner is at home. A phone nothing can locate — no tracker, or a tracker reading `unknown` /
+  `unavailable` — is **notified**, never silently skipped; it is only ever skipped when a rule you
+  set says so.
+
+- **The always-notified device is now exactly that.** Neither away entity, nor a walk's mute
+  switch, nor its own tracker takes it off the list. The alerting switch is the only thing that
+  silences it — and that silences everything. **This is a behaviour change**: muting a single walk
+  used to silence that device too, and now stops only the phones added to that walk.
+
+- **Both away entities became fallbacks.** They answer for a phone that cannot answer for itself,
+  and never for the always-notified device. Field labels changed to say so.
+
+- **`muted` in the `walk_the_dog_alert` payload now means "nobody was reached at all"**, not "the
+  away entity said no". One phone being skipped does not set it.
+
 ### Added
 
 - **Polish localization.** The integration speaks Polish end to end — the setup wizard, the

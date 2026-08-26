@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from homeassistant.const import STATE_HOME, STATE_NOT_HOME
+from homeassistant.const import STATE_HOME, STATE_NOT_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from pytest_homeassistant_custom_component.common import async_capture_events, async_mock_service
 
 from custom_components.walk_the_dog.const import (
@@ -63,6 +63,12 @@ WALK_MUTE_ENTITY = "person.walker"
 #: Two phones that share the dog: the standard walk is addressed to them by name.
 MORNING_PHONE = "mobile_app_morning"
 EVENING_PHONE = "mobile_app_evening"
+
+#: The tracker the companion app registers beside each phone's notify service:
+#: same slug, different domain. This is the whole of the link the notifier uses.
+DEFAULT_TRACKER = "device_tracker.test"
+MORNING_TRACKER = "device_tracker.morning"
+EVENING_TRACKER = "device_tracker.evening"
 
 #: Where the standard walk's own notification settings are stored.
 WALK_KEY = target_key(KEY_ALL, WALK_HHMM)
@@ -241,21 +247,39 @@ async def test_no_contributing_source_is_never_announced(
     assert alerts == []
 
 
-async def test_auto_mute_suppresses_the_push_but_not_the_event(
+async def test_the_away_entity_does_not_silence_the_always_notified_device(
     hass: HomeAssistant,
     coordinator: WalkCoordinator,
     freezer: FrozenDateTimeFactory,
     notifications: list[ServiceCall],
     alerts: list,
 ) -> None:
-    """Away from home: no push, but an automation may still want to know."""
+    """Nobody being home stops the walk's own phones, never the entry-wide one.
+
+    That device is the phone the user asked to be told about every walk; only the
+    alerting switch takes that away.
+    """
     hass.states.async_set(MUTE_ENTITY, STATE_NOT_HOME)
 
     await run_cycle(hass, freezer, ARM_AT)
 
-    assert notifications == []
+    assert len(notifications) == 1
     assert len(alerts) == 1
-    assert alerts[0].data["muted"] is True
+    assert alerts[0].data["muted"] is False
+
+
+async def test_the_always_notified_device_hears_even_when_it_is_out(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Not even its own tracker silences it — "always" has no exceptions but one."""
+    hass.states.async_set(DEFAULT_TRACKER, STATE_NOT_HOME)
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
 
 
 async def test_alerting_switched_off_sends_nothing(
@@ -356,14 +380,20 @@ async def setup_with_target(
     target: dict[str, object],
     *,
     auto_mute: str | None = None,
+    default_device: str | None = NOTIFY_SERVICE,
 ) -> WalkCoordinator:
-    """Set the entry up with an always-notified device and one walk-specific setting."""
+    """Set the entry up with an always-notified device and one walk-specific setting.
+
+    `default_device=None` leaves the entry without one, which is the only way a
+    walk can end up reaching nobody at all.
+    """
     options: dict[str, object] = {
         **entry.options,
-        CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
         CONF_FIRE_EVENT: True,
         CONF_WALK_TARGETS: {WALK_KEY: target},
     }
+    if default_device:
+        options[CONF_NOTIFY_SERVICE] = default_device
     if auto_mute:
         options[CONF_AUTO_MUTE_ENTITY] = auto_mute
     hass.config_entries.async_update_entry(entry, options=options)
@@ -434,9 +464,14 @@ async def test_a_walk_follows_its_own_away_entity(
     fetch: FakeFetch,
     freezer: FrozenDateTimeFactory,
     notifications: list[ServiceCall],
+    morning: list[ServiceCall],
     alerts: list,
 ) -> None:
-    """The walk Anna does falls silent when Anna leaves, not when the entry's person does."""
+    """Anna's phone answers to Anna, not to whoever the entry watches.
+
+    The phone here has no tracker of its own, which is the case the away entities
+    exist for: something has to answer for a device that cannot answer for itself.
+    """
     hass.states.async_set(MUTE_ENTITY, STATE_HOME)
     hass.states.async_set(WALK_MUTE_ENTITY, STATE_NOT_HOME)
     await setup_with_target(
@@ -444,15 +479,17 @@ async def test_a_walk_follows_its_own_away_entity(
         entry,
         fetch,
         freezer,
-        {CONF_TARGET_AWAY_ENTITY: WALK_MUTE_ENTITY},
+        {CONF_TARGET_SERVICES: [MORNING_PHONE], CONF_TARGET_AWAY_ENTITY: WALK_MUTE_ENTITY},
         auto_mute=MUTE_ENTITY,
     )
 
     await run_cycle(hass, freezer, ARM_AT)
 
-    assert notifications == []
+    assert morning == []
+    # The entry-wide device is not a walk phone, so none of this reaches it.
+    assert len(notifications) == 1
     assert len(alerts) == 1
-    assert alerts[0].data["muted"] is True
+    assert alerts[0].data["muted"] is False
 
 
 async def test_a_walks_own_away_entity_overrides_the_entry_wide_one(
@@ -461,6 +498,7 @@ async def test_a_walks_own_away_entity_overrides_the_entry_wide_one(
     fetch: FakeFetch,
     freezer: FrozenDateTimeFactory,
     notifications: list[ServiceCall],
+    morning: list[ServiceCall],
 ) -> None:
     """Away from home himself, Piotr's walk still alerts while Piotr is in."""
     hass.states.async_set(MUTE_ENTITY, STATE_NOT_HOME)
@@ -470,12 +508,13 @@ async def test_a_walks_own_away_entity_overrides_the_entry_wide_one(
         entry,
         fetch,
         freezer,
-        {CONF_TARGET_AWAY_ENTITY: WALK_MUTE_ENTITY},
+        {CONF_TARGET_SERVICES: [MORNING_PHONE], CONF_TARGET_AWAY_ENTITY: WALK_MUTE_ENTITY},
         auto_mute=MUTE_ENTITY,
     )
 
     await run_cycle(hass, freezer, ARM_AT)
 
+    assert len(morning) == 1
     assert len(notifications) == 1
 
 
@@ -516,7 +555,7 @@ async def test_a_walk_with_no_devices_of_its_own_uses_the_default(
     assert morning == []
 
 
-async def test_a_muted_walk_sends_no_push_but_still_fires_the_event(
+async def test_a_muted_walk_still_reaches_the_always_notified_device(
     hass: HomeAssistant,
     entry: MockConfigEntry,
     fetch: FakeFetch,
@@ -525,7 +564,11 @@ async def test_a_muted_walk_sends_no_push_but_still_fires_the_event(
     morning: list[ServiceCall],
     alerts: list,
 ) -> None:
-    """Muting one walk silences it the same way being away silences all of them."""
+    """Muting a walk silences the phones it added, and only those.
+
+    The entry-wide device is not one of the walk's phones — it is the one the user
+    asked to hear about every walk — so the switch cannot reach it.
+    """
     await setup_with_target(
         hass,
         entry,
@@ -536,7 +579,128 @@ async def test_a_muted_walk_sends_no_push_but_still_fires_the_event(
 
     await run_cycle(hass, freezer, ARM_AT)
 
-    assert notifications == []
+    assert morning == []
+    assert len(notifications) == 1
+    assert len(alerts) == 1
+    assert alerts[0].data["muted"] is False
+
+
+async def test_one_phone_being_out_does_not_silence_the_other(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    morning: list[ServiceCall],
+    evening: list[ServiceCall],
+) -> None:
+    """The reason this rule exists: presence belongs to a phone, not to a walk.
+
+    Two people share the dog and both asked to be told. One of them is out. The
+    one who is in still has to be told, or the alert is worse than useless — it is
+    silently absent exactly when somebody could have acted on it.
+    """
+    hass.states.async_set(MORNING_TRACKER, STATE_NOT_HOME)
+    hass.states.async_set(EVENING_TRACKER, STATE_HOME)
+    await setup_with_target(
+        hass,
+        entry,
+        fetch,
+        freezer,
+        {CONF_TARGET_SERVICES: [MORNING_PHONE, EVENING_PHONE]},
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert morning == []
+    assert len(evening) == 1
+    assert len(notifications) == 1
+
+
+async def test_a_phone_with_no_tracker_and_no_away_entity_is_notified(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+) -> None:
+    """Nothing can say where this phone is, so it is told rather than skipped."""
+    await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE]})
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(morning) == 1
+
+
+@pytest.mark.parametrize("unreadable", [STATE_UNKNOWN, STATE_UNAVAILABLE])
+async def test_a_tracker_that_cannot_answer_is_not_read_as_away(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+    unreadable: str,
+) -> None:
+    """`unknown` and `unavailable` mean the tracker is silent, not that Anna is out."""
+    hass.states.async_set(MORNING_TRACKER, unreadable)
+    await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE]})
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(morning) == 1
+
+
+async def test_the_away_entity_answers_only_for_a_phone_that_cannot(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+    evening: list[ServiceCall],
+) -> None:
+    """A phone with a tracker is never overruled by the entry-wide person.
+
+    Both phones sit under an away entity that is out. The one that tracks itself
+    and is at home is still notified; the one that cannot answer is not.
+    """
+    hass.states.async_set(MUTE_ENTITY, STATE_NOT_HOME)
+    hass.states.async_set(EVENING_TRACKER, STATE_HOME)
+    await setup_with_target(
+        hass,
+        entry,
+        fetch,
+        freezer,
+        {CONF_TARGET_SERVICES: [MORNING_PHONE, EVENING_PHONE]},
+        auto_mute=MUTE_ENTITY,
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert morning == []
+    assert len(evening) == 1
+
+
+async def test_muted_in_the_event_means_nobody_was_reached(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """With no always-notified device, one absent phone can still leave silence."""
+    hass.states.async_set(MORNING_TRACKER, STATE_NOT_HOME)
+    await setup_with_target(
+        hass,
+        entry,
+        fetch,
+        freezer,
+        {CONF_TARGET_SERVICES: [MORNING_PHONE]},
+        default_device=None,
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
     assert morning == []
     assert len(alerts) == 1
     assert alerts[0].data["muted"] is True

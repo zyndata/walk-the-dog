@@ -87,13 +87,38 @@ in turn.
 
 | Field | Key | Type | Default | Notes |
 |---|---|---|---|---|
-| Also notify these devices | `notify_services` | list of `mobile_app_*` service names | *(empty)* | Extra devices for this walk, **on top of `notify_service`**, all receiving the same message. Empty means "only the always-notified device", never "notify nobody" — silencing a walk is what the mute switch is for. Validated exactly like `notify_service`, custom values included, and de-duplicated on store. |
-| Never alert about this walk | `mute` | bool | `false` | No push is ever sent for this walk, on any device — the always-notified one included. The sensor and the `walk_the_dog_alert` event still update (with `muted: true`), so automations keep working. |
-| Skip this walk while this person is away | `away_entity` | entity id | *(unset)* | Optional `person`/`device_tracker` that replaces `auto_mute_entity` **for this walk only**, so the walk Anna does falls silent when Anna leaves. Unset means the walk follows the entry-wide `auto_mute_entity`. |
+| Also notify these devices | `notify_services` | list of `mobile_app_*` service names | *(empty)* | Extra devices for this walk, **on top of `notify_service`**, all receiving the same message. Empty means "only the always-notified device", never "notify nobody" — silencing a walk's own phones is what the mute switch is for. Validated exactly like `notify_service`, custom values included, and de-duplicated on store. |
+| Do not notify this walk's phones | `mute` | bool | `false` | The devices in `notify_services` get nothing about this walk. **`notify_service` still does** — only the alerting switch silences that one. The sensor and the `walk_the_dog_alert` event keep updating, so automations keep working. |
+| Skip this walk's phones while this person is away | `away_entity` | entity id | *(unset)* | Optional `person`/`device_tracker` that replaces `auto_mute_entity` **for this walk only**. It answers only for a phone that cannot answer for itself (see *Who is actually reached* below). Unset means the walk follows the entry-wide `auto_mute_entity`. |
 
 A walk left at all three defaults stores **nothing at all**, so `walk_targets` only ever holds
 walks the user actually said something about, and an entry configured before this feature existed
 keeps behaving exactly as it did.
+
+### Who is actually reached
+
+Being addressed and being reached are two different things. `services_for` builds the list a walk
+is addressed to; `recipients_for` decides, **one phone at a time**, which of them the push goes to
+at this moment. Three rules, in this order:
+
+1. **`notify_service` always hears.** Not the mute switch, not either away entity, not even its
+   own tracker takes it off the list. It is the phone the user asked to be told about every walk,
+   and the alerting switch — which stops the whole integration — is the only thing that silences
+   it.
+2. **A walk's own phones obey its `mute` switch.**
+3. **Otherwise each phone answers for itself.** A companion-app device registers
+   `notify.mobile_app_jan_phone` and `device_tracker.jan_phone` from the same device name, so the
+   notifier reads that tracker: `home` is notified, anything else is skipped. **Only that phone is
+   skipped** — one person leaving the house never takes the alert away from everybody else.
+
+A phone that cannot answer — no tracker of that name, or a tracker reading `unknown` /
+`unavailable` — falls through to the away entity that applies to it (`away_entity`, else
+`auto_mute_entity`). If there is none, it is **notified**: a needless alert is a far cheaper
+mistake than a missed one, so a phone is only ever skipped because a rule the user configured
+said so.
+
+`muted` in the event payload therefore means *nobody at all was reached*, not that one phone was
+skipped. With an always-notified device configured it is effectively always `false`.
 
 ### One phone, one notification
 
@@ -221,13 +246,14 @@ direction, so silence alone would leave you waiting for a window that stopped be
 It is sent once per walk, and an alert that happens to land at that moment counts as it.
 
 The message goes to `notify_service` together with the walk's own devices, each device named
-once however many places it appears in. Every
-device in the list gets the same message.
+once however many places it appears in, minus the phones their own trackers report as away. Every
+device that is reached gets the same message.
 
-Suppressed entirely by: the enable switch being off, the walk's own mute switch, the walk's
-away entity — its own `away_entity`, else the entry-wide `auto_mute_entity` — not being `home`,
-or zero contributing sources. A muted alert is **suppressed, not
-queued** — coming home does not release a message about a decision that has since moved on.
+Suppressed entirely by: the enable switch being off, or zero contributing sources. Everything
+else — the mute switch, both away entities, a phone's own tracker — decides *which phones* are
+reached rather than whether the walk speaks at all (§ Who is actually reached). A suppressed
+alert is **suppressed, not queued** — coming home does not release a message about a decision
+that has since moved on.
 
 If a configured `notify.mobile_app_*` service is not registered (a phone configured before its
 companion-app service existed), a warning is logged, the other devices are still notified, and
@@ -286,7 +312,7 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
 | `horizon_limited` | bool | The walk reaches past what the sources forecast |
 | `provisional` | bool | No radar reaches the recommended window, so the timing rests on hourly models. An early answer the coordinator keeps re-checking, not a final one |
 | `data_age_s` | int \| `null` | Age of the freshest source that voted |
-| `muted` | bool | The push was suppressed for this alert — by the walk's own mute switch or by the away entity that applies to it |
+| `muted` | bool | Nobody was reached at all. One phone being skipped does not set it; an entry with an always-notified device effectively never does |
 | `confirmation` | bool | This is the pre-departure reassurance rather than a new recommendation |
 | `sources` | list | One entry per source: its own verdict over the scheduled window, its status, its weight and its peak |
 

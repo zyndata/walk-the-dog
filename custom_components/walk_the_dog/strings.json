@@ -34,16 +34,16 @@
       },
       "walk_target": {
         "title": "Who is told about this walk?",
-        "description": "**Walk {index} of {total}: {days} at {time}.**\n\nEverything on this page applies to this walk time only — {days} at {time}. The wizard asks again for each walk you configured.\n\nIts alert always goes to {default_device}. The fields below only add to that: more phones for this one walk, a switch that silences it, and the person whose absence silences it.",
+        "description": "**Walk {index} of {total}: {days} at {time}.**\n\nEverything on this page applies to this walk time only — {days} at {time}. The wizard asks again for each walk you configured.\n\nIts alert always goes to {default_device}. The fields below only add to that: more phones for this one walk, a switch that silences them, and the person whose absence silences them.",
         "data": {
           "notify_services": "Also notify these devices",
-          "mute": "Never alert about this walk",
-          "away_entity": "Skip this walk while this person is away"
+          "mute": "Do not notify this walk's phones",
+          "away_entity": "Skip this walk's phones while this person is away"
         },
         "data_description": {
-          "notify_services": "Phones notified about this one walk on top of the always-notified device. Leave empty if this walk needs no extra phone.",
-          "mute": "No push is ever sent for this walk, on any device — not even the always-notified one. The sensor and the walk_the_dog_alert event still update, so your own automations keep working. Use it for a walk somebody else always handles.",
-          "away_entity": "While this person or device tracker is not home, this walk sends no push. Leave empty to use the person from \"Mute alerts when this is away\" in Alert settings; set it so this walk follows whoever actually does it."
+          "notify_services": "Phones notified about this one walk on top of the always-notified device. A phone whose tracker says it is not home is skipped; the others are still notified. Leave empty if this walk needs no extra phone.",
+          "mute": "The phones listed above get no notification about this walk. The always-notified device still does — only the Alerting switch stops that one. The sensor and the walk_the_dog_alert event keep updating either way.",
+          "away_entity": "Applies only to this walk's phones that have no tracker of their own. Leave empty to use the person from Alert settings."
         }
       },
       "params": {
@@ -58,7 +58,7 @@
           "confirm_margin_min": "Second message shortly before you leave",
           "notify_service": "Always notify this device",
           "fire_event": "Fire a custom event",
-          "auto_mute_entity": "Mute alerts when this is away"
+          "auto_mute_entity": "Skip phones while this person is away"
         },
         "data_description": {
           "radius_km": "The circle around the walk location that is checked for rain.",
@@ -67,9 +67,9 @@
           "later_margin_min": "How much later than the scheduled time you are willing to set off. Going later is always checked again as the time approaches — the radars will have seen it long before you have to leave — so a wide margin here costs nothing but a few more forecast requests.",
           "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested, so a walk longer than the 60 minutes the radars forecast can never be fully radar-backed at the moment you are told to go.",
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
-          "notify_service": "The companion app device that receives every walk's alert, whichever walk it is. Devices you added to an individual walk are notified as well as this one, never instead of it — and a device set in both places still receives a single notification, not two. Leave empty to notify only the per-walk devices, or nobody at all if you set none.",
+          "notify_service": "The companion app device that receives every walk's alert. Nothing silences it — not being away, not muting a single walk — except the Alerting switch. Phones added to an individual walk are notified alongside it. Leave empty to notify only the per-walk phones.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
-          "auto_mute_entity": "While the chosen person or device tracker is not home, no walk sends a push. If a different person was set for a walk time on the \"Who is told about this walk?\" step, that walk follows the person instead. The sensor and the walk_the_dog_alert event keep updating either way."
+          "auto_mute_entity": "A fallback presence rule for phones that cannot say where they are. A companion app phone has a tracker of its own and answers for itself; only a phone without one asks about this person, and falls silent while they are away. The always-notified device is never affected."
         }
       },
       "long_walk": {
@@ -120,16 +120,16 @@
       },
       "walk_target": {
         "title": "Who is told about this walk?",
-        "description": "**Walk {index} of {total}: {days} at {time}.**\n\nEverything on this page applies to this walk time only — {days} at {time}. The wizard asks again for each walk you configured.\n\nIts alert always goes to {default_device}. The fields below only add to that: more phones for this one walk, a switch that silences it, and the person whose absence silences it.",
+        "description": "**Walk {index} of {total}: {days} at {time}.**\n\nEverything on this page applies to this walk time only — {days} at {time}. The wizard asks again for each walk you configured.\n\nIts alert always goes to {default_device}. The fields below only add to that: more phones for this one walk, a switch that silences them, and the person whose absence silences them.",
         "data": {
           "notify_services": "Also notify these devices",
-          "mute": "Never alert about this walk",
-          "away_entity": "Skip this walk while this person is away"
+          "mute": "Do not notify this walk's phones",
+          "away_entity": "Skip this walk's phones while this person is away"
         },
         "data_description": {
-          "notify_services": "Phones notified about this one walk on top of the always-notified device. Leave empty if this walk needs no extra phone.",
-          "mute": "No push is ever sent for this walk, on any device — not even the always-notified one. The sensor and the walk_the_dog_alert event still update, so your own automations keep working. Use it for a walk somebody else always handles.",
-          "away_entity": "While this person or device tracker is not home, this walk sends no push. Leave empty to use the person from \"Mute alerts when this is away\" in Alert settings; set it so this walk follows whoever actually does it."
+          "notify_services": "Phones notified about this one walk on top of the always-notified device. A phone whose tracker says it is not home is skipped; the others are still notified. Leave empty if this walk needs no extra phone.",
+          "mute": "The phones listed above get no notification about this walk. The always-notified device still does — only the Alerting switch stops that one. The sensor and the walk_the_dog_alert event keep updating either way.",
+          "away_entity": "Applies only to this walk's phones that have no tracker of their own. Leave empty to use the person from Alert settings."
         }
       },
       "params": {
@@ -144,7 +144,7 @@
           "confirm_margin_min": "Second message shortly before you leave",
           "notify_service": "Always notify this device",
           "fire_event": "Fire a custom event",
-          "auto_mute_entity": "Mute alerts when this is away"
+          "auto_mute_entity": "Skip phones while this person is away"
         },
         "data_description": {
           "radius_km": "The circle around the walk location that is checked for rain.",
@@ -153,9 +153,9 @@
           "later_margin_min": "How much later than the scheduled time you are willing to set off. Going later is always checked again as the time approaches — the radars will have seen it long before you have to leave — so a wide margin here costs nothing but a few more forecast requests.",
           "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested, so a walk longer than the 60 minutes the radars forecast can never be fully radar-backed at the moment you are told to go.",
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
-          "notify_service": "The companion app device that receives every walk's alert, whichever walk it is. Devices you added to an individual walk are notified as well as this one, never instead of it — and a device set in both places still receives a single notification, not two. Leave empty to notify only the per-walk devices, or nobody at all if you set none.",
+          "notify_service": "The companion app device that receives every walk's alert. Nothing silences it — not being away, not muting a single walk — except the Alerting switch. Phones added to an individual walk are notified alongside it. Leave empty to notify only the per-walk phones.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
-          "auto_mute_entity": "While the chosen person or device tracker is not home, no walk sends a push. If a different person was set for a walk time on the \"Who is told about this walk?\" step, that walk follows the person instead. The sensor and the walk_the_dog_alert event keep updating either way."
+          "auto_mute_entity": "A fallback presence rule for phones that cannot say where they are. A companion app phone has a tracker of its own and answers for itself; only a phone without one asks about this person, and falls silent while they are away. The always-notified device is never affected."
         }
       },
       "long_walk": {

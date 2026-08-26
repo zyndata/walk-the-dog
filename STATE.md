@@ -1175,6 +1175,72 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     and hassfest run against the real action image in Docker. Unchanged.
   - Everything else carried forward from the earlier entries is unchanged.
 
+## Post-phase-7 change — presence is decided per device, not per walk
+
+- **Status:** done (code, tests, strings and docs; live re-test is the maintainer's next step)
+- **Date:** 2026-08-26
+- **Why it exists:** not a phase. It came out of reviewing the Polish copy for the away entity:
+  writing down what the field did made plain that the behaviour itself was wrong. **Deviation
+  from `PLAN.md`, recorded here before proceeding, as workflow rule 3 requires.** No phase was
+  started or advanced; phase 7 is done and phase 8 has not begun.
+
+- **The report.** Two things, from the maintainer:
+  1. "If two devices are configured for a walk and one of them is not home at the moment the
+     notification goes out, the other device should still get it." Today one absent person
+     silences the walk for *everyone*.
+  2. "The default device from the main settings screen should always be notified — unless the
+     alerting switch is off, in which case nobody is."
+
+- **Decisions (maintainer's, taken before the change was written).**
+  - **A phone's presence is derived from its own tracker.** `notify.mobile_app_jan_phone` and
+    `device_tracker.jan_phone` are the same phone registered by the same companion app under the
+    same slug, so the link needs no configuration at all. When no such tracker exists, or it
+    reads `unknown` / `unavailable`, the device is **notified** rather than silently skipped —
+    an extra alert is a much cheaper mistake than a missed one.
+  - **The always-notified device is exempt from every silencing rule but one.** Not the per-walk
+    mute switch, not either away entity, not its own tracker. Only the alerting switch stops it,
+    and that stops the whole integration. Chosen deliberately over keeping mute absolute: the
+    maintainer's rule is "that phone always hears", and one rule with no exceptions is easier to
+    trust than one with three.
+  - **Both away entities become the fallback presence rule for a walk's own phones**, and neither
+    touches the always-notified device. A walk's own entity still overrides the entry-wide one.
+  - **Consequence, accepted:** there is no longer any way to silence a whole walk *conditionally*.
+    "Skip this walk while Anna is out" now means "skip Anna's phone", because Anna's phone answers
+    for itself. The unconditional mute switch and the alerting switch are what remain for
+    silencing, and the second of them is the only thing that can silence the always-notified
+    device.
+  - **`muted` in the event payload now means "nobody was reached at all"**, rather than "the away
+    entity said no". With an always-notified device configured it is therefore almost always
+    `false` — which is accurate: somebody did get told.
+
+- **What was built.**
+  - `notifier.py`: `recipients_for()` replaces `services_for()` at dispatch and filters the
+    addressed list one phone at a time; `_reaches()` holds the three rules; `_device_is_home()`
+    reads `device_tracker.<slug>` for a `mobile_app_<slug>` service and returns `None` — not
+    `False` — when there is nothing to read. `services_for()` is unchanged and still answers
+    "who is this walk addressed to", which is what `async_clear` needs.
+  - `strings.json` / `en.json` / `pl.json`: three labels renamed (they promised more than the
+    code does now — "Never alert about this walk" no longer describes a switch the entry-wide
+    device ignores) and four descriptions rewritten.
+  - `docs/CONFIG.md`: a new § *Who is actually reached* with the three rules, plus the per-walk
+    table, § Notification behavior and the `muted` row brought in line.
+  - Tests: three rewritten because they encoded the old contract, six added for the new one —
+    two phones with one away, a phone with no tracker, a tracker reading `unknown` / `unavailable`,
+    a tracker overruling the away entity, the always-notified device ignoring its own tracker, and
+    `muted` meaning nobody at all. **473 in total**, green offline.
+
+- **Open questions carried forward.**
+  - **The tracker link is by name.** `mobile_app_jan_phone` → `device_tracker.jan_phone` holds
+    because the companion app registers both from one device name, but a renamed entity breaks it
+    — and breaks it *safely*, into "cannot answer", which notifies. Worth re-checking against the
+    live install before 1.0.0; if it turns out to be fragile in practice, the fallback is an
+    explicit presence field per device, which was considered and rejected here as too heavy for
+    the wizard.
+  - **There is no longer a conditional way to silence a whole walk.** If someone asks for it back,
+    the honest shape is a separate "silence this walk while X is away" switch, not a reinterpretation
+    of the away entities.
+  - Everything else carried forward from phase 7 is unchanged.
+
 ## Phase 8 — Performance pass
 
 - **Status:** not started

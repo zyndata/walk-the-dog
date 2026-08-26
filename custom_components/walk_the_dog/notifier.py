@@ -23,13 +23,20 @@ to every walk's list — it is the phone that always hears about a walk — and 
 combined list is de-duplicated, so naming that same phone on a walk as well still
 buys exactly one push.
 
-The entry-wide away entity works the other way round: it is a default a walk may
-replace, so the walk Anna is responsible for can fall silent when *Anna* leaves,
-not when whoever the entry names does.
+*Whether* a phone on that list is told is then decided one phone at a time, not
+once for the walk. A companion-app device tracks itself, so each phone answers
+for its own presence and one person leaving the house cannot take the alert away
+from everybody else. The away entities are the fallback for a phone that cannot
+answer — a device with no tracker, or one whose tracker is unavailable — and a
+phone that nothing can answer for is notified rather than silently skipped.
+
+The entry-wide device is exempt from all of it: mute, both away entities and its
+own tracker. It is the phone the user asked to be told about every walk, and only
+the alerting switch takes that away.
 
 The `walk_the_dog_alert` event fires whenever a notification *would* fire, even
-when auto-mute suppresses the push — an automation may well want to know while
-nobody is home. Its payload is `WalkData.payload()`, documented in docs/CONFIG.md.
+when nothing is sent — an automation may well want to know while nobody is home.
+Its payload is `WalkData.payload()`, documented in docs/CONFIG.md.
 """
 
 from __future__ import annotations
@@ -39,7 +46,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
-from homeassistant.const import STATE_HOME
+from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
@@ -49,6 +56,7 @@ from .const import (
     DOMAIN,
     EVENT_ALERT,
     NOTIFY_DOMAIN,
+    NOTIFY_SERVICE_PREFIX,
 )
 from .engine import (
     DIRECTION_EARLIER,
@@ -94,6 +102,13 @@ TEXT_ACTION_WALKED: Final = "action_walked"
 #: How a walk occurrence is written into a tag or an action identifier.
 STAMP_FORMAT: Final = "%Y%m%dT%H%M"
 
+#: Where the companion app registers the phone a `mobile_app_*` notify service
+#: belongs to. The two share a slug, which is the whole of the link between them.
+TRACKER_DOMAIN: Final = "device_tracker"
+
+#: A tracker in one of these states is not saying "away", it is saying nothing.
+UNREADABLE_STATES: Final = frozenset({STATE_UNKNOWN, STATE_UNAVAILABLE})
+
 #: Groups every alert about one walk under a single companion-app notification, so
 #: a revised recommendation replaces the one it supersedes instead of stacking a
 #: second, contradictory message underneath it.
@@ -105,11 +120,15 @@ class WalkTarget:
     """Who to interrupt about one particular walk, and whether to interrupt at all.
 
     `services` holds the devices this walk adds to the entry-wide one, which is
-    always notified as well; silencing a walk is what `muted` is for, so an empty
-    list means "only the entry-wide device", never "notify nobody".
+    always notified as well; silencing a walk's own phones is what `muted` is for,
+    so an empty list means "only the entry-wide device", never "notify nobody".
 
-    `away_entity` replaces the entry-wide away entity for this walk alone; `None`
-    means the walk is happy with whichever person the entry watches.
+    `muted` silences this walk's own phones. It cannot silence the entry-wide
+    device — only the alerting switch does that.
+
+    `away_entity` replaces the entry-wide away entity for this walk alone, and
+    both only ever answer for a phone that cannot answer for itself; `None` means
+    the walk is happy with whichever person the entry watches.
     """
 
     services: tuple[str, ...] = ()
@@ -156,11 +175,11 @@ class WalkNotifier:
         self._confirmed = False
 
     def away_entity_for(self, target: WalkTarget) -> str | None:
-        """Whose absence silences this walk — its own person, else the entry's."""
+        """Whose absence stands in for a phone that cannot answer for itself."""
         return target.away_entity or self._mute_entity
 
     def is_away(self, target: WalkTarget = DEFAULT_TARGET) -> bool:
-        """True while the person this walk watches is away from home.
+        """True while the person this walk falls back to is away from home.
 
         An entity that has no state yet counts as away: a tracker Home Assistant
         has not restored is not evidence that anybody is in.
@@ -172,17 +191,63 @@ class WalkNotifier:
         return state is None or state.state != STATE_HOME
 
     def services_for(self, target: WalkTarget) -> tuple[str, ...]:
-        """Every device this walk's push goes to, each named exactly once.
+        """Every device this walk is addressed to, each named exactly once.
 
         The entry-wide device is always among them; a walk's own devices are extra
         phones, not a replacement. `dict.fromkeys` is the de-duplication: the same
         service listed on the walk and as the entry-wide default — or twice within
         one walk — collapses to one recipient, and the order the user chose is kept.
+
+        This is who the walk is *addressed* to. Who it reaches right now is
+        `recipients_for`, which asks each phone whether it is at home.
         """
         services = [*target.services]
         if self._default_service:
             services.append(self._default_service)
         return tuple(dict.fromkeys(services))
+
+    def recipients_for(self, target: WalkTarget) -> tuple[str, ...]:
+        """The devices this walk's push reaches at this moment.
+
+        Presence is a property of each phone, not of the walk: one person leaving
+        the house must not take the alert away from everybody else who was going
+        to be told.
+        """
+        return tuple(
+            service for service in self.services_for(target) if self._reaches(service, target)
+        )
+
+    def _reaches(self, service: str, target: WalkTarget) -> bool:
+        """Whether this one device is told about this walk right now.
+
+        Three rules, in order. The entry-wide device always hears — it is the phone
+        the user asked to be told about every walk, and only the alerting switch
+        silences it. A walk's own phones obey its mute switch. Otherwise the phone
+        answers for itself, and the away entity answers only when it cannot.
+        """
+        if service == self._default_service:
+            return True
+        if target.muted:
+            return False
+        at_home = self._device_is_home(service)
+        if at_home is not None:
+            return at_home
+        return not self.is_away(target)
+
+    def _device_is_home(self, service: str) -> bool | None:
+        """Whether this phone is at home, or None when nothing can say.
+
+        `notify.mobile_app_jan_phone` and `device_tracker.jan_phone` are the same
+        phone: the companion app registers both from one device name, so the link
+        costs the user no configuration at all. A phone whose tracker does not
+        exist — or exists and cannot answer — returns None and is notified rather
+        than skipped: a needless alert is a far cheaper mistake than a missed one.
+        """
+        entity_id = f"{TRACKER_DOMAIN}.{service.removeprefix(NOTIFY_SERVICE_PREFIX)}"
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in UNREADABLE_STATES:
+            return None
+        return state.state == STATE_HOME
 
     async def async_process(
         self,
@@ -276,13 +341,15 @@ class WalkNotifier:
     ) -> None:
         """Fire the event and, unless muted, push. `key` None means a normal alert."""
         payload = data.payload()
-        muted = target.muted or self.is_away(target)
-        payload["muted"] = muted
+        recipients = self.recipients_for(target)
+        # `muted` says nobody at all was reached, not that one phone was skipped:
+        # an automation cares whether the advice got out, not to how many phones.
+        payload["muted"] = not recipients
         payload["confirmation"] = key is not None
         if self._fire_event:
             self.hass.bus.async_fire(EVENT_ALERT, payload)
-        if not muted:
-            await self._async_send(recommendation, self.services_for(target), key=key)
+        if recipients:
+            await self._async_send(recommendation, recipients, key=key)
 
     async def _async_send(
         self,

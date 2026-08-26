@@ -34,16 +34,16 @@
       },
       "walk_target": {
         "title": "Kto ma wiedzieć o tym spacerze?",
-        "description": "**Spacer {index} z {total}: {days} o {time}.**\n\nWszystko na tej stronie dotyczy wyłącznie tego jednego spaceru — {days} o {time}. Kreator zapyta o to osobno przy każdym skonfigurowanym spacerze.\n\nAlert o nim zawsze trafia na {default_device}. Pola poniżej tylko to uzupełniają: dodatkowe telefony dla tego jednego spaceru, przełącznik, który go wycisza, i osoba, której nieobecność go wycisza.",
+        "description": "**Spacer {index} z {total}: {days} o {time}.**\n\nWszystko na tej stronie dotyczy wyłącznie tego jednego spaceru — {days} o {time}. Kreator zapyta o to osobno przy każdym skonfigurowanym spacerze.\n\nAlert o nim zawsze trafia na {default_device}. Pola poniżej tylko to uzupełniają: dodatkowe telefony dla tego jednego spaceru, przełącznik, który je wycisza, i osoba, której nieobecność je wycisza.",
         "data": {
           "notify_services": "Powiadamiaj także te urządzenia",
-          "mute": "Nigdy nie alarmuj o tym spacerze",
-          "away_entity": "Pomiń ten spacer, gdy tej osoby nie ma w domu"
+          "mute": "Nie powiadamiaj telefonów tego spaceru",
+          "away_entity": "Pomiń telefony tego spaceru, gdy tej osoby nie ma w domu"
         },
         "data_description": {
-          "notify_services": "Telefony powiadamiane dodatkowo o tym jednym spacerze — oprócz urządzenia z pola „Zawsze powiadamiaj to urządzenie”. Zostaw puste, jeśli ten spacer nie wymaga dodatkowego telefonu.",
-          "mute": "Dla tego spaceru nie jest wysyłane żadne powiadomienie na żadne urządzenie — nawet na to zawsze powiadamiane. Sensor i zdarzenie walk_the_dog_alert nadal się aktualizują, więc Twoje własne automatyzacje działają dalej. Przydaje się przy spacerze, którym zawsze zajmuje się ktoś inny.",
-          "away_entity": "Dopóki tej osoby lub tego lokalizatora nie ma w domu, ten spacer nie wysyła powiadomień. Zostaw puste, aby korzystać z osoby wskazanej w polu „Wycisz alerty, gdy tej osoby nie ma w domu” w ustawieniach alertów; ustaw, aby ten spacer podążał za osobą, która faktycznie go odbywa."
+          "notify_services": "Telefony powiadamiane dodatkowo o tym jednym spacerze — oprócz urządzenia z pola „Zawsze powiadamiaj to urządzenie”. Telefon, którego lokalizator pokazuje, że nie ma go w domu, jest pomijany; pozostałe dostają powiadomienie. Zostaw puste, jeśli ten spacer nie wymaga dodatkowego telefonu.",
+          "mute": "Telefony wskazane powyżej nie dostają powiadomień o tym spacerze. Urządzenie zawsze powiadamiane dostaje je nadal — zatrzymuje je tylko przełącznik Alerty. Sensor i zdarzenie walk_the_dog_alert aktualizują się tak czy inaczej.",
+          "away_entity": "Dotyczy tylko telefonów tego spaceru, które nie mają własnego lokalizatora. Zostaw puste, aby użyć osoby z ustawień alertów."
         }
       },
       "params": {
@@ -58,7 +58,7 @@
           "confirm_margin_min": "Druga wiadomość tuż przed wyjściem",
           "notify_service": "Zawsze powiadamiaj to urządzenie",
           "fire_event": "Wywołuj własne zdarzenie",
-          "auto_mute_entity": "Wycisz alerty, gdy tej osoby nie ma w domu"
+          "auto_mute_entity": "Pomiń telefony, gdy tej osoby nie ma w domu"
         },
         "data_description": {
           "radius_km": "Koło wokół miejsca spaceru, w którym sprawdzany jest deszcz.",
@@ -67,9 +67,9 @@
           "later_margin_min": "O ile później niż o zaplanowanej godzinie możesz wyjść z domu. Późniejsze wyjście jest zawsze sprawdzane ponownie, w miarę jak ta godzina się zbliża — radary zobaczą je na długo przed tym, zanim trzeba będzie wychodzić — więc szeroki margines kosztuje tu tylko kilka zapytań o prognozę więcej.",
           "walk_duration_min": "Ile trwa spacer. Żeby jakaś godzina została zaproponowana, cały spacer musi pozostać suchy, więc spacer dłuższy niż 60 minut, na które prognozują radary, nigdy nie będzie w całości potwierdzony radarem w chwili, gdy dostajesz wiadomość.",
           "confirm_margin_min": "Druga, krótka wiadomość tyle minut przed faktycznym wyjściem, mówiąca, że otrzymany plan jest nadal aktualny — albo że deszcz odpuścił i można jednak iść o zwykłej porze. Trafia na te same urządzenia co pierwsza. Wartość 0 wyłącza ją i jest ustawieniem domyślnym: brak wiadomości oznacza, że nic się nie zmieniło.",
-          "notify_service": "Urządzenie z aplikacją Home Assistant, które dostaje alert o każdym spacerze, niezależnie od tego, który to spacer. Urządzenia dodane przy pojedynczym spacerze dostają powiadomienie razem z nim, nigdy zamiast niego — a urządzenie wskazane w obu miejscach nadal dostaje jedno powiadomienie, a nie dwa. Zostaw puste, aby powiadamiać wyłącznie urządzenia przypisane do spacerów, albo nikogo, jeśli nie ustawisz żadnego.",
+          "notify_service": "Urządzenie z aplikacją Home Assistant, które dostaje alert o każdym spacerze. Nie wycisza go ani nieobecność, ani wyciszenie pojedynczego spaceru — tylko przełącznik Alerty. Telefony dodane do pojedynczego spaceru dostają powiadomienie razem z nim. Zostaw puste, aby powiadamiać wyłącznie telefony przypisane do spacerów.",
           "fire_event": "Wywołuje zdarzenie walk_the_dog_alert, na które mogą reagować Twoje własne automatyzacje.",
-          "auto_mute_entity": "Dopóki wskazanej encji Osoba lub Śledzenie urządzenia nie ma w domu, nie jest wysyłane powiadomienie o żadnym spacerze. Jeśli na kroku „Kto ma wiedzieć o tym spacerze?” wskazano dla danej godziny inną osobę, ten spacer kieruje się nią. Sensor i zdarzenie walk_the_dog_alert aktualizują się tak czy inaczej."
+          "auto_mute_entity": "Zapasowa reguła obecności dla telefonów, które nie potrafią same powiedzieć, gdzie są. Telefon z aplikacją Home Assistant ma własny lokalizator i to on decyduje; dopiero telefon bez lokalizatora pyta o tę osobę i milknie, gdy jej nie ma w domu. Urządzenia zawsze powiadamianego to nie dotyczy."
         }
       },
       "long_walk": {
@@ -120,16 +120,16 @@
       },
       "walk_target": {
         "title": "Kto ma wiedzieć o tym spacerze?",
-        "description": "**Spacer {index} z {total}: {days} o {time}.**\n\nWszystko na tej stronie dotyczy wyłącznie tego jednego spaceru — {days} o {time}. Kreator zapyta o to osobno przy każdym skonfigurowanym spacerze.\n\nAlert o nim zawsze trafia na {default_device}. Pola poniżej tylko to uzupełniają: dodatkowe telefony dla tego jednego spaceru, przełącznik, który go wycisza, i osoba, której nieobecność go wycisza.",
+        "description": "**Spacer {index} z {total}: {days} o {time}.**\n\nWszystko na tej stronie dotyczy wyłącznie tego jednego spaceru — {days} o {time}. Kreator zapyta o to osobno przy każdym skonfigurowanym spacerze.\n\nAlert o nim zawsze trafia na {default_device}. Pola poniżej tylko to uzupełniają: dodatkowe telefony dla tego jednego spaceru, przełącznik, który je wycisza, i osoba, której nieobecność je wycisza.",
         "data": {
           "notify_services": "Powiadamiaj także te urządzenia",
-          "mute": "Nigdy nie alarmuj o tym spacerze",
-          "away_entity": "Pomiń ten spacer, gdy tej osoby nie ma w domu"
+          "mute": "Nie powiadamiaj telefonów tego spaceru",
+          "away_entity": "Pomiń telefony tego spaceru, gdy tej osoby nie ma w domu"
         },
         "data_description": {
-          "notify_services": "Telefony powiadamiane dodatkowo o tym jednym spacerze — oprócz urządzenia z pola „Zawsze powiadamiaj to urządzenie”. Zostaw puste, jeśli ten spacer nie wymaga dodatkowego telefonu.",
-          "mute": "Dla tego spaceru nie jest wysyłane żadne powiadomienie na żadne urządzenie — nawet na to zawsze powiadamiane. Sensor i zdarzenie walk_the_dog_alert nadal się aktualizują, więc Twoje własne automatyzacje działają dalej. Przydaje się przy spacerze, którym zawsze zajmuje się ktoś inny.",
-          "away_entity": "Dopóki tej osoby lub tego lokalizatora nie ma w domu, ten spacer nie wysyła powiadomień. Zostaw puste, aby korzystać z osoby wskazanej w polu „Wycisz alerty, gdy tej osoby nie ma w domu” w ustawieniach alertów; ustaw, aby ten spacer podążał za osobą, która faktycznie go odbywa."
+          "notify_services": "Telefony powiadamiane dodatkowo o tym jednym spacerze — oprócz urządzenia z pola „Zawsze powiadamiaj to urządzenie”. Telefon, którego lokalizator pokazuje, że nie ma go w domu, jest pomijany; pozostałe dostają powiadomienie. Zostaw puste, jeśli ten spacer nie wymaga dodatkowego telefonu.",
+          "mute": "Telefony wskazane powyżej nie dostają powiadomień o tym spacerze. Urządzenie zawsze powiadamiane dostaje je nadal — zatrzymuje je tylko przełącznik Alerty. Sensor i zdarzenie walk_the_dog_alert aktualizują się tak czy inaczej.",
+          "away_entity": "Dotyczy tylko telefonów tego spaceru, które nie mają własnego lokalizatora. Zostaw puste, aby użyć osoby z ustawień alertów."
         }
       },
       "params": {
@@ -144,7 +144,7 @@
           "confirm_margin_min": "Druga wiadomość tuż przed wyjściem",
           "notify_service": "Zawsze powiadamiaj to urządzenie",
           "fire_event": "Wywołuj własne zdarzenie",
-          "auto_mute_entity": "Wycisz alerty, gdy tej osoby nie ma w domu"
+          "auto_mute_entity": "Pomiń telefony, gdy tej osoby nie ma w domu"
         },
         "data_description": {
           "radius_km": "Koło wokół miejsca spaceru, w którym sprawdzany jest deszcz.",
@@ -153,9 +153,9 @@
           "later_margin_min": "O ile później niż o zaplanowanej godzinie możesz wyjść z domu. Późniejsze wyjście jest zawsze sprawdzane ponownie, w miarę jak ta godzina się zbliża — radary zobaczą je na długo przed tym, zanim trzeba będzie wychodzić — więc szeroki margines kosztuje tu tylko kilka zapytań o prognozę więcej.",
           "walk_duration_min": "Ile trwa spacer. Żeby jakaś godzina została zaproponowana, cały spacer musi pozostać suchy, więc spacer dłuższy niż 60 minut, na które prognozują radary, nigdy nie będzie w całości potwierdzony radarem w chwili, gdy dostajesz wiadomość.",
           "confirm_margin_min": "Druga, krótka wiadomość tyle minut przed faktycznym wyjściem, mówiąca, że otrzymany plan jest nadal aktualny — albo że deszcz odpuścił i można jednak iść o zwykłej porze. Trafia na te same urządzenia co pierwsza. Wartość 0 wyłącza ją i jest ustawieniem domyślnym: brak wiadomości oznacza, że nic się nie zmieniło.",
-          "notify_service": "Urządzenie z aplikacją Home Assistant, które dostaje alert o każdym spacerze, niezależnie od tego, który to spacer. Urządzenia dodane przy pojedynczym spacerze dostają powiadomienie razem z nim, nigdy zamiast niego — a urządzenie wskazane w obu miejscach nadal dostaje jedno powiadomienie, a nie dwa. Zostaw puste, aby powiadamiać wyłącznie urządzenia przypisane do spacerów, albo nikogo, jeśli nie ustawisz żadnego.",
+          "notify_service": "Urządzenie z aplikacją Home Assistant, które dostaje alert o każdym spacerze. Nie wycisza go ani nieobecność, ani wyciszenie pojedynczego spaceru — tylko przełącznik Alerty. Telefony dodane do pojedynczego spaceru dostają powiadomienie razem z nim. Zostaw puste, aby powiadamiać wyłącznie telefony przypisane do spacerów.",
           "fire_event": "Wywołuje zdarzenie walk_the_dog_alert, na które mogą reagować Twoje własne automatyzacje.",
-          "auto_mute_entity": "Dopóki wskazanej encji Osoba lub Śledzenie urządzenia nie ma w domu, nie jest wysyłane powiadomienie o żadnym spacerze. Jeśli na kroku „Kto ma wiedzieć o tym spacerze?” wskazano dla danej godziny inną osobę, ten spacer kieruje się nią. Sensor i zdarzenie walk_the_dog_alert aktualizują się tak czy inaczej."
+          "auto_mute_entity": "Zapasowa reguła obecności dla telefonów, które nie potrafią same powiedzieć, gdzie są. Telefon z aplikacją Home Assistant ma własny lokalizator i to on decyduje; dopiero telefon bez lokalizatora pyta o tę osobę i milknie, gdy jej nie ma w domu. Urządzenia zawsze powiadamianego to nie dotyczy."
         }
       },
       "long_walk": {
