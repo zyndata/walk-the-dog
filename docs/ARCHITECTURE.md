@@ -127,8 +127,13 @@ palette decoding exactly), `smooth=0`, `snow=0`, identifying `User-Agent` (manda
 Python UA is rejected with 403, measured in phase 0).
 
 1. Fetch `/public/weather-maps.json` (1 request/cycle). Take the newest `past` frame + all 6
-   `nowcast` frames; identify each frame by its `path` string (nowcast frames are re-issued per
-   run; `path` is the cache identity, the timestamp alone is not).
+   `nowcast` frames; identify each frame by its `path` string, which is the cache key.
+   **Measured in phase 8:** that path is `/v2/radar/<epoch of the frame's own valid time>`, so a
+   nowcast frame re-issued by a later run keeps the path it had — the cache treats the two as
+   the same frame and does not re-fetch it. That is what makes a warm cycle cost one new frame
+   instead of seven, and it is the reason the request budget closes at all; the price is that a
+   slot is scored from the first run that predicted it rather than from the latest. See
+   `STATE.md`, phase 8, for why that trade is kept.
 2. Project home lat/lon to Web Mercator pixel coordinates at z=8: at 52° N one 256 px tile spans
    ~96.4 km (≈ 0.377 km/px), so the r ≤ 15 km disc spans ≤ 80 px and touches 1 tile in the
    common case, up to 4 at tile corners.
@@ -379,10 +384,23 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
   **The alignment may only ever pull a cycle earlier** (`min(grid, aligned)`), which is what makes
   it safe to have: the grid keeps running underneath at its own rate whatever the provider does,
   so a wrong guess about when a frame lands costs one cheap extra cycle and can never cost a cycle
-  that was due. `PUBLISH_SETTLE` (60 s) is an estimate, not a measurement — see phase 8.
-  The cost is up to **two cycles per cadence** instead of one, and no extra requests: every
-  adapter gates its own fetch on its own publication interval (`librewxr` 10 min, `chmi` 5 min,
-  Open-Meteo 30 min, `metno` 10 min), so the extra cycle re-scores what is already held.
+  that was due. The cost is up to **two cycles per cadence** instead of one.
+- **`PUBLISH_SETTLE` is per source and measured** (phase 8, `scripts/measure_publish_lag.py`,
+  2026-08-26): **LibreWXR 180 s** (observed 78–158 s after a frame's own stamp) and **CHMI 90 s**
+  (18 s on almost every run, 68 s on the worst seen). One shared 60 s estimate was below
+  LibreWXR's real lag, and being early is not harmless: the aligned cycle then asks for a frame
+  that is not on the server yet. CHMI uses the same number twice — it is also how far back the
+  run-stamp candidate is offset, which used to be a 2-minute guess.
+- **An aligned cycle is allowed to fetch.** Measured in phase 8 and fixed there: the adapters
+  gated on "has my publication interval elapsed since I last asked", so the extra cycle woke and
+  then fetched nothing, and every radar frame was being read a full cycle after it appeared
+  (median 8 minutes, measured over a simulated day). They now also fetch when *a frame they do
+  not have is due* — `issued_at + interval + settle` — which locks the cadence onto the
+  publications after one short interval and cuts the median wait to **1 minute**. It is a phase
+  shift, not a faster rate: once locked, "a frame I do not have" comes true exactly once per
+  publication. CHMI keeps the stricter form of the rule (no closer together than
+  `interval − settle`) because it publishes twice as fast as the grid, and reading every run
+  would double its cost for data the sprint already exists to collect.
 - **Notification dispatch** (`notifier.py`): evaluated on the cycle that lands on `T − E`, fires
   with the freshest coordinator data **only if** the scheduled window is not dry; afterwards
   every cycle until `walk end` re-checks material change **and actionability** — a window still
@@ -423,22 +441,46 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
 
 ## Resource budget
 
-Estimates to be replaced by measurements in phase 8; these are the ceilings tuning must meet.
+Measured in phase 8 and now stated as measurements, not estimates. Method:
+`scripts/benchmark.py` drives the real adapters and the real engine over the recorded
+fixtures inside a container limited to **one CPU and 512 MB** (Debian, Python 3.14,
+host Intel i7-14700KF); `tests/test_performance.py` simulates a whole day of four
+walks through the real coordinator and counts what it spends. Both are repeatable:
+`python scripts/benchmark.py` and `pytest tests/test_performance.py --log-cli-level=INFO`.
 
-| Quantity | Budget | Basis |
-|---|---|---|
-| Transient RAM per update cycle | **< 1 MB typical, 5 MB hard cap** | dominated by one decoded image: a 256×256 LibreWXR tile (64 KB) or one paletted CHMI composite (680×460 = 313 KB), plus the 92 KB forecast archive held while it is expanded, plus Pillow/numpy overhead; JSON bodies < 100 KB parsed |
-| Steady-state RAM (cache + series) | **< 100 KB** | ~50 floats of sampled data + last Open-Meteo response (6.5 KB raw) |
-| Persisted storage | **≤ 20 KB** | one HA Store JSON, see Frame cache |
-| CPU per cycle (single-core ARM ~1 GHz) | **< 250 ms** | PNG decode of a ≤ 2 KB tile is ms-scale; masking/percentile over 64 KB uint8 is trivial; engine is arithmetic over ≤ ~90 slots |
-| CPU outside active windows | **0** (one armed timer) | no polling design |
-| Update cycles, active hour | **6 typical, ≤ 24 worst** | one per 10-minute slot, doubled where publication alignment applies, and doubled again over the two 20-minute sprints. A cycle without a fetch is arithmetic over ≤ ~90 slots — the image decode, which is what the CPU budget above is about, only happens when an adapter actually fetches |
-| HTTP requests, active hour | **≤ 22 typical / ≤ 28 worst** outside CHMI's box; **≤ 58** inside it | `librewxr` 6 metadata + ≤ 12 tiles (warm cache: 1–2 new frames/cycle; worst = cold start 7 tiles in cycle 1) ≤ 20/h self-cap; Open-Meteo 2/h; `metno` ≤ 2/h failover-only; `chmi` ≤ 12 fetches/h at its own 5-minute rate = ≤ 24 requests/h, ≤ 30/h capped, and only where it is applicable. **Requests follow the sources' publication rates, not the cycle count**: each adapter gates its own fetch, so neither the sprint nor the publication alignment adds one |
-| HTTP requests, daily (4 walks) | **≤ 200**, or **≤ 380** inside CHMI's box | matches the phase 0 budget table plus the CHMI deviation recorded in `STATE.md`; ≤ 3 % of Open-Meteo's daily allowance under conservative call counting |
-| HTTP requests while idle / switch off | **0** | hard requirement |
+Two profiles, because the cost depends on where the user lives: **Warszawa** (one
+z=8 tile per frame, outside the CHMI composite) and **Bielsko-Biała** (two tiles,
+inside it — the worst case, and not an unusual one: a disc straddles a tile boundary
+at plenty of locations).
+
+| Quantity | Budget | Measured | Verdict |
+|---|---|---|---|
+| Transient RAM per update cycle | < 1 MB typical, 5 MB hard cap | peak RSS **+224 KiB** (Warszawa) / **+260 KiB** (Bielsko) over a cycle; **+2.4 / +3.2 MB** on the very first cycle after a restart, which is Pillow and numpy starting up rather than the cycle | inside |
+| Steady-state RAM (cache + series) | < 100 KB | RSS grows **+224 KiB** over 16 cycles at Warszawa and **+356 KiB** at Bielsko and then stops; the cache itself serializes to 1.6–4.3 KB | inside |
+| Persisted storage | ≤ 20 KB | **1 639 bytes** (18 entries) / **4 341 bytes** (32 entries) | inside |
+| CPU per cycle | < 250 ms on single-core ARM ~1 GHz | **0.7 ms** median warm / 2.8 ms cold (Warszawa); **4.9 ms** median warm / 10.2 ms cold (Bielsko); 8–16 ms for the first cycle after a restart | inside with an order of magnitude to spare — see the note on ARM below |
+| Longest event-loop stall in a cycle | not previously stated | **0.9 ms** typical, **3.2 ms** worst (Warszawa); **1.1 ms** typical, **11.1 ms** worst (Bielsko, first cycle after a restart) | well under asyncio's own 100 ms slow-callback threshold |
+| CPU outside active windows | 0 (one armed timer) | no cycle and no request runs outside a window — asserted over a simulated day | met |
+| Update cycles, active hour | 6 typical, ≤ 24 worst | busiest hour **13** (Warszawa) / **21** (Bielsko); 108 / 140 cycles per day | inside |
+| HTTP requests, active hour | ≤ 28 outside CHMI's box; ≤ 58 inside it | busiest hour **22** / **47** | inside |
+| HTTP requests, daily (4 walks) | ≤ 200, or ≤ 380 inside CHMI's box | **156** / **372** | inside |
+| Bandwidth, daily (4 walks) | not previously stated | **365 KiB** outside CHMI's box, **7.9 MiB** inside it — the composites are the whole of the difference | recorded so 1.0.0 users on metered connections can be told |
+| HTTP requests while idle / switch off | 0 | **0** — a whole day with alerting off makes no request at all | met |
+
+**On the ARM claim.** The CPU figures above are process CPU time, measured on one
+core of a modern desktop; no ARM board was available. A Cortex-A53 at ~1.2 GHz — the
+weakest thing that runs Home Assistant — is roughly an order of magnitude slower per
+core on this kind of scalar Python and small-array numpy work, which puts a warm
+cycle at ~10 ms and the heaviest cold one at ~150 ms: inside the 250 ms budget, but
+not by a wide margin on the very first cycle after a restart. The benchmark also runs
+unmodified on `linux/arm64`, verified under emulation; the emulated *timings* are
+worthless as a proxy (QEMU interprets every NEON instruction and reports figures
+hundreds of times slower than the host), so they are not quoted here. Running
+`scripts/benchmark.py` on the maintainer's own Home Assistant box is what would
+replace the estimate with a number — see `STATE.md`, phase 8.
 
 All numbers stay consistent with the per-provider limits established in
-[DATA_SOURCES.md](DATA_SOURCES.md); the Open-Meteo refinement only lowers usage.
+[DATA_SOURCES.md](DATA_SOURCES.md).
 
 ## Frame cache
 

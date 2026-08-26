@@ -28,9 +28,9 @@ from custom_components.walk_the_dog.const import (
 )
 from custom_components.walk_the_dog.coordinator import (
     CYCLE,
-    PUBLISH_SETTLE,
     SPRINT,
     WalkCoordinator,
+    publish_settle,
 )
 from custom_components.walk_the_dog.engine import (
     DIRECTION_EARLIER,
@@ -557,7 +557,8 @@ async def test_a_cycle_follows_the_frame_it_is_waiting_for(
 
     assert published
     for frame in published:
-        assert any(frame <= moment <= frame + PUBLISH_SETTLE for moment in moments), frame
+        settle = publish_settle(SOURCE_LIBREWXR)
+        assert any(frame <= moment <= frame + settle for moment in moments), frame
 
 
 async def test_alignment_never_costs_a_scheduled_cycle(

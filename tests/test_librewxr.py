@@ -18,6 +18,7 @@ from custom_components.walk_the_dog.const import (
     INTENSITY_THRESHOLD_HEAVY,
     INTENSITY_THRESHOLD_LIGHT,
     INTENSITY_THRESHOLD_MODERATE,
+    PUBLISH_SETTLE_S,
     SOURCE_LIBREWXR,
     intensity_class,
 )
@@ -31,6 +32,7 @@ from custom_components.walk_the_dog.sources.librewxr import (
     COLOR_SCHEME,
     MAX_REQUESTS_PER_HOUR,
     MIN_INTERVAL_S,
+    NOWCAST_FRAMES,
     SMOOTH,
     SNOW,
     STEP_S,
@@ -39,6 +41,7 @@ from custom_components.walk_the_dog.sources.librewxr import (
     DiscMask,
     LibreWxrAdapter,
     grey_to_mm_per_h,
+    hourly_cap,
     parse_weather_maps,
 )
 
@@ -49,6 +52,11 @@ UA = "walk_the_dog/test (+https://github.com/zyndata/walk-the-dog)"
 
 # The frames the recorded weather-maps.json advertises.
 NEWEST_PAST = datetime(2026, 8, 25, 6, 50, tzinfo=UTC)
+
+#: One publication interval, and the frame published one interval after the newest
+#: one the recorded index advertises.
+STEP = timedelta(seconds=STEP_S)
+NEXT_PAST = NEWEST_PAST + STEP
 
 
 # --- Calibration -----------------------------------------------------------------
@@ -182,8 +190,13 @@ def _mock_frames(
     aioclient_mock: AiohttpClientMocker,
     geometry: SampleGeometry,
     tile: bytes,
+    shift: timedelta = timedelta(0),
 ) -> tuple[dict, DiscMask]:
     index = load_fixture("librewxr", "weather-maps.json")
+    if shift:
+        # One publication later: every frame moves on, and its path with it — the
+        # path is the frame's own valid time, which is what makes the cache work.
+        index = _shifted(index, int(shift.total_seconds()))
     aioclient_mock.get(INDEX_URL, json=index)
     mask = DiscMask(geometry)
     host, frames = parse_weather_maps(index)
@@ -191,6 +204,19 @@ def _mock_frames(
         for url in _tile_urls(host, path, mask):
             aioclient_mock.get(url, content=tile)
     return index, mask
+
+
+def _shifted(index: dict, seconds: int) -> dict:
+    """The same index, one or more publications later."""
+    radar = index["radar"]
+    moved = {
+        key: [
+            {"time": frame["time"] + seconds, "path": f"/v2/radar/{frame['time'] + seconds}"}
+            for frame in radar[key]
+        ]
+        for key in ("past", "nowcast")
+    }
+    return {**index, "radar": {**radar, **moved}}
 
 
 async def test_fetch_returns_a_normalized_seven_slot_series(
@@ -330,7 +356,7 @@ async def test_fetch_stops_before_exceeding_the_hourly_budget(
     geometry: SampleGeometry,
     now: datetime,
 ) -> None:
-    """The self-imposed 20 requests/hour ceiling is never crossed, cold cache or not."""
+    """The self-imposed hourly ceiling is never crossed, cold cache or not."""
     _mock_frames(aioclient_mock, geometry, load_bytes("librewxr", "tile_wet.png"))
     adapter = LibreWxrAdapter(UA)  # no cache: every cycle re-samples all 7 frames
     session = async_get_clientsession(hass)
@@ -339,6 +365,53 @@ async def test_fetch_stops_before_exceeding_the_hourly_budget(
         await adapter.fetch(session, geometry, now + timedelta(minutes=minute))
 
     assert len(aioclient_mock.mock_calls) <= MAX_REQUESTS_PER_HOUR
+
+
+async def test_the_hourly_ceiling_follows_the_geometry(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    now: datetime,
+) -> None:
+    """A disc that costs two tiles a frame gets twice the frames' worth of allowance.
+
+    Measured in phase 8: with one flat ceiling, a disc that straddles a tile boundary
+    — which is where two of the project's own test locations sit — spent its whole
+    hour inside the first window and then stopped sampling frames. A ceiling meant to
+    be polite to the provider was silently shortening the forecast instead.
+    """
+    straddling = SampleGeometry(52.2297, 143 / 256 * 360 - 180, 15.0)
+    assert DiscMask(straddling).tile_count > 1
+
+    _mock_frames(aioclient_mock, straddling, load_bytes("librewxr", "tile_dry.png"))
+    adapter = LibreWxrAdapter(UA)
+    await adapter.fetch(async_get_clientsession(hass), straddling, now)
+
+    assert adapter.budget.limit == hourly_cap(DiscMask(straddling).tile_count)
+    assert adapter.budget.limit > MAX_REQUESTS_PER_HOUR
+
+
+async def test_a_whole_window_of_cycles_stays_under_the_ceiling(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """The allowance covers a real hour: a cold start and five more cycles after it.
+
+    Cold, every frame is sampled; warm, only the newly published one — and the cache
+    that makes that true is what the ceiling is sized against.
+    """
+    _mock_frames(aioclient_mock, geometry, load_bytes("librewxr", "tile_dry.png"))
+    cache = SampleCache(geometry.key)
+    adapter = LibreWxrAdapter(UA, cache=cache)
+    session = async_get_clientsession(hass)
+
+    for minute in range(0, 60, 10):
+        result = await adapter.fetch(session, geometry, now + timedelta(minutes=minute))
+        assert result.series, f"no series at minute {minute}"
+        assert len(result.series[0].slots) == 1 + NOWCAST_FRAMES
+
+    assert len(aioclient_mock.mock_calls) < adapter.budget.limit
 
 
 async def test_budget_recovers_in_the_next_hour(
@@ -437,11 +510,10 @@ async def test_cached_before_any_fetch_reports_failure(now: datetime) -> None:
     assert result.statuses[0].state == STATE_FAILED
 
 
-async def test_a_published_frame_is_fetched_once_however_often_the_cycle_runs(
+async def test_a_frame_already_held_is_not_asked_for_again(
     hass: HomeAssistant,
     aioclient_mock: AiohttpClientMocker,
     geometry: SampleGeometry,
-    now: datetime,
 ) -> None:
     """The coordinator sprints to 5 minutes near a walk; LibreWXR publishes every 10.
 
@@ -450,9 +522,47 @@ async def test_a_published_frame_is_fetched_once_however_often_the_cycle_runs(
     """
     _mock_frames(aioclient_mock, geometry, load_bytes("librewxr", "tile_dry.png"))
     adapter = LibreWxrAdapter(UA)
+    # Read as soon as the frame was published, which is where the cadence settles.
+    fetched_at = NEWEST_PAST + timedelta(seconds=PUBLISH_SETTLE_S[SOURCE_LIBREWXR])
 
-    assert adapter.should_fetch(now)
-    await adapter.fetch(async_get_clientsession(hass), geometry, now)
+    assert adapter.should_fetch(fetched_at)
+    await adapter.fetch(async_get_clientsession(hass), geometry, fetched_at)
 
-    assert not adapter.should_fetch(now + timedelta(seconds=MIN_INTERVAL_S // 2))
-    assert adapter.should_fetch(now + timedelta(seconds=MIN_INTERVAL_S))
+    assert not adapter.should_fetch(fetched_at + timedelta(seconds=MIN_INTERVAL_S // 2))
+    assert adapter.should_fetch(fetched_at + timedelta(seconds=MIN_INTERVAL_S))
+
+
+async def test_the_cadence_shifts_onto_the_publications_and_stays_there(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+) -> None:
+    """A frame we do not have yet may be asked for before the interval has elapsed.
+
+    Measured in phase 8: the cycle grid is anchored to the walk and the frames are
+    not, so a read that lands late in a frame's ten minutes used to stay late for
+    the whole window — every frame waiting almost a full cycle to be looked at. The
+    adapter now asks "is there a frame I do not have", which costs one short interval
+    once and then locks onto the publications.
+    """
+    _mock_frames(aioclient_mock, geometry, load_bytes("librewxr", "tile_dry.png"))
+    adapter = LibreWxrAdapter(UA)
+    settle = timedelta(seconds=PUBLISH_SETTLE_S[SOURCE_LIBREWXR])
+    # A cycle that lands seven minutes into the frame's ten: the badly phased case.
+    late = NEWEST_PAST + timedelta(minutes=7)
+    await adapter.fetch(async_get_clientsession(hass), geometry, late)
+
+    # The next frame is due before the interval since that read has elapsed, and
+    # that is exactly the moment the coordinator's aligned wakeup arrives at.
+    aligned = NEWEST_PAST + timedelta(seconds=MIN_INTERVAL_S) + settle
+    assert aligned - late < timedelta(seconds=MIN_INTERVAL_S)
+    assert adapter.should_fetch(aligned)
+
+    # ...and it is a shift, not a faster rate: nothing more is due until the frame
+    # after that one.
+    aioclient_mock.clear_requests()
+    _mock_frames(aioclient_mock, geometry, load_bytes("librewxr", "tile_dry.png"), shift=STEP)
+    await adapter.fetch(async_get_clientsession(hass), geometry, aligned)
+
+    assert not adapter.should_fetch(aligned + timedelta(seconds=MIN_INTERVAL_S // 2))
+    assert adapter.should_fetch(NEXT_PAST + timedelta(seconds=MIN_INTERVAL_S) + settle)

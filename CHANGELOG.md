@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A new radar frame now reaches you about a minute after it is published, instead of eight.**
+  The integration already woke up for each new frame, but then decided it had asked recently
+  enough and looked at nothing — so every frame was read almost a full cycle late, and so was any
+  alert that depended on it. It now asks whenever there is a frame it does not have, which settles
+  onto the sources' own publication times after one short interval. Costs about 5 % more requests
+  a day and stays well inside every budget.
+
+- **The radar is no longer cut off part-way through the first hour of a walk window** at locations
+  whose alert area straddles a map tile boundary — a common geometry, not a rare one. The
+  self-imposed request ceiling was a flat number that such a location spent in about forty
+  minutes, after which the adapter stopped fetching frames and the forecast quietly got shorter.
+  The ceiling now scales with how many tiles the area actually costs.
+
+- **Timing constants that used to be guesses are now measurements.** How long after its own
+  timestamp a frame can actually be downloaded was measured live for both radar sources (CHMI
+  18 s, LibreWXR 78–158 s) and is now set per source instead of one shared estimate. As a
+  side-effect the Czech radar's data is up to a minute fresher on every update.
+
+### Added
+
+- **Two measurement tools and a performance test suite.** `scripts/benchmark.py` reports what one
+  update cycle costs — processor time, memory, how long it holds the event loop, how many
+  requests — against the recorded fixtures, with no network and no Home Assistant needed.
+  `scripts/measure_publish_lag.py` measures how late each source publishes. `tests/test_performance.py`
+  simulates a whole day of four walks through the real coordinator and holds it to the published
+  request, cycle and bandwidth budgets.
+
+- **The documentation now states what the integration costs to run**, measured rather than
+  estimated: 156 requests and about 0.4 MB a day in most of Poland, 372 requests and about 8 MB
+  in the south-west corner where the second radar is available, and nothing at all when no walk
+  is near or the switch is off. Memory and processor use are far below the weakest hardware Home
+  Assistant runs on: under a megabyte per update and a few milliseconds of work.
+
+### Changed
+
 - **One person being out no longer silences everybody else.** Presence is now a property of each
   phone rather than of the walk: a companion app device is tracked by
   `device_tracker.<its own name>`, so a walk addressed to two phones still reaches the one whose

@@ -151,6 +151,25 @@ owns it: `target_key()` builds it and `Walk.target_key` reads it back.
 still exist, so a device list can never be inherited by a later walk that happens to land on the
 same time.
 
+## What it costs to run
+
+Measured in phase 8 over a simulated day of four walks (`tests/test_performance.py`), for the
+default settings — 5 km radius, 1 h earlier margin, 30 min later margin, a 30-minute walk:
+
+| | Outside the CHMI radar area | Inside it (south-west Poland) |
+|---|---|---|
+| Requests per day | 156 | 372 |
+| Data per day | ~0.4 MB | ~8 MB |
+| Requests while a walk is not near, or while the switch is off | 0 | 0 |
+
+The difference is the CHMI composites: the second radar is fetched as whole images, which is
+what buys the extra precision in the corner of the country it covers. On a metered connection
+that is the one number worth knowing before installing.
+
+Memory and processor cost are far below what the weakest supported hardware has: under a
+megabyte of extra memory per update and a few milliseconds of processor time
+([ARCHITECTURE.md](ARCHITECTURE.md) § Resource budget).
+
 ## Entities
 
 Three, on one service device named after the config entry. Each answers a different

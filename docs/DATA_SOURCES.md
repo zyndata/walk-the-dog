@@ -548,13 +548,31 @@ enable switch is off**. That is 10 h/day active, 60 polling cycles/day.
 
 | Source | Per cycle | Per active hour | Per day | Provider limit | Headroom used |
 |---|---|---|---|---|---|
-| LibreWXR | 1 metadata + 1–2 newly published frames × 1 tile (the frame cache holds the rest; a z=8 tile spans ~96 km at 52° N, so one tile covers any permitted radius except at a tile boundary, where it is 4) | ≤ 20 requests (self-imposed cap) | ≤ 120 | No published numeric limit; fair use forbids bulk/high-volume automation | Well inside "normal interactive use" |
+| LibreWXR | 1 metadata + 1–2 newly published frames × 1 tile (the frame cache holds the rest; a z=8 tile spans ~96 km at 52° N, so one tile covers any permitted radius except at a tile boundary, where it is 2, or 4 at a corner) | ≤ 25 requests per tile-count-1 disc, ≤ 44 for a two-tile one (self-imposed cap, **scaled by geometry since phase 8**) | ≤ 136 measured, four walks | No published numeric limit; fair use forbids bulk/high-volume automation | Well inside "normal interactive use" |
 | Open-Meteo (ICON-EU + KNMI in **one** request) | 1 HTTP request | 6 requests | ≤ 60 | 600/min, 5 000/h, 10 000/day | ≤ 0.12 % of the minutely limit |
 | Open-Meteo, counted as *calls* (worst case: each of 5 sample points counts separately) | 5 calls | 30 calls | ≤ 300 | 10 000/day | **3 % of the daily limit** |
 | MET Norway (failover only, 1 point, honouring `Expires`) | ≤ 0.5 request | ≤ 2 requests | ≤ 20 | 20 req/s; ≥ 10 min between polls | negligible |
 | **CHMI** (only inside its box; 1 forecast tar + 1 observed frame) | 2 requests | ≤ 30 (self-imposed cap; ≤ 24 in practice, one fetch per published 5-minute run) | ≤ 200 | none published; a national met service's open-data host | ~110 KB/fetch |
-| **Total, outside CHMI's box** | | **≤ 28 HTTP requests/hour while a walk window is near; 0 otherwise** | **≤ 200/day** | | |
-| **Total, inside CHMI's box** | | **≤ 46 HTTP requests/hour while a walk window is near; 0 otherwise** | **≤ 320/day** | | |
+| **Total, outside CHMI's box** | | **≤ 28 HTTP requests/hour while a walk window is near; 0 otherwise** — **22 measured** | **≤ 200/day** — **156 measured** | | |
+| **Total, inside CHMI's box** | | **≤ 58 HTTP requests/hour while a walk window is near; 0 otherwise** — **47 measured** | **≤ 380/day** — **372 measured** | | |
+
+**Measured, phase 8** (`tests/test_performance.py`, a simulated day of four walks driven through
+the real coordinator and the real adapters): **156 requests and 365 KiB** outside CHMI's box,
+**372 requests and 7.9 MiB** inside it, 0 while alerting is off, and nothing at all outside a
+walk window. The in-box hourly and daily figures are the ones `docs/ARCHITECTURE.md` § Resource
+budget states; the earlier 46/h and 320/day in this table predated the sprint cadence and the
+per-geometry LibreWXR ceiling, and are corrected above.
+
+Two ceilings changed in phase 8, both because measurement showed the old ones were wrong:
+
+- **LibreWXR's hourly cap now scales with the disc's tile count** (`hourly_cap()`): six cycles of
+  one index poll plus up to two new frames, plus one cold start's back-fill. A flat 20/h was
+  binding for any disc that straddles a tile boundary — which is a *common* geometry, not a rare
+  one — and the adapter's response to a binding cap is to stop sampling frames, so a limit meant
+  to be polite to the provider was quietly shortening the forecast.
+- **CHMI's run-stamp offset dropped from 2 minutes to 90 s**, matching the measured publication
+  lag (18 s typical, 68 s worst). It costs nothing and makes every cycle's radar up to a minute
+  fresher.
 
 Notes behind the numbers:
 
@@ -575,8 +593,14 @@ Notes behind the numbers:
   whole nowcast costs a single request — 92 KB measured — plus one for the observed frame. The
   frame cache cannot spare it (a new run every 5 minutes means new content every cycle), but at two
   requests a cycle it does not need to. This raises the in-window budget beyond the phase 0 figure,
-  a deviation recorded in `STATE.md`; the bandwidth, not the request count, is the thing for the
-  phase 8 performance pass to look at.
+  a deviation recorded in `STATE.md`.
+- **The bandwidth phase 8 was asked to look at: 7.9 MiB a day inside CHMI's box** against 365 KiB
+  outside it, measured over a simulated day of four walks. It is all composites — 111 KB per
+  fetch, twice an hour per active hour plus the sprints. That is small against any home
+  connection and large against a metered one, so it is stated here and in
+  [CONFIG.md](CONFIG.md) § What it costs to run rather than
+  reduced: the alternative is fetching fewer runs, which is exactly the freshness the second
+  radar was added for.
 
 Every recommended source fits inside its documented limits with at least an order of magnitude to
 spare, and the integration is silent outside active windows.

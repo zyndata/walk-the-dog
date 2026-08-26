@@ -97,13 +97,6 @@ SPRINT_MINUTES: Final = 5
 #: How long before setting off the sprint cadence begins.
 SPRINT_LEAD_MIN: Final = 20
 
-#: Grace between a source's nominal publication time and asking it for the data.
-#: A frame stamped 12:10 is not on the server at 12:10:00, and asking too early
-#: wastes the request on the frame we already hold. The value is an estimate, not a
-#: measurement (phase 8) — and it cannot do harm either way, because a
-#: publication-aligned wakeup may only ever come *earlier* than the scheduled cycle,
-#: never instead of it (docs/ARCHITECTURE.md § Coordinator scheduling).
-PUBLISH_SETTLE_S: Final = 60
 
 # Common intensity scale, mm/h lower bounds (docs/DATA_SOURCES.md)
 INTENSITY_NONE: Final = "none"
@@ -144,6 +137,31 @@ SOURCE_CHMI: Final = "chmi"
 #: rain starts to the minute, so a window they do not reach is a weaker answer than
 #: one they do, and the difference is worth telling the user about.
 NOWCAST_SOURCES: Final[frozenset[str]] = frozenset({SOURCE_LIBREWXR, SOURCE_CHMI})
+
+#: Grace between a frame's nominal timestamp and asking the server for it. A frame
+#: stamped 12:10 is not there at 12:10:00, and asking too early spends the request
+#: on the frame we already hold — so this has to be **at least** the publication lag
+#: or the aligned wakeup fetches nothing.
+#:
+#: Phase 8 replaced the estimate with a measurement (`scripts/measure_publish_lag.py`,
+#: 2026-08-26; method and figures in STATE.md): CHMI publishes 18 s after the stamp
+#: on almost every run and 68 s on its worst, while LibreWXR ranges from 78 s to
+#: 158 s. The values below sit above the worst observed lag of each, which is what
+#: makes the alignment able to fetch rather than merely to wake.
+PUBLISH_SETTLE_S: Final[dict[str, int]] = {
+    SOURCE_LIBREWXR: 180,
+    SOURCE_CHMI: 90,
+}
+
+#: For a source with no measurement of its own — none exists today, and an hourly
+#: model has nothing to align to at this timescale anyway.
+DEFAULT_PUBLISH_SETTLE_S: Final = 60
+
+
+def publish_settle_s(source_id: str) -> int:
+    """How long after its stamp a frame from this source can be asked for."""
+    return PUBLISH_SETTLE_S.get(source_id, DEFAULT_PUBLISH_SETTLE_S)
+
 
 #: How far ahead a radar nowcast reaches, in minutes. Both radar sources publish
 #: +10...+60 min and nothing beyond, so anything further out rests on hourly models

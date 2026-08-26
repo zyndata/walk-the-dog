@@ -28,7 +28,7 @@ import numpy as np
 from aiohttp import ClientSession, ClientTimeout
 from PIL import Image
 
-from ..const import SOURCE_LIBREWXR
+from ..const import SOURCE_LIBREWXR, publish_settle_s
 from .base import (
     CELL_KM,
     RELIABILITY,
@@ -67,8 +67,33 @@ NOWCAST_FRAMES = 6  # +10...+60 min
 #: no-op on the standard cycle and a guard against the coordinator's faster one.
 MIN_INTERVAL_S = 10 * 60
 
-#: Self-imposed ceiling from the docs/DATA_SOURCES.md request budget.
-MAX_REQUESTS_PER_HOUR = 20
+#: Cycles per hour on the coordinator's ten-minute grid — what the hourly ceiling
+#: below is counted in.
+CYCLES_PER_HOUR = 6
+
+
+def hourly_cap(tile_count: int) -> int:
+    """Self-imposed hourly ceiling for a disc that costs `tile_count` tiles a frame.
+
+    Measured in phase 8: a fixed ceiling was wrong, because what an hour honestly
+    costs depends on the geometry. A disc that lands inside one z=8 tile spends one
+    request per new frame; one that straddles a boundary spends two, and a corner
+    four — and at 5 km, half of the two test locations straddle one. With a flat cap
+    those users hit it inside the first hour of every window, and the adapter's
+    response to that is to stop sampling frames, so the ceiling meant to protect the
+    provider was quietly shortening the forecast instead.
+
+    The allowance is six cycles of one index poll plus up to two newly published
+    frames, plus one cold start's back-fill of the whole seven-frame series — an
+    hour cannot legitimately need more, because every fetch beyond that is gated by
+    `MIN_INTERVAL_S`.
+    """
+    return CYCLES_PER_HOUR * (1 + 2 * tile_count) + (1 + NOWCAST_FRAMES) * tile_count
+
+
+#: What a single-tile disc is allowed, and the starting value before the geometry
+#: is known (docs/DATA_SOURCES.md § Request budget).
+MAX_REQUESTS_PER_HOUR = hourly_cap(1)
 
 #: Grey level below which the composite reports no echo at all.
 GREY_NODATA = 0
@@ -178,12 +203,40 @@ class LibreWxrAdapter:
         minutes — cannot make this one re-fetch a frame it already has. On the
         ordinary 10-minute grid the elapsed time is exactly the interval, so this
         changes nothing there.
+
+        The second clause is what makes the coordinator's publication alignment do
+        anything at all. Measured in phase 8: the cycle grid is anchored to the walk
+        and LibreWXR's frames are not, so a frame published at 12:02 was being read
+        at 12:10 — every time, because the aligned wakeup arrived inside the elapsed
+        interval and was refused here. Asking "is there a frame I do not have yet"
+        rather than "has it been ten minutes since I last asked" cuts that wait to
+        the settle margin, and cannot cost extra requests once the frame arrives,
+        because the answer goes back to no as soon as it is read.
         """
         if not self._backoff.ready(now):
             return False
         if self._last_fetch_at is None:
             return True
-        return now - self._last_fetch_at >= timedelta(seconds=MIN_INTERVAL_S)
+        elapsed = now - self._last_fetch_at
+        if elapsed >= timedelta(seconds=MIN_INTERVAL_S):
+            return True
+        # Otherwise: only for a frame we do not have yet, and never twice inside one
+        # settle margin. That combination is what lets the phase shift onto the
+        # publications and then stay there — the shift costs one short interval, once,
+        # after which "a frame I do not have" is true again exactly every ten minutes.
+        # LibreWXR can be trusted with this because it publishes at the cycle cadence;
+        # CHMI publishes twice as fast as the grid, which is why its rule is the
+        # stricter one.
+        settle = timedelta(seconds=publish_settle_s(SOURCE_LIBREWXR))
+        return self._next_frame_due(now) and elapsed >= settle
+
+    def _next_frame_due(self, now: datetime) -> bool:
+        """Whether a frame newer than the one held should be on the server by now."""
+        if self._last is None or not self._last.series:
+            return False
+        issued = self._last.series[0].issued_at
+        due = timedelta(seconds=MIN_INTERVAL_S + publish_settle_s(SOURCE_LIBREWXR))
+        return now >= issued + due
 
     def cached(self, now: datetime) -> FetchResult:
         """Re-present the last successful result, re-stated as stale once too old."""
@@ -235,6 +288,10 @@ class LibreWxrAdapter:
         if self._mask is None or self._mask_key != geometry.key:
             self._mask = DiscMask(geometry)
             self._mask_key = geometry.key
+            # The ceiling follows the geometry: a frame costs one request per tile
+            # the disc touches, so a fixed number would either strangle a
+            # boundary-straddling disc or be far too loose for an ordinary one.
+            self._budget.limit = hourly_cap(self._mask.tile_count)
         return self._mask
 
     async def _fetch(
@@ -390,11 +447,13 @@ def _is_frame(frame: Any) -> bool:
 
 
 __all__ = [
+    "CYCLES_PER_HOUR",
     "DiscMask",
     "LibreWxrAdapter",
     # Re-exported: the Marshall-Palmer conversion moved to `base` when a second
     # radar source needed it, and this keeps the phase 3 import path working.
     "dbz_to_mm_per_h",
     "grey_to_mm_per_h",
+    "hourly_cap",
     "parse_weather_maps",
 ]

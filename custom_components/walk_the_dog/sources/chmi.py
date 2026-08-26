@@ -53,7 +53,7 @@ import numpy as np
 from aiohttp import ClientSession, ClientTimeout
 from PIL import Image
 
-from ..const import SOURCE_CHMI
+from ..const import SOURCE_CHMI, publish_settle_s
 from .base import (
     CELL_KM,
     EARTH_RADIUS_KM,
@@ -101,9 +101,14 @@ STAMP_FORMAT = "%Y%m%d.%H%M"
 RUN_INTERVAL_MIN = 5
 
 #: The run stamp is the *end* of the 5-minute interval it covers, and publication
-#: lags it by under a minute (measured). Asking for a run that is not there yet
-#: costs a 404, so the newest candidate is offset by this much before rounding.
-PUBLICATION_LAG = timedelta(minutes=2)
+#: lags it. Asking for a run that is not there yet costs a 404, so the newest
+#: candidate is offset by this much before rounding.
+#:
+#: It is the same fact as the settle margin the coordinator times its wakeup by —
+#: "how long after its stamp is a run readable" — so it is the same number, measured
+#: in phase 8: 18 s on almost every run, 68 s on the worst seen. The 2 minutes this
+#: used to be was a guess, and it cost every cycle up to a minute of freshness.
+PUBLICATION_LAG = timedelta(seconds=publish_settle_s(SOURCE_CHMI))
 
 #: How many 5-minute runs back to try before giving up. Three covers a late
 #: publication or a short outage without turning a cycle into a retry storm.
@@ -429,12 +434,30 @@ class ChmiAdapter:
 
         The registry checks coverage before calling this, so a location outside the
         box never reaches here and costs nothing at all.
+
+        The last clause lets a publication-aligned cycle actually fetch: a run
+        stamped 12:10 is on the server 18 s later (measured, phase 8), and asking
+        "is there a run I do not have" is what turns that into data the same minute
+        instead of at the next five-minute cycle.
         """
         if not self._backoff.ready(now):
             return False
         if self._last_fetch_at is None:
             return True
-        return now - self._last_fetch_at >= timedelta(seconds=MIN_INTERVAL_S)
+        elapsed = now - self._last_fetch_at
+        if elapsed >= timedelta(seconds=MIN_INTERVAL_S):
+            return True
+        # As in LibreWXR: an aligned cycle may only ever pull a fetch earlier by the
+        # settle margin, which shifts the phase without raising the rate.
+        settle = timedelta(seconds=publish_settle_s(SOURCE_CHMI))
+        return self._next_run_due(now) and elapsed >= timedelta(seconds=MIN_INTERVAL_S) - settle
+
+    def _next_run_due(self, now: datetime) -> bool:
+        """Whether a run newer than the one held should be published by now."""
+        if self._last is None or not self._last.series:
+            return False
+        issued = self._last.series[0].issued_at
+        return now >= issued + timedelta(seconds=MIN_INTERVAL_S + publish_settle_s(SOURCE_CHMI))
 
     def cached(self, now: datetime) -> FetchResult:
         """Re-present the last successful result, re-stated as stale once too old."""

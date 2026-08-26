@@ -60,11 +60,11 @@ from .const import (
     DOMAIN,
     EVENT_MOBILE_APP_ACTION,
     LEAD_TIME_MIN,
-    PUBLISH_SETTLE_S,
     SCHEDULE_MODE_DAILY,
     SLOT_MINUTES,
     SPRINT_LEAD_MIN,
     SPRINT_MINUTES,
+    publish_settle_s,
 )
 from .engine import DIRECTION_UNKNOWN, Search, build_consensus, evaluation_slots, recommend
 from .notifier import WalkNotifier, WalkTarget, walk_start_from_action
@@ -100,8 +100,16 @@ LEAD_TIME = timedelta(minutes=LEAD_TIME_MIN)
 SPRINT = timedelta(minutes=SPRINT_MINUTES)
 SPRINT_LEAD = timedelta(minutes=SPRINT_LEAD_MIN)
 
-#: Grace between a frame's stamp and asking for it (docs/DATA_SOURCES.md).
-PUBLISH_SETTLE = timedelta(seconds=PUBLISH_SETTLE_S)
+
+def publish_settle(source_id: str) -> timedelta:
+    """Grace between a frame's stamp and asking for it, per source.
+
+    Measured in phase 8: LibreWXR publishes up to 158 s after a frame's own
+    timestamp and CHMI within 20 s, so one shared number would have been too early
+    for one of them — and too early means the aligned cycle asks for a frame that is
+    not there yet (`const.PUBLISH_SETTLE_S`).
+    """
+    return timedelta(seconds=publish_settle_s(source_id))
 
 
 @dataclass(frozen=True)
@@ -510,17 +518,18 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         gets `None` and keeps the plain grid.
         """
         seconds = int(cadence.total_seconds())
-        issued = next(
+        reference = next(
             (
-                stamp
+                (source_id, stamp)
                 for source_id, stamp in self._issued.items()
                 if UPDATE_INTERVAL_S.get(source_id) == seconds
             ),
             None,
         )
-        if issued is None:
+        if reference is None:
             return None
-        due = issued + cadence + PUBLISH_SETTLE
+        source_id, issued = reference
+        due = issued + cadence + publish_settle(source_id)
         if due > now:
             return due
         # A publication we missed, or a source that has stopped: roll forward to the
@@ -595,9 +604,9 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
 __all__ = [
     "CYCLE",
     "LEAD_TIME",
-    "PUBLISH_SETTLE",
     "SPRINT",
     "SPRINT_LEAD",
     "WalkCoordinator",
     "WalkData",
+    "publish_settle",
 ]

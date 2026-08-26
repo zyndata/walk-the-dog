@@ -20,8 +20,6 @@ from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from homeassistant.helpers.storage import Store
-
 from .const import DOMAIN
 
 if TYPE_CHECKING:
@@ -151,6 +149,11 @@ class SampleCache:
 
     def attach_store(self, hass: HomeAssistant) -> None:
         """Wire up the HA Store used by `async_load` and `async_schedule_save`."""
+        # Imported here rather than at module level so the LRU above really is
+        # plain Python, as the docstring promises: `scripts/benchmark.py` drives the
+        # cache with no Home Assistant installed at all.
+        from homeassistant.helpers.storage import Store  # noqa: PLC0415
+
         self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
 
     async def async_load(self) -> None:

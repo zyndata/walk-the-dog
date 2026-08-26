@@ -39,6 +39,8 @@ This creates `.venv/` with Python 3.14, installs the pinned dev dependencies fro
 | `python scripts/install.py` | deploy `custom_components/walk_the_dog/` into a local HA instance |
 | `python scripts/make_chmi_fixtures.py` | re-record `tests/fixtures/chmi/` from opendata.chmi.cz |
 | `python scripts/make_branding.py` | redraw the icon and logo in `branding/` |
+| `python scripts/benchmark.py` | measure what one update cycle costs (offline, see below) |
+| `python scripts/measure_publish_lag.py` | measure how long after its stamp a frame is fetchable (**live requests**) |
 
 Tests use `pytest-homeassistant-custom-component` and recorded fixtures — they must pass with
 no network access.
@@ -81,6 +83,35 @@ docker run --rm --network none -v "%CD%:/repo" -w /repo ghcr.io/astral-sh/uv:pyt
 (`--network none` also proves the offline requirement.) Drop `--network none` on the first run so
 the dependencies can be downloaded, or bake them into an image. On the Linux machine, and in CI,
 `python scripts/test.py` runs directly.
+
+### Measuring performance
+
+Two tools, plus the suite itself. All three are how the numbers in
+[ARCHITECTURE.md](ARCHITECTURE.md) § Resource budget were obtained, and re-running them is how
+they are re-checked.
+
+```
+python scripts/benchmark.py                       # per-cycle CPU, memory, loop stalls, requests
+pytest tests/test_performance.py --log-cli-level=INFO   # a simulated day: requests, cycles, latency
+python scripts/measure_publish_lag.py --minutes 50      # live: how late each source publishes
+```
+
+`benchmark.py` needs only numpy, Pillow and aiohttp — it loads the adapters without starting Home
+Assistant — so it runs natively on Windows too, and inside any small container. The published
+figures were taken with one core and 512 MB, which is the shape of the weakest supported box:
+
+```
+docker run --rm --network none --cpus=1 --memory=512m -v "%CD%:/repo" -w /repo   ghcr.io/astral-sh/uv:python3.14-bookworm-slim   sh -c "uv venv /tmp/v && uv pip install --python /tmp/v/bin/python numpy pillow aiohttp && /tmp/v/bin/python scripts/benchmark.py"
+```
+
+It reports each profile's **cold** cycle (empty cache) and its **warm** ones separately, because
+they cost very different amounts, and `--no-warmup` folds Pillow's and numpy's one-off start-up
+into the first cycle — which is what a Home Assistant restart really does.
+
+`measure_publish_lag.py` is the only tool here that touches the network. It polls two small
+endpoints every 20 s and reports, per source, how long after a frame's own timestamp the frame
+could first be read. That is what `const.PUBLISH_SETTLE_S` is set from; run it for at least
+40 minutes to see several publications of each.
 
 ## Deploying into a test Home Assistant instance
 

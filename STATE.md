@@ -1243,11 +1243,151 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 8 — Performance pass
 
-- **Status:** not started
-- **Date:**
+- **Status:** done
+- **Date:** 2026-08-26
+- **Where it was measured:** no ARM board was available, so the target was a **container limited
+  to one CPU and 512 MB** (Debian, Python 3.14.2; host Intel i7-14700KF), which `PLAN.md` allows
+  and which reproduces the *memory* constraint of the weakest supported hardware exactly and the
+  *processor* one only by proportion. The benchmark was also run unmodified on `linux/arm64`
+  under emulation — it works there, and its timings are useless as a proxy (QEMU interprets every
+  NEON instruction and came out hundreds of times slower than the host), so none are quoted.
 - **What was built:**
+  - `scripts/benchmark.py` — drives the **real** adapters and the **real** engine over the
+    recorded fixtures and reports, per cycle: CPU time, peak RSS (sampled from `/proc/self/statm`
+    by a thread, because numpy and Pillow allocate where `tracemalloc` cannot see), the longest
+    event-loop stall, requests and bytes. Two profiles: Warszawa (one tile per frame, no CHMI)
+    and Bielsko-Biała (two tiles, inside the CHMI composite). It runs a *sequence* of cycles from
+    a cold cache at the real cadence, so cold and warm cycles are measured as they actually
+    occur, and it needs no Home Assistant at all.
+  - `scripts/measure_publish_lag.py` — the only tool here that touches the network: it watches
+    the two fast sources for an hour and reports how long after a frame's own timestamp the frame
+    can first be read. Stdlib only, so it runs with a bare Python on either machine.
+  - `tests/test_performance.py` — seven tests, including a **whole simulated day** of four walks
+    driven minute by minute through the real coordinator, the real adapters and their real
+    budgets, with only the network replaced. It counts requests per source per rolling hour,
+    cycles per hour, bytes, and the latency between a frame being published and being read; it
+    also asserts that a day with alerting off costs nothing at all. It reuses the benchmark's
+    fixture session rather than growing a second one.
+  - Tuning, all three items measurement-driven: the LibreWXR hourly ceiling now scales with the
+    disc's tile count, `PUBLISH_SETTLE_S` is per source and measured, and both radar adapters
+    will now fetch for a publication-aligned cycle.
+  - Docs: `docs/ARCHITECTURE.md` § Resource budget rewritten as measurements with a verdict per
+    line, § Coordinator scheduling updated for the per-source settle and the aligned fetch,
+    § Frame sampling corrected on what a LibreWXR frame path actually is;
+    `docs/DATA_SOURCES.md` § Request budget carries the measured day and the two corrected
+    ceilings; `docs/CONFIG.md` gained § What it costs to run (for users, in megabytes);
+    `docs/DEVELOPMENT.md` § Measuring performance says how to re-run all of it.
+  - **483 tests** (10 of them new), green offline (`docker run --network none`); `ruff` clean.
+
+- **Measured — per cycle** (one CPU, 512 MB; median over 16 cycles):
+
+  | | Warszawa | Bielsko-Biała |
+  |---|---|---|
+  | warm cycle | **0.7 ms** CPU, 2 requests | **4.9 ms**, 5 requests |
+  | cold cycle (empty cache) | 2.8 ms, 9 requests | 10.2 ms, 18 requests |
+  | first cycle after a restart | 8.1 ms, peak RSS +2.4 MB | 15.8 ms, +3.2 MB |
+  | peak RSS over a steady cycle | +224 KiB | +260 KiB |
+  | longest event-loop stall | 0.9 ms typical, 3.2 ms worst | 1.1 ms typical, 11.1 ms worst |
+  | cache after 16 cycles | 18 entries, 1 639 B persisted | 32 entries, 4 341 B |
+
+- **Measured — a day of four walks:** 156 requests and 365 KiB outside CHMI's box, 372 requests
+  and 7.9 MiB inside it; busiest hour 22 / 47 requests and 13 / 21 cycles; zero requests outside
+  a walk window and zero with alerting off. Every figure is inside the budget it was measured
+  against.
+
+- **Measured — publication lag** (live, 2026-08-26 18:47–19:42 UTC, 20 s polling): **CHMI 18.2 s
+  on almost every run and 68.1 s on its worst**; **LibreWXR 78–158 s**.
+
 - **Decisions:**
+  - **The budget stands; it was not revised.** Every ceiling in `docs/ARCHITECTURE.md` was met
+    with at least an order of magnitude to spare on processor and memory, so nothing was traded
+    away to fit. Two lines were *added* to the table rather than changed: the longest event-loop
+    stall, and daily bandwidth — both things the phase measured that nobody had put a number on.
+  - **LibreWXR's hourly ceiling is now a function of the geometry** (`hourly_cap(tile_count)`:
+    six cycles of an index poll plus up to two new frames, plus one cold start's back-fill —
+    25 requests for a one-tile disc, 44 for two). The flat 20/h was **binding**: at Bielsko-Biała
+    the adapter spent exactly 20 in the first hour of every window and then stopped sampling
+    frames, because that is what an exhausted budget makes it do. A disc that straddles a z=8
+    tile boundary is not a corner case — one of the two locations the project has tested with all
+    along is one, and so is any Warszawa disc of 10 km or more. A limit meant to be polite to the
+    provider was quietly shortening the forecast.
+  - **`PUBLISH_SETTLE` is per source and measured**: LibreWXR 180 s, CHMI 90 s. One shared 60 s
+    guess was below LibreWXR's real lag, and being early is not free — the aligned cycle then
+    asks for a frame that is not there yet. CHMI's own run-stamp offset (`PUBLICATION_LAG`, a
+    2-minute guess) is now the same constant: it is the same fact, and the correction makes every
+    CHMI cycle up to a minute fresher.
+  - **The publication alignment was inert, and now is not.** The coordinator woke early for a
+    frame, and the adapter then refused to fetch because its own "have ten minutes passed since I
+    last asked" gate had not: measured over a simulated day, **every** radar frame was read a
+    full 8 minutes after it was published. The adapters now also fetch when *a frame they do not
+    have is due* (`issued_at + interval + settle`), which locks the cadence onto the publications
+    after one short interval and cuts the median wait to **1 minute**. Requests rose 5 % (156 a
+    day, from 148) and every ceiling still holds.
+    - The alignment tests that existed passed throughout, because they drive the coordinator with
+      a fake fetch and could only ever prove that it *woke* on time. That is why the new test
+      measures the thing the user feels — how long a published frame waits to be looked at —
+      rather than when a timer fired.
+    - CHMI keeps the stricter form (never closer together than `interval − settle`) because it
+      publishes twice as fast as the cycle grid; reading every run would double its cost and its
+      bandwidth for freshness the sprint cadence already exists to collect. Left unguarded it did
+      exactly that in measurement: 468 requests a day instead of 372.
+  - **Image sampling stays in the event loop.** Offloading the decode to an executor was
+    considered and declined: the longest measured stall is 11.1 ms, on the first cycle after a
+    restart, against asyncio's own 100 ms threshold — and buying it back would mean threading an
+    executor through the registry into two adapters at the end of the project. The number that
+    would change the answer is a real one from ARM hardware; if a user's log ever shows Home
+    Assistant complaining that something is blocking the loop, this is the thing to change.
+  - **`cache.py` imports `Store` inside `attach_store()`**, so the module's own promise — "the LRU
+    is plain Python with no Home Assistant imports" — is now literally true, and the benchmark can
+    exercise the real cache with no Home Assistant installed.
+  - **The benchmark loads the integration without running its `__init__.py`**, by registering the
+    package under its own name with a synthetic module object. That is the one clever thing in
+    the tooling and it earns its keep: it is what lets the measurement run on Windows, in a
+    100 MB container, and on `linux/arm64`, none of which have Home Assistant.
+
+- **Deviations from `PLAN.md` (recorded before proceeding):**
+  1. **The phase changed behaviour in three places**, where the plan's task 2 says to tune "until
+     within budget" and the budget was already met. Each change came out of a measurement that
+     showed something documented was not true — a ceiling that shortened the forecast, a settle
+     margin below the real lag, an alignment that could not fetch — and leaving those in place
+     would have meant publishing a measured lie. No new feature was added.
+  2. **A real ARM device was not used** (none exists here). `PLAN.md` allows a constrained
+     container and asks for the choice to be recorded; it is recorded above, along with what the
+     container does and does not reproduce.
+
 - **Open questions carried forward:**
+  - **The processor figures still want one run on real hardware.** `scripts/benchmark.py` is in
+    the repo precisely so it can be run on the maintainer's own Home Assistant box (Advanced SSH
+    add-on, `python scripts/benchmark.py`); one run there replaces the order-of-magnitude
+    estimate in `docs/ARCHITECTURE.md` with a number. Worth doing before 1.0.0 is announced.
+  - **Two modules use Python 3.14-only syntax** — `except KeyError, IndexError:` without
+    parentheses (PEP 758), in `notifier.py` and `sources/met_norway.py`. It is a `SyntaxError` on
+    3.13, so the integration would fail to load for anyone whose Home Assistant still runs it.
+    Found because the first arm64 benchmark image shipped 3.13 and the import blew up.
+    `hacs.json` requires HA 2026.8.0, which is 3.14, so nothing is broken today — but the fix is
+    two pairs of brackets and the failure mode is total, so it is worth a decision in phase 9.
+  - **A re-issued LibreWXR nowcast frame is never re-read.** The frame path is
+    `/v2/radar/<the frame's own valid time>`, not a per-run identity as `docs/ARCHITECTURE.md`
+    used to claim, so the cache treats the 12:20 frame predicted at 12:00 and the improved one
+    predicted at 12:10 as the same thing. Correcting it outright would mean 7 tiles a cycle
+    instead of 1 and fits no sane budget; the honest options are to keep it (current choice, now
+    documented) or to re-read only the *observed* frame, which costs one extra tile a cycle and
+    would replace a ten-minute-old prediction with what actually happened. Worth deciding later,
+    with a false-alarm log to point at.
+  - **The worst frame still waits 8 minutes** — the first one of each window, before the cadence
+    locks onto the publications. Waking a window's first cycle on the alignment rather than on
+    the window start would fix it; it was left alone because that cycle is also the coldest one
+    and nothing is waiting on its frame yet.
+  - **The publication lag was measured once, over an hour.** LibreWXR's spread (78–158 s) is wide
+    enough that a seasonal or load-related shift is plausible. If the settle margin ever proves
+    too short, the symptom is an aligned cycle that fetches the frame it already has, and the
+    remedy is to re-run `scripts/measure_publish_lag.py` and raise the number.
+  - **p90 for the LibreWXR disc** (carried since phase 1: whether the percentile needs tuning
+    against real events) is still open. This phase measured cost, not accuracy, and there is no
+    false-alarm log to tune against yet.
+  - **The manual smoke test from phase 6 has still not been recorded here**, and neither has a
+    Polish speaker's read of the phase 7 strings. Unchanged.
+  - Everything else carried forward from phase 7 is unchanged.
 
 ## Phase 9 — Docs, release 1.0.0
 
