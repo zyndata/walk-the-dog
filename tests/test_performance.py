@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 import pytest
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
@@ -124,8 +125,8 @@ class Day:
 
 async def _simulate_day(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory, location: tuple[float, float]
-) -> Any:
-    """Run one whole day minute by minute, returning the session that served it.
+) -> Day:
+    """Run one whole day minute by minute, returning what it spent.
 
     A minute is the finest the coordinator ever asks for — its wakeups land on the
     ten-minute grid, on the five-minute sprint, and on a publication-aligned moment
@@ -135,7 +136,7 @@ async def _simulate_day(
     await hass.config.async_set_time_zone("UTC")
     entry = _entry(location)
     entry.add_to_hass(hass)
-    session = benchmark.FixtureSession(now_provider=lambda: _utcnow(hass))
+    session = benchmark.FixtureSession(now_provider=dt_util.utcnow)
     day = Day(session=session)
 
     with patch(
@@ -147,7 +148,7 @@ async def _simulate_day(
         await hass.async_block_till_done()
         # Every published update is one cycle — including the cheap ones that made
         # no request, which is what the cycle half of the resource budget counts.
-        entry.runtime_data.async_add_listener(lambda: day.cycles.append(_utcnow(hass)))
+        entry.runtime_data.async_add_listener(lambda: day.cycles.append(dt_util.utcnow()))
 
         moment = DAY_START
         while moment < DAY_END:
@@ -157,13 +158,6 @@ async def _simulate_day(
             await hass.async_block_till_done()
 
     return day
-
-
-def _utcnow(hass: HomeAssistant) -> datetime:
-    """The frozen clock, read the way the integration reads it."""
-    from homeassistant.util import dt as dt_util  # noqa: PLC0415
-
-    return dt_util.utcnow()
 
 
 def _source_of(url: str) -> str:
@@ -339,7 +333,7 @@ async def test_a_quiet_day_costs_nothing_at_all(
     await hass.config.async_set_time_zone("UTC")
     entry = _entry(benchmark.BIELSKO)
     entry.add_to_hass(hass)
-    session = benchmark.FixtureSession(now_provider=lambda: _utcnow(hass))
+    session = benchmark.FixtureSession(now_provider=dt_util.utcnow)
 
     with patch(
         "custom_components.walk_the_dog.coordinator.async_get_clientsession",

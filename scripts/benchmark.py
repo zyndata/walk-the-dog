@@ -100,9 +100,6 @@ cache_module = importlib.import_module("custom_components.walk_the_dog.cache")
 engine_module = importlib.import_module("custom_components.walk_the_dog.engine")
 sources_module = importlib.import_module("custom_components.walk_the_dog.sources")
 base_module = importlib.import_module("custom_components.walk_the_dog.sources.base")
-chmi_module = importlib.import_module("custom_components.walk_the_dog.sources.chmi")
-librewxr_module = importlib.import_module("custom_components.walk_the_dog.sources.librewxr")
-open_meteo_module = importlib.import_module("custom_components.walk_the_dog.sources.open_meteo")
 
 SampleCache = cache_module.SampleCache
 SampleGeometry = base_module.SampleGeometry
