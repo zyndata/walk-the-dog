@@ -1087,7 +1087,7 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - Tests: the Polish parity suite in `tests/test_strings.py` (every key present, nothing empty,
     nothing left in English, every `{placeholder}` preserved), the translated device name in
     `tests/test_entities.py`, and an end-to-end Polish notification in `tests/test_notifier.py`.
-    **13 new tests, 465 in total**, green with networking fully disabled
+    **14 new tests, 466 in total**, green with networking fully disabled
     (`docker run --network none`). `ruff` clean; hassfest run locally against the real action
     image and green, with no warnings.
 - **Decisions:**
