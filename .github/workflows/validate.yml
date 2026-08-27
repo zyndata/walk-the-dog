@@ -32,8 +32,5 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # `hacsjson` and `integration_manifest` were ignored only because the action
-          # reads repository files through the GitHub API and got nothing back while the
-          # repo was private. It is public now, so both run for real.
-          # `brands` stays ignored until the home-assistant/brands PR lands in phase 9.
-          ignore: brands
+          # No ignores. The last one, `brands`, went when the icon moved into
+          # `custom_components/walk_the_dog/brand/` — see docs/BRANDING.md.

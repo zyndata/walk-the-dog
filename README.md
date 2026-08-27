@@ -1,25 +1,8 @@
-<img src="branding/custom_integrations/walk_the_dog/logo.png" alt="Walk the dog" width="420">
+<img src="custom_components/walk_the_dog/brand/logo.png" alt="Walk the dog" width="420">
 
 # Walk the dog 🐕🌧️
 
 *Polish: „Idź już z psem"*
-
-> [!WARNING]
-> **Work in progress — pre-1.0.** The current release is
-> [`0.8.0`](https://github.com/zyndata/walk-the-dog/releases/latest); the integration is being
-> built phase by phase in the open, and every release below `1.0.0` is a development release.
->
-> - **Works today:** installation, the full setup wizard (location, walk schedule, alert
->   settings), the options flow, the whole prediction loop — the recommendation sensor,
->   the alerting switch, push notifications and the `walk_the_dog_alert` event — full
->   English and Polish localization, and the measured performance budget.
-> - **Not yet:** the [home-assistant/brands](https://github.com/home-assistant/brands)
->   submission (phase 9), until which Home Assistant still shows a placeholder icon rather
->   than the one in [branding/](branding/). Real-world accuracy is untested.
->
-> Breaking changes land without warning and there is no upgrade path between development
-> versions. See [CHANGELOG.md](CHANGELOG.md) for what has landed and [STATE.md](STATE.md)
-> for the phase currently in progress.
 
 A [Home Assistant](https://www.home-assistant.io/) custom integration that predicts whether it
 will rain during your recurring dog walks — and, when a walk is at risk, proactively suggests
@@ -68,31 +51,43 @@ when the consensus says your walk window is wet.
 
 ### HACS (recommended)
 
-1. In HACS, add this repository as a custom repository (category: *Integration*), or install
-   it directly from the HACS store once it is included there.
-2. Install **Walk the dog** and restart Home Assistant.
-3. Go to **Settings → Devices & services → Add integration** and search for **Walk the dog**.
+1. In HACS, search for **Walk the dog** and download it. If it is not in the store yet, add
+   `https://github.com/zyndata/walk-the-dog` as a custom repository (category: *Integration*)
+   first: **⋮ → Custom repositories**.
+2. Restart Home Assistant.
+3. **Settings → Devices & services → Add integration**, search for **Walk the dog**, and go
+   through the wizard.
 
 ### Manual
 
-Copy `custom_components/walk_the_dog/` into the `custom_components/` folder of your Home
-Assistant configuration directory and restart Home Assistant.
+1. Download the [latest release](https://github.com/zyndata/walk-the-dog/releases/latest).
+2. Copy `custom_components/walk_the_dog/` into the `custom_components/` folder of your Home
+   Assistant configuration directory, creating it if it does not exist.
+3. Restart Home Assistant, then add the integration as in step 3 above.
 
-### Development period: manual install
-
-While developing, deploy your working copy into a local Home Assistant instance either by
-copying the folder as above, by symlinking it
-(`ln -s /path/to/repo/custom_components/walk_the_dog /path/to/ha-config/custom_components/walk_the_dog`),
-or with the repo's deploy script (`python scripts/install.py`, target path configured in
-`.env` — see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)).
+Working on the integration itself is a different exercise — see
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Configuration
 
-Everything is configured from the UI — a three-step wizard (location, walk schedule,
-parameters) plus an options flow for later changes. Three schedule modes are supported: same
-times every day, weekday/weekend split, or a full per-day schedule.
+Everything is configured from the UI; nothing goes in `configuration.yaml`. The wizard asks
+three things, and the options flow lets you change any of them later.
 
-See [docs/CONFIG.md](docs/CONFIG.md) for every option and its semantics.
+1. **Where you walk** — the home location and the alert radius, the disc around it that a
+   forecast has to be dry over. Pre-filled from Home Assistant's own location.
+2. **When you walk** — one of three schedule modes: the same times every day, a
+   weekday/weekend split, or a full per-day schedule; plus how long a walk takes.
+3. **How you want to be told** — which phone to notify, how far ahead of a walk an alert may
+   arrive, how much earlier or later the integration may suggest going, and optionally a
+   person or device tracker whose absence mutes the alert.
+
+What it creates: a **recommendation sensor** for the next walk (risk, confidence, suggested
+time, per-source breakdown), a **binary sensor** that is on while a walk window is being
+watched, and a **switch** that turns alerting off entirely. Notifications carry an *Already
+went* button, and a `walk_the_dog_alert` event fires alongside them for your own automations.
+
+See [docs/CONFIG.md](docs/CONFIG.md) for every option and its semantics, including
+[what it costs to run](docs/CONFIG.md#what-it-costs-to-run) in requests and megabytes.
 
 ## How it works
 
@@ -102,6 +97,20 @@ window around each scheduled walk, the integration samples each source's precipi
 forecast over a disc around your location, normalizes everything to a common mm/h scale,
 computes a weighted-vote risk and confidence per 10-minute slot, evaluates your walk window,
 and searches for the nearest dry window of the full walk duration.
+
+## Maturity
+
+`1.0.0` is feature-complete: everything described above is built, tested and measured. What it
+is **not** is field-proven — the forecasts have been checked against recorded data, not against
+a season of actual weather, and nobody has yet counted how often the advice was right. If it
+tells you to wait and the rain never comes, that is worth an
+[issue](https://github.com/zyndata/walk-the-dog/issues); tuning the consensus needs real
+misses to tune against.
+
+Home Assistant shows a placeholder icon for the integration in the **HACS store listing** only
+— HACS does not yet read the brand images an integration ships with itself
+([hacs/integration#5171](https://github.com/hacs/integration/issues/5171)). Everywhere inside
+Home Assistant the real icon appears.
 
 ## Data sources & attribution
 

@@ -9,8 +9,9 @@ Everything is drawn at four times the delivered size and reduced with LANCZOS:
 that antialiases the badge corners and the paw edges far better than drawing them
 at final size does, at no cost to a file that is generated once and committed.
 
-Output goes to `branding/custom_integrations/walk_the_dog/`, which is exactly the
-folder that gets copied into a home-assistant/brands pull request (phase 9).
+Output goes to `custom_components/walk_the_dog/brand/`, which is where Home
+Assistant reads a custom integration's own brand images from (2026.3 and newer).
+See docs/BRANDING.md.
 """
 
 from __future__ import annotations
@@ -21,9 +22,9 @@ from typing import NamedTuple
 from PIL import Image, ImageDraw, ImageFont
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TARGET = REPO_ROOT / "branding" / "custom_integrations" / "walk_the_dog"
+TARGET = REPO_ROOT / "custom_components" / "walk_the_dog" / "brand"
 
-#: Delivered icon sizes, fixed by home-assistant/brands: square, 256 and 512.
+#: Delivered icon sizes, fixed by the brand-image specification: square, 256 and 512.
 ICON_SIZE = 256
 ICON_2X_SIZE = 512
 

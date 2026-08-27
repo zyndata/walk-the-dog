@@ -1431,8 +1431,138 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 9 — Docs, release 1.0.0
 
-- **Status:** not started
-- **Date:**
+- **Status:** done up to the release itself; the tags and the HACS submission are the
+  maintainer's to push (see *What is left*).
+- **Date:** 2026-08-27
 - **What was built:**
+  - **The brand images moved into the integration.** They now live in
+    `custom_components/walk_the_dog/brand/` — the six PNGs are byte-identical to the ones phase 7
+    drew, only their path changed — and `scripts/make_branding.py` writes them there. The
+    `branding/` folder is gone; its README became `docs/BRANDING.md`, rewritten around the
+    mechanism that actually applies.
+  - **HACS validation runs with no ignores.** `ignore: brands` is out of
+    `.github/workflows/validate.yml`.
+  - **`hacs.json` gained `"country": ["PL"]`** — a HACS default-inclusion requirement for a
+    repository that targets one region.
+  - **The work-in-progress banners are gone** from `README.md` and `info.md`. Installation is
+    written for a released version instead of a development checkout; the configuration section
+    now says what the wizard asks and what entities appear; a short *Maturity* section keeps what
+    was honest in the banner (measured, not field-proven) without the warning frame. `info.md`
+    ends on the attribution, as a store page should.
+  - **The Python 3.13 syntax problem is fixed**, and cannot come back:
+    `custom_components/walk_the_dog/notifier.py` and `sources/met_norway.py` use parenthesized
+    `except` tuples again, `tests/test_syntax_floor.py` parses every shipped module with
+    `ast.parse(feature_version=(3, 13))`, and `pyproject.toml` sets ruff's `target-version` to
+    `py313`.
+  - `manifest.json` is `1.0.0`; `CHANGELOG.md` has its `1.0.0` section and its link references.
+  - **512 tests** (22 of them new — the 21-module syntax floor and its coverage guard), green
+    offline in the container; `ruff check` and `ruff format --check` clean.
+
+- **Secrets audit, re-run over the 12 commits added since 2026-08-25** (`1f35ec7..c6c962d`),
+  same four steps as the audit recorded under *Repository made public*:
+  1. files ever added matching `.env`, `settings.local.json`, `*.pem`, `*.key`, `*.p12`, `id_rsa`,
+     `secret`, `credential`, `token` — **none**;
+  2. token-shaped strings in every added line (`gh[pousr]_…`, `eyJ…` JWTs, `AKIA…`, `xox[baprs]-…`,
+     `api_key=…`, `Bearer …`, `password=…`) — **none**;
+  3. IPv4 addresses, `homeassistant.local`, `*.duckdns.org`, `*.ui.nabu.casa` — **none**;
+     e-mail addresses in added lines — **none** (the only hits are `@pytest` and `@2x.png`);
+  4. every coordinate added since is a named public place or published grid metadata, checked one
+     by one: Bielsko-Biała 49.8224/19.0584 and Warszawa 52.2297/21.0122 in `scripts/benchmark.py`
+     (the file says so in a comment), Praha 50.0755/14.4378 in `scripts/make_chmi_fixtures.py`,
+     Brno / Ostrava / Kraków / Gdańsk in `tests/test_chmi.py`, the CZRAD image and data rectangles
+     and the two Czech radar sites in `sources/chmi.py` (from CHMI's published radar description),
+     and Open-Meteo's grid-snapped echoes in the fixtures. **No personal coordinates.**
+
+  Clean. Nothing was found and nothing had to be removed.
+
 - **Decisions:**
+  - **The `home-assistant/brands` pull request was not opened, because it cannot be.** Since Home
+    Assistant 2026.3 a custom integration ships its own brand images in a `brand/` folder next to
+    `manifest.json`, and the brands repository now runs
+    `.github/workflows/close-new-custom-integrations.yml`, which closes every pull request that
+    adds a `custom_integrations/*` folder with a pointer to that mechanism. Every recent
+    custom-integration PR there is closed unmerged (#11050, #11031, #11030, #11028 …). Phase 7
+    prepared the PR contents against a route that stopped existing; the images are unchanged and
+    the new route is strictly better — no review queue, and the icon works the moment the
+    integration is installed.
+  - **This is what let the last HACS ignore go, and it is a real pass, not a suppression.** HACS's
+    `brands` check (`custom_components/hacs/validate/brands.py`) looks for
+    `custom_components/<domain>/brand/icon.png` first and only queries the brands repository when
+    there is none. So the phase's acceptance criterion — *HACS validation green with no ignores* —
+    is met without the pull request that criterion assumed.
+  - **One place will still show a placeholder: the HACS store listing.** The HACS frontend fetches
+    icons from `data-v2.hacs.xyz` and has no fallback to Home Assistant's local brands proxy —
+    [hacs/integration#5171](https://github.com/hacs/integration/issues/5171),
+    [#5223](https://github.com/hacs/integration/issues/5223). Nothing in this repository can fix
+    it; `README.md` § Maturity and `docs/BRANDING.md` say so rather than leaving the user to
+    wonder why the icon is missing in one screen and present in every other.
+  - **The syntax floor is Python 3.13, one release below the declared minimum.** The open question
+    from phase 8 asked for a decision; this is it. `hacs.json` requires HA 2026.8 (which is 3.14),
+    so nothing was broken today — but the README documents a manual install, that route has no
+    version gate whatsoever, and the failure mode is a `SyntaxError` at import: no config flow, no
+    entities, a traceback. Two pairs of brackets against a total failure is not a trade.
+  - **Ruff's `target-version` had to move with it.** The formatter is what removed those brackets:
+    at `py314` it rewrites `except (A, B):` to `except A, B:` on every run, so fixing the two
+    modules without fixing the setting would have undone itself at the next `scripts/format.py`.
+    The test would have caught it; the setting means it never happens.
+  - **No `zip_release`, and the open question that asked for it rested on a wrong premise.** HACS
+    does not install "the tag's source tree": `HacsIntegrationRepository` sets
+    `content.path.remote` to `custom_components/<domain>` and downloads only that directory, so
+    `tests/`, `docs/`, `scripts/` and the fixtures never reach a user's machine. There is nothing
+    for a zip asset to trim. It would add a build step to every release in exchange for fewer
+    GitHub API calls during a download, which is not a problem anyone has reported.
+  - **`branding/` was deleted rather than kept.** Its whole stated purpose was to hold "the
+    ready-made contents of the home-assistant/brands pull request" in the brands repository's own
+    layout. That layout is now meaningless, and keeping the images in two places invites them to
+    disagree. The design notes were worth keeping and are `docs/BRANDING.md`.
+  - **`"country": ["PL"]`, accepting that it narrows discovery.** HACS shows a country-tagged
+    repository to users who have set that country. The integration's sources are chosen for
+    Poland and only Poland is verified, so the tag is true; and the HACS inclusion requirements
+    ask for it explicitly when a repository targets a region.
+
+- **Deviations from `PLAN.md` (recorded before proceeding):**
+  1. **Task 5's brands half is not deferred — it is impossible**, and was replaced by the
+     mechanism above. The HACS default-inclusion half is unchanged and is described under
+     *What is left*.
+  2. **`hacs.json` gained a key the plan does not mention** (`country`), because the HACS
+     inclusion requirements ask for it and the plan predates them.
+  3. **Two shipped modules and one lint setting changed**, which task 1 does not cover. Both come
+     out of an open question phase 8 explicitly left for this phase to decide.
+  4. **No screenshots.** Task 1 asks for screenshots from a real Home Assistant instance; this
+     session has none and cannot take them. Everything else in task 1 is done. See
+     *What is left*.
+  5. **The post-phase-8 versioning work was still uncommitted** when this phase started — written
+     on 2026-08-27, never committed or pushed. It was committed unchanged as `c6c962d` before any
+     phase 9 work began, so `main` now matches what `STATE.md` had already recorded.
+
+- **What is left (for the maintainer, on the live machine):**
+  1. **`v0.8.0` and `v1.0.0` are not tagged.** Both changelog sections are dated and
+     `python scripts/release.py` passes; `python scripts/release.py --tag` pushes the tag for
+     whatever `manifest.json` currently says, and the **Release** workflow publishes the GitHub
+     release from that changelog section. `v0.8.0` wants tagging at `c6c962d` first, or the
+     `[0.8.0]` link at the bottom of `CHANGELOG.md` points at nothing.
+  2. **The HACS default-inclusion pull request** to [hacs/default](https://github.com/hacs/default)
+     — one line added to the `integration` file, alphabetically, from a branch that is not
+     `master`, submitted by the repository owner. Its precondition is a published release, so it
+     follows the tag. Everything else it checks is already true: public, description, issues
+     enabled, topics (11 of them), valid `hacs.json`, valid manifest, brand assets, HACS action
+     and hassfest green with no ignores.
+  3. **Screenshots** in `README.md` — the setup wizard, the sensor, a notification on a phone.
+
 - **Open questions carried forward:**
+  - **The processor figures still want one run on real hardware.** Unchanged from phase 8:
+    `python scripts/benchmark.py` on the maintainer's own Home Assistant box replaces the
+    order-of-magnitude estimate in `docs/ARCHITECTURE.md` with a number. Worth doing before 1.0.0
+    is announced anywhere.
+  - **A re-issued LibreWXR nowcast frame is never re-read.** Unchanged from phase 8: keep it, or
+    re-read only the observed frame for one extra tile a cycle. Wants a false-alarm log.
+  - **The worst frame still waits 8 minutes** — the first of each window, before the cadence locks
+    on. Unchanged.
+  - **The publication lag was measured once, over an hour.** Unchanged.
+  - **p90 for the LibreWXR disc** — still open, still needs real events to tune against. This is
+    now the same question as the *Maturity* note in `README.md`: 1.0.0 ships measured but not
+    field-proven, and the first thing 1.0.x should collect is when the advice was wrong.
+  - **The manual smoke test from phase 6 has still not been recorded here**, and neither has a
+    Polish speaker's read of the phase 7 strings. Unchanged.
+  - **The maintainer's radar-image-in-the-alert idea** is still a feasibility note only, not in
+    `PLAN.md`. Nothing implemented.

@@ -1,7 +1,10 @@
 # Tool configuration only — this repo is a HA custom integration, not a Python package.
 
 [tool.ruff]
-target-version = "py314"
+# 3.13, not the 3.14 the dev environment runs: shipped code has to parse one release
+# below the minimum Home Assistant, and the formatter is what put 3.14-only `except`
+# syntax into two modules in the first place. See tests/test_syntax_floor.py.
+target-version = "py313"
 line-length = 100
 # Don't reformat Python code blocks inside the docs — their comment alignment is deliberate
 extend-exclude = ["*.md"]

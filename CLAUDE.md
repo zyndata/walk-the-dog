@@ -18,7 +18,8 @@ This file holds only general working rules. Everything else is in dedicated docu
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — module layout, data flow, sampling, consensus scoring, resource budget.
 - [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) — evaluated weather sources, comparison table, request budget, fallback strategy.
 - [docs/CONFIG.md](docs/CONFIG.md) — all user-facing configuration options and their semantics.
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — dev environment setup (Windows + Linux), test/deploy instructions (created in phase 2).
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — dev environment setup (Windows + Linux), test/deploy/release instructions (created in phase 2).
+- [docs/BRANDING.md](docs/BRANDING.md) — the icon and logo: where they live, how they are drawn, what they must satisfy.
 
 ## Tech stack
 

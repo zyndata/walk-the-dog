@@ -234,7 +234,7 @@ def _http_date(value: str | None) -> datetime | None:
         return None
     try:
         parsed = parsedate_to_datetime(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)

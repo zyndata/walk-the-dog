@@ -38,7 +38,7 @@ This creates `.venv/` with Python 3.14, installs the pinned dev dependencies fro
 | `python scripts/test.py [pytest args]` | run the test suite (e.g. `python scripts/test.py -k manifest`) |
 | `python scripts/install.py` | deploy `custom_components/walk_the_dog/` into a local HA instance |
 | `python scripts/make_chmi_fixtures.py` | re-record `tests/fixtures/chmi/` from opendata.chmi.cz |
-| `python scripts/make_branding.py` | redraw the icon and logo in `branding/` |
+| `python scripts/make_branding.py` | redraw the icon and logo in `custom_components/walk_the_dog/brand/` |
 | `python scripts/benchmark.py` | measure what one update cycle costs (offline, see below) |
 | `python scripts/measure_publish_lag.py` | measure how long after its stamp a frame is fetchable (**live requests**) |
 
@@ -156,8 +156,7 @@ under the integration, HACS shows it in the store, and the git tag mirrors it. N
 version from the git history — without a release, HACS falls back to naming an install by its
 commit hash, which means nothing to the person reading it.
 
-1. Bump `version` in `manifest.json` (SemVer; everything below `1.0.0` is a development
-   release, and `1.0.0` is phase 9).
+1. Bump `version` in `manifest.json` (SemVer).
 2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a fresh empty
    `## [Unreleased]` above it, and update the link references at the bottom of the file.
 3. `python scripts/release.py` — checks that the two agree. `tests/test_release.py` checks the
@@ -178,13 +177,18 @@ beta versions, so the update would silently not appear.
   Assistant releases; its version also pins the `homeassistant` package used in tests).
 - The `ruff` pin must match the `rev` in `.pre-commit-config.yaml`.
 - The Python version for the venv is pinned in `scripts/_env.py` (`PYTHON_VERSION`).
+- **Shipped code has a syntax floor of Python 3.13**, one release below what the minimum Home
+  Assistant runs. A newer grammar is not a degraded feature — the integration fails to import
+  and the user gets a traceback instead of a config flow, and the manual install route has no
+  version gate at all. `tests/test_syntax_floor.py` parses every shipped module against that
+  floor; it is the only thing that catches it, because the dev interpreter is 3.14.
 
 ## CI
 
 Every push and PR runs two workflows:
 
-- **Validate** — `hassfest` (Home Assistant manifest/translations checks) and HACS validation
-  (`ignore: brands` until the brands PR is submitted in phase 9).
+- **Validate** — `hassfest` (Home Assistant manifest/translations checks) and HACS validation,
+  which runs with no ignores.
 - **CI** — `scripts/setup.py` + `scripts/lint.py` + `scripts/test.py`, i.e. exactly what you
   run locally.
 

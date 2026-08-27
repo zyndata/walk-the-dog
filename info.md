@@ -1,16 +1,5 @@
 # Walk the dog 🐕🌧️
 
-> ### ⚠️ Work in progress — pre-1.0
->
-> Every release below `1.0.0` is a development release. **Works today:** installation, the
-> setup wizard, the options flow, the whole prediction loop — recommendation sensor, alerting
-> switch, push notifications and the custom event — full English and Polish localization, and
-> the measured performance budget. **Not yet:** the brands submission, until which Home
-> Assistant shows a placeholder icon. Real-world accuracy is untested.
->
-> Breaking changes land without warning, and there is no upgrade path between development
-> versions.
-
 **Will it rain on your dog walk?** This integration watches precipitation nowcasts from
 multiple independent weather sources covering Poland, scores how much they agree, and — when
 one of your recurring walk times is at risk — proactively suggests going out **earlier or
@@ -27,6 +16,14 @@ later** so the walk stays dry.
   around your location, stays within strict request and memory budgets.
 
 Fully localized in Polish — the integration calls itself "Idź już z psem" there.
+
+Everything is set up from the UI: a three-step wizard (where you walk, when you walk, how you
+want to be told) and an options flow for later changes. Requires Home Assistant 2026.8 or newer
+and a location in Poland.
+
+`1.0.0` is feature-complete and measured, but not yet field-proven — the advice has been tested
+against recorded data, not against a season of real weather. Reports of a wrong call are
+welcome on the [issue tracker](https://github.com/zyndata/walk-the-dog/issues).
 
 Weather data: LibreWXR (EUMETNET OPERA composite), Open-Meteo (DWD ICON-EU, KNMI HARMONIE
 AROME), MET Norway, and — regionally — the Czech Hydrometeorological Institute's CZRAD composite.

@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-27
+
+The first stable release. Nothing about how the integration predicts rain changed here — that
+was finished and measured in the releases below. This one makes it installable, gives it a face,
+and takes down the sign saying it is not ready.
+
+### Added
+
+- **The icon and logo now actually appear.** They ship inside the integration, in
+  `custom_components/walk_the_dog/brand/`, which is where Home Assistant has read a custom
+  integration's own brand images from since 2026.3 — no submission anywhere, no waiting for a
+  pull request to be merged. The images themselves are the ones drawn in `0.8.0`, unchanged.
+  *(One place still shows a placeholder: the HACS store listing, which does not yet read brand
+  images that ship with an integration —*
+  *[hacs/integration#5171](https://github.com/hacs/integration/issues/5171).)*
+
+- **A `country` marker in `hacs.json`.** The integration's sources cover Poland and only Poland
+  is verified, so HACS now files it under `PL` and shows it to people who have said that is
+  where they are.
+
+### Fixed
+
+- **The integration would have failed to load on Python 3.13** — outright, with a syntax error
+  at import and no working config flow, on any Home Assistant still running it. Two `except`
+  clauses used a form of the syntax that only exists from Python 3.14. Home Assistant 2026.8,
+  the declared minimum, runs 3.14 and was never affected; a manual install has no version gate,
+  and this was a total failure with an unhelpful message. `tests/test_syntax_floor.py` now
+  parses every shipped module against the 3.13 grammar so it cannot come back.
+
+### Changed
+
+- **The README and the HACS description no longer open with a warning.** The
+  work-in-progress banners are gone, installation is written for the released version rather
+  than for a development checkout, and the configuration section now says what the wizard asks
+  and what entities appear. What was honest in the banners has not been dropped: a short
+  *Maturity* section still says plainly that the advice is measured but not yet field-proven,
+  and asks for reports of a wrong call.
+
+- **HACS validation runs with no ignored checks.** The last ignore, `brands`, existed only
+  because the icon was not published anywhere HACS could see it. It now is.
+
 ## [0.8.0] - 2026-08-27
 
 First tagged release. Everything below shipped unversioned on `main` before this tag; it is
@@ -95,7 +136,7 @@ showing a commit hash.
 
 - **An icon and a logo.** A rain-blue badge with a paw print under three falling drops, drawn by
   `scripts/make_branding.py` so a colour or a proportion is a code change rather than a binary
-  edit. They live in [`branding/`](branding/) in exactly the layout the
+  edit. They live in [`branding/`](custom_components/walk_the_dog/brand/) in exactly the layout the
   [home-assistant/brands](https://github.com/home-assistant/brands) pull request needs. **Home
   Assistant will keep showing a placeholder icon until that pull request is submitted and merged**
   — that is phase 9; everything it needs is ready.
@@ -481,5 +522,6 @@ way; all of it is written up in `docs/DATA_SOURCES.md` § CHMI:
 - RainViewer is no longer a candidate: its public API serves past radar frames only, and the
   live `radar.nowcast` array is empty.
 
-[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.0.0
 [0.8.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v0.8.0

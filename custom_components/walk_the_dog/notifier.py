@@ -423,7 +423,7 @@ def _lookup(texts: dict[str, str], key: str, placeholders: dict[str, str]) -> st
         return key
     try:
         return template.format(**placeholders)
-    except KeyError, IndexError:
+    except (KeyError, IndexError):
         # A translation with a placeholder we do not supply must not break the alert.
         return template
 
