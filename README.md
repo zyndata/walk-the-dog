@@ -12,6 +12,15 @@ Instead of trusting a single weather app, it combines ready-made precipitation n
 multiple independent sources covering Poland, scores how much they agree, and only alerts you
 when the consensus says your walk window is wet.
 
+## What it looks like
+
+Two real alerts, three hours apart. The first moves the walk forward; the second holds it
+back — and says plainly that the radar cannot see that far yet, so the time may still change.
+
+<img src="docs/images/notification-earlier.png" alt="Home Assistant notification titled Walk the dog: rain is expected around 18:00, set off at 17:40 instead — 20 minutes earlier — and the whole 15-minute walk should stay dry, back home by 17:55. An Already went button sits below." width="560">
+
+<img src="docs/images/notification-wait.png" alt="Home Assistant notification titled Walk the dog: rain is expected around 21:15, wait until 21:40 — 25 minutes later — and the whole 15-minute walk should stay dry, back home by 21:55. The radar does not reach that far ahead yet, so this is a model estimate, still being watched. An Already went button sits below." width="560">
+
 ## Features
 
 - **Consensus, not a guess** — a radar nowcast (EUMETNET OPERA via LibreWXR) plus two

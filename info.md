@@ -5,6 +5,8 @@ multiple independent weather sources covering Poland, scores how much they agree
 one of your recurring walk times is at risk — proactively suggests going out **earlier or
 later** so the walk stays dry.
 
+<img src="https://raw.githubusercontent.com/zyndata/walk-the-dog/main/docs/images/notification-earlier.png" alt="Home Assistant notification titled Walk the dog: rain is expected around 18:00, set off at 17:40 instead — 20 minutes earlier — and the whole 15-minute walk should stay dry, back home by 17:55." width="520">
+
 - Consensus of independent sources (radar nowcast + two NWP models, with automatic failover),
   never a single provider's guess. Around south-western Poland a second radar — the Czech CHMI
   composite — joins in automatically; elsewhere it stays silent.
