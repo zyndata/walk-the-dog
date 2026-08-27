@@ -1431,8 +1431,8 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 9 — Docs, release 1.0.0
 
-- **Status:** done up to the release itself; the tags and the HACS submission are the
-  maintainer's to push (see *What is left*).
+- **Status:** done; the HACS default-inclusion pull request is the maintainer's to open
+  (see *What is left*).
 - **Date:** 2026-08-27
 - **What was built:**
   - **The brand images moved into the integration.** They now live in
@@ -1535,19 +1535,25 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
      on 2026-08-27, never committed or pushed. It was committed unchanged as `c6c962d` before any
      phase 9 work began, so `main` now matches what `STATE.md` had already recorded.
 
+- **Released.** Both tags are pushed and the **Release** workflow published both from their own
+  `CHANGELOG.md` section, neither marked pre-release:
+  - [`v0.8.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v0.8.0) at `c6c962d` — tagged
+    after the fact so the `[0.8.0]` link at the bottom of `CHANGELOG.md` resolves, and so the
+    development period has a version number of its own.
+  - [`v1.0.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.0.0) at `97a5f6a` — the
+    phase's deliverable. **CI**, **Validate** (hassfest + HACS, no ignores) and **Release** all
+    green on that commit.
+
 - **What is left (for the maintainer, on the live machine):**
-  1. **`v0.8.0` and `v1.0.0` are not tagged.** Both changelog sections are dated and
-     `python scripts/release.py` passes; `python scripts/release.py --tag` pushes the tag for
-     whatever `manifest.json` currently says, and the **Release** workflow publishes the GitHub
-     release from that changelog section. `v0.8.0` wants tagging at `c6c962d` first, or the
-     `[0.8.0]` link at the bottom of `CHANGELOG.md` points at nothing.
-  2. **The HACS default-inclusion pull request** to [hacs/default](https://github.com/hacs/default)
+  1. **The HACS default-inclusion pull request** to [hacs/default](https://github.com/hacs/default)
      — one line added to the `integration` file, alphabetically, from a branch that is not
-     `master`, submitted by the repository owner. Its precondition is a published release, so it
-     follows the tag. Everything else it checks is already true: public, description, issues
-     enabled, topics (11 of them), valid `hacs.json`, valid manifest, brand assets, HACS action
-     and hassfest green with no ignores.
-  3. **Screenshots** in `README.md` — the setup wizard, the sensor, a notification on a phone.
+     `master`, submitted by the repository owner. Everything it checks is already true: public,
+     description, issues enabled, topics (11 of them), valid `hacs.json`, valid manifest, brand
+     assets, a published release, HACS action and hassfest green with no ignores. Deliberately
+     left un-opened this session — it is a pull request against someone else's repository, in
+     the maintainer's name.
+  2. **Screenshots** in `README.md` — the setup wizard, the sensor, a notification on a phone.
+     The only part of task 1 this session could not do.
 
 - **Open questions carried forward:**
   - **The processor figures still want one run on real hardware.** Unchanged from phase 8:
