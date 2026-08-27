@@ -125,11 +125,11 @@ the repository instead — this is also the closest thing to how real users will
 1. In HACS: **⋮ → Custom repositories**, paste `https://github.com/zyndata/walk-the-dog`,
    category **Integration**, **Add**.
 2. Find **Walk the dog**, **Download**, then restart Home Assistant.
-3. To pick up new work: push to `main`, then **Redownload** in HACS and restart.
+3. To pick up new work: publish a release (below), then **Redownload** in HACS and restart.
 
-There are no releases yet, so HACS installs from the default branch — every push to `main` is
-immediately installable. Once `v1.0.0` is tagged in phase 9, HACS switches to installing
-releases.
+HACS installs the newest release and shows its version number. To test an unreleased commit,
+pick **Redownload → show all versions → main** — HACS then names the install by its commit
+hash, which is exactly what the version numbers exist to avoid.
 
 ### Local config folder (a container or Core install on the same machine)
 
@@ -149,6 +149,28 @@ start it, authenticate to `\\homeassistant` from the dev machine first (otherwis
 reports the directory as missing), then set `HA_CONFIG_DIR=\\homeassistant\config`. The `.env`
 parser keeps backslashes literally — no quoting or escaping.
 
+## Releasing
+
+One version number, in `custom_components/walk_the_dog/manifest.json`. Home Assistant shows it
+under the integration, HACS shows it in the store, and the git tag mirrors it. Nothing derives a
+version from the git history — without a release, HACS falls back to naming an install by its
+commit hash, which means nothing to the person reading it.
+
+1. Bump `version` in `manifest.json` (SemVer; everything below `1.0.0` is a development
+   release, and `1.0.0` is phase 9).
+2. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a fresh empty
+   `## [Unreleased]` above it, and update the link references at the bottom of the file.
+3. `python scripts/release.py` — checks that the two agree. `tests/test_release.py` checks the
+   same thing in CI, so a forgotten bump fails the build rather than reaching a user.
+4. Commit, push, then `python scripts/release.py --tag` — it refuses a dirty tree or an
+   existing tag, then pushes `vX.Y.Z`.
+5. The **Release** workflow picks the tag up, re-checks the tag against the manifest, and
+   publishes a GitHub release whose notes are that changelog section. HACS offers it within
+   the hour.
+
+Never publish a release as a *pre-release*: HACS hides those unless the user has opted into
+beta versions, so the update would silently not appear.
+
 ## Versions and pins
 
 - `requirements-dev.txt` pins exact versions. `pytest` must stay at the exact version
@@ -165,6 +187,9 @@ Every push and PR runs two workflows:
   (`ignore: brands` until the brands PR is submitted in phase 9).
 - **CI** — `scripts/setup.py` + `scripts/lint.py` + `scripts/test.py`, i.e. exactly what you
   run locally.
+
+A third workflow, **Release**, runs only on a `v*` tag (see [Releasing](#releasing)). It is the
+only one with write permission, and the only one that publishes anything.
 
 ## Git workflow between machines
 

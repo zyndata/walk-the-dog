@@ -1390,6 +1390,45 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     Polish speaker's read of the phase 7 strings. Unchanged.
   - Everything else carried forward from phase 7 is unchanged.
 
+## Post-phase-8 change — versioning, and a dead attribution link
+
+- **Status:** done (release metadata, workflow, tests and docs; the `v0.8.0` tag is the
+  maintainer's to push)
+- **Date:** 2026-08-27
+- **Why it exists:** not a phase. Two reports from the maintainer after updating the integration
+  on the live instance. **Deviation from `PLAN.md`, recorded here before proceeding, as workflow
+  rule 3 requires.** No phase was started or advanced; phase 8 is done and phase 9 has not begun.
+
+- **The reports.**
+  1. HACS showed "Installed version `2e12f07` / Latest version `4e76f94`" — commit hashes, which
+     tell the user nothing about what the update contains.
+  2. The README's EUMETNET OPERA attribution linked to `observations.eu`, which now redirects to
+     a domain broker.
+
+- **Decisions.**
+  - **Release, don't wait for 1.0.0.** HACS names an install by its commit hash only while a
+    repository has no releases at all; the plan had the first tag in phase 9, which left the
+    whole development period unreadable. Tagging now costs nothing and makes every update since
+    legible.
+  - **First tag is `v0.8.0`, not `v0.1.0`.** `manifest.json` still said `0.1.0` — a number set
+    at the repo skeleton and never touched through six phases of work. The minor version now
+    tracks the completed phase, so `1.0.0` still means "phase 9 complete" exactly as planned.
+  - **`manifest.json` is the single source of the version; the tag mirrors it.** Home Assistant
+    and HACS both display the manifest value, so anything that derived a version elsewhere could
+    only disagree with what the user sees. `scripts/release.py` refuses to tag until
+    `CHANGELOG.md` has a matching dated section, the `Release` workflow re-checks the tag against
+    the manifest before publishing, and `tests/test_release.py` fails CI if the two drift.
+  - **Releases are never marked pre-release.** HACS hides pre-releases unless the user has opted
+    into beta versions, so a `0.x` marked that way would simply never appear as an update.
+  - **The whole existing changelog became the `0.8.0` section** rather than being split
+    retroactively into invented earlier versions — none of it was ever released under a number.
+
+- **Open questions carried forward:**
+  - Phase 9 should decide whether `1.0.0` also brings a `zip_release` HACS asset; today HACS
+    installs the tag's source tree, which is correct but ships the tests and docs too.
+  - The maintainer asked whether an alert could carry a radar image of the 25 km disc around
+    home. Answered as a feasibility note only — nothing implemented, and it is not in `PLAN.md`.
+
 ## Phase 9 — Docs, release 1.0.0
 
 - **Status:** not started

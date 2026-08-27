@@ -1,12 +1,12 @@
 # Walk the dog 🐕🌧️
 
-> ### ⚠️ Work in progress — not ready for use
+> ### ⚠️ Work in progress — pre-1.0
 >
-> There has been no release yet (version `0.1.0`). **Works today:** installation, the setup
-> wizard, the options flow, the whole prediction loop — recommendation sensor, alerting
-> switch, push notifications and the custom event — and full English and Polish localization.
-> **Not yet:** the performance pass on low-end hardware, and the brands submission, until which
-> Home Assistant shows a placeholder icon. Real-world accuracy is untested.
+> Every release below `1.0.0` is a development release. **Works today:** installation, the
+> setup wizard, the options flow, the whole prediction loop — recommendation sensor, alerting
+> switch, push notifications and the custom event — full English and Polish localization, and
+> the measured performance budget. **Not yet:** the brands submission, until which Home
+> Assistant shows a placeholder icon. Real-world accuracy is untested.
 >
 > Breaking changes land without warning, and there is no upgrade path between development
 > versions.

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-27
+
+First tagged release. Everything below shipped unversioned on `main` before this tag; it is
+collected here so that Home Assistant and HACS can name the installed version instead of
+showing a commit hash.
+
+### Added
+
+- **The integration now has version numbers you can read.** Until now there had been no release,
+  so HACS could only name an install by its commit hash — `2e12f07` updating to `4e76f94` says
+  nothing about what changed. Releases are now tagged `vX.Y.Z`, the number matches the one Home
+  Assistant shows under the integration, and the release notes are this file's section for that
+  version. `scripts/release.py` performs the release and `tests/test_release.py` fails the build
+  if the manifest version and the changelog ever disagree.
+
+### Fixed
+
+- **The EUMETNET OPERA attribution in the README pointed at a domain that is for sale.** It now
+  links to the OPERA weather radar network page on `eumetnet.eu`.
+
 ### Changed
 
 - **A new radar frame now reaches you about a minute after it is published, instead of eight.**
@@ -460,3 +480,6 @@ way; all of it is written up in `docs/DATA_SOURCES.md` § CHMI:
 
 - RainViewer is no longer a candidate: its public API serves past radar frames only, and the
   live `radar.nowcast` array is empty.
+
+[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v0.8.0

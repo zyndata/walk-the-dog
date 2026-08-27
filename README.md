@@ -5,17 +5,17 @@
 *Polish: „Idź już z psem"*
 
 > [!WARNING]
-> **Work in progress — not ready for use.** There has been no release yet (version `0.1.0`);
-> the integration is being built phase by phase in the open.
+> **Work in progress — pre-1.0.** The current release is
+> [`0.8.0`](https://github.com/zyndata/walk-the-dog/releases/latest); the integration is being
+> built phase by phase in the open, and every release below `1.0.0` is a development release.
 >
 > - **Works today:** installation, the full setup wizard (location, walk schedule, alert
 >   settings), the options flow, the whole prediction loop — the recommendation sensor,
->   the alerting switch, push notifications and the `walk_the_dog_alert` event — and full
->   English and Polish localization.
-> - **Not yet:** the performance pass on low-end hardware (phase 8), and the
->   [home-assistant/brands](https://github.com/home-assistant/brands) submission (phase 9),
->   until which Home Assistant still shows a placeholder icon rather than the one in
->   [branding/](branding/). Real-world accuracy is untested.
+>   the alerting switch, push notifications and the `walk_the_dog_alert` event — full
+>   English and Polish localization, and the measured performance budget.
+> - **Not yet:** the [home-assistant/brands](https://github.com/home-assistant/brands)
+>   submission (phase 9), until which Home Assistant still shows a placeholder icon rather
+>   than the one in [branding/](branding/). Real-world accuracy is untested.
 >
 > Breaking changes land without warning and there is no upgrade path between development
 > versions. See [CHANGELOG.md](CHANGELOG.md) for what has landed and [STATE.md](STATE.md)
@@ -108,8 +108,8 @@ and searches for the nearest dry window of the full walk duration.
 Weather data, modified (resampled and reclassified) by this integration:
 
 - **LibreWXR** ([librewxr.net](https://librewxr.net/)) — weather data via LibreWXR, radar
-  composite © [EUMETNET OPERA](https://www.observations.eu/) members, licensed
-  [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/).
+  composite © [EUMETNET OPERA](https://www.eumetnet.eu/observations/weather-radar-network/)
+  members, licensed [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/).
 - **Open-Meteo** ([open-meteo.com](https://open-meteo.com/)) — forecast data by Open-Meteo,
   based on DWD ICON-EU and KNMI HARMONIE AROME model output, licensed
   [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/).
