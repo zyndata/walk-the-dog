@@ -36,14 +36,11 @@ from homeassistant.util import dt as dt_util
 
 from .cache import SampleCache
 from .const import (
-    CONF_AUTO_MUTE_ENTITY,
     CONF_CONFIRM_MARGIN_MIN,
     CONF_EARLIER_MARGIN_MIN,
-    CONF_FIRE_EVENT,
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
-    CONF_NOTIFY_SERVICE,
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
@@ -256,13 +253,7 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         self._cache = SampleCache(self._geometry.key)
         self._cache.attach_store(hass)
         self._registry = SourceRegistry(build_user_agent(version), cache=self._cache)
-        self.notifier = WalkNotifier(
-            hass,
-            notify_service=options.get(CONF_NOTIFY_SERVICE),
-            fire_event=bool(options.get(CONF_FIRE_EVENT, False)),
-            mute_entity=options.get(CONF_AUTO_MUTE_ENTITY),
-            confirm_margin=self._confirm_margin,
-        )
+        self.notifier = WalkNotifier(hass, entry, confirm_margin=self._confirm_margin)
 
         # Starts off: the switch restores the real state and turns it on, so a
         # restart with alerting disabled makes no request at all.
@@ -350,7 +341,10 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
     async def _async_update_data(self) -> WalkData:
         """One update cycle: resolve the walk, fetch if due, score, recommend."""
         now = dt_util.utcnow()
+        previous = self._walk
         walk = self._walk = self._resolve_walk(now)
+        if previous is not None and (walk is None or walk.start != previous.start):
+            await self._async_take_down(previous)
         if not self._enabled or walk is None or not self._is_active(now):
             return self._idle(active=False)
 
@@ -363,6 +357,19 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
             target=self._target_for(walk),
         )
         return data
+
+    async def _async_take_down(self, walk: Walk) -> None:
+        """Take a finished walk's notification off the phones it is still sitting on.
+
+        The push survives the tap that opens it, which is the point of it — so
+        something has to remove it once the walk it advises about is over, or
+        tomorrow's advice arrives underneath yesterday's. The cycle that lands
+        exactly on the end of the window is where the coordinator moves on to the
+        next walk (`_next_wake`), and that is this.
+        """
+        if not self.notifier.has_spoken(walk.start):
+            return
+        await self.notifier.async_clear(self._target_for(walk), walk.start)
 
     def _target_for(self, walk: Walk) -> WalkTarget:
         """This walk's own devices, mute switch and away entity, if it has any.

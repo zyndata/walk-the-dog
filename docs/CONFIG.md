@@ -251,6 +251,13 @@ Every alert about one walk carries the same companion-app `tag`, keyed on the wa
 so a revised recommendation **replaces** the message it supersedes on the phone rather than
 stacking a second, contradictory one underneath it.
 
+**Tapping the message opens the recommendation sensor**, whose attributes carry the whole
+answer: both times, each source's own verdict, how far the radar reached. On Android the message
+also stays in the notification shade after the tap, so the advice can be re-read rather than
+disappearing into the app that was opened to look at it; it is still swipeable, and it is taken
+down automatically at the end of the walk. iOS opens the same entity, and keeps its own copy in
+the Notification Centre.
+
 Every push carries one action button, **Already went**, which closes the walk the way the
 `walk_the_dog.walked` service does. The walk's UTC start is encoded in the action identifier —
 the one field both companion apps reliably hand back — so a leftover notification from yesterday

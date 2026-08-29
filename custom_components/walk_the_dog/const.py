@@ -82,6 +82,12 @@ RADIUS_STEP_KM: Final = 0.5
 NOTIFY_DOMAIN: Final = "notify"
 NOTIFY_SERVICE_PREFIX: Final = "mobile_app_"
 
+#: `translation_key` of the recommendation sensor, and the tail of its unique id.
+#: Named here rather than written twice because the notifier resolves it back to an
+#: entity id: tapping a notification opens the entity that holds the same advice in
+#: full, so the two modules have to mean the same entity by it.
+ENTITY_KEY_RECOMMENDATION: Final = "recommendation"
+
 DEFAULT_FIRE_EVENT: Final = False
 
 # Time grid: all window evaluation happens on a 10-minute UTC grid

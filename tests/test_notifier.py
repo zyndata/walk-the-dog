@@ -31,7 +31,12 @@ from custom_components.walk_the_dog.const import (
 )
 from custom_components.walk_the_dog.coordinator import CYCLE, WalkCoordinator
 from custom_components.walk_the_dog.engine import DIRECTION_EARLIER
-from custom_components.walk_the_dog.notifier import TAG_PREFIX, walked_action
+from custom_components.walk_the_dog.notifier import (
+    CLICK_ENTITY_PREFIX,
+    STICKY,
+    TAG_PREFIX,
+    walked_action,
+)
 from custom_components.walk_the_dog.schedule import KEY_ALL, target_key
 
 from .conftest import (
@@ -55,6 +60,10 @@ if TYPE_CHECKING:
     from .conftest import FakeFetch
 
 IDLE = datetime(2026, 8, 25, 0, 0, tzinfo=UTC)
+
+#: The entity a tapped notification opens — the sensor's own id, as Home Assistant
+#: registers it from the translated device and entity names.
+SENSOR_ENTITY_ID = "sensor.walk_the_dog_walk_recommendation"
 
 NOTIFY_SERVICE = "mobile_app_test"
 MUTE_ENTITY = "person.owner"
@@ -81,6 +90,11 @@ HEAVY_AT_FIVE = [0.0, 0.0, 9.0, 9.0, 0.0]
 
 #: No rain at all — nothing to say.
 NO_RAIN = [0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+def _alerts_only(calls: list[ServiceCall]) -> list[ServiceCall]:
+    """The pushes that said something, without the take-downs that removed them."""
+    return [call for call in calls if call.data["message"] != CLEAR_NOTIFICATION]
 
 
 @pytest.fixture
@@ -316,7 +330,9 @@ async def test_the_next_walk_starts_a_fresh_conversation(
     await run_cycle(hass, freezer, WINDOW_START + tomorrow)
     await run_cycle(hass, freezer, ARM_AT + tomorrow)
 
-    assert len(notifications) == 2
+    # Yesterday's message is taken off the phone on the way past, which is a call
+    # to the same service and not a second piece of advice.
+    assert len(_alerts_only(notifications)) == 2
 
 
 async def test_an_unregistered_notify_service_is_reported_not_raised(
@@ -870,6 +886,70 @@ async def test_going_out_takes_the_notification_off_every_phone(
 
     assert notifications[-1].data["message"] == CLEAR_NOTIFICATION
     assert notifications[-1].data["data"]["tag"] == f"{TAG_PREFIX}{WALK_START:%Y%m%dT%H%M}"
+
+
+# --- reading the advice again ---------------------------------------------
+
+
+async def test_tapping_the_push_opens_the_recommendation(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """The tap lands on the sensor that holds the whole answer, on either platform."""
+    await run_cycle(hass, freezer, ARM_AT)
+
+    data = notifications[0].data["data"]
+    target = f"{CLICK_ENTITY_PREFIX}{SENSOR_ENTITY_ID}"
+
+    assert hass.states.get(SENSOR_ENTITY_ID) is not None
+    assert data["clickAction"] == target
+    assert data["url"] == target
+
+
+async def test_the_push_survives_being_read(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Opening the advice must not be what takes the advice away."""
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert notifications[0].data["data"]["sticky"] == STICKY
+
+
+async def test_the_notification_is_taken_down_when_the_walk_is_over(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """A message that survives the tap has to be removed by the end of the walk."""
+    await run_cycle(hass, freezer, ARM_AT)
+    assert len(_alerts_only(notifications)) == 1
+
+    await run_cycle(hass, freezer, WALK_END)
+
+    assert notifications[-1].data["message"] == CLEAR_NOTIFICATION
+    assert notifications[-1].data["data"]["tag"] == f"{TAG_PREFIX}{WALK_START:%Y%m%dT%H%M}"
+
+
+async def test_a_walk_nobody_was_told_about_is_not_taken_down(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Clearing a tag that was never used is a service call spent saying nothing."""
+    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+
+    await run_cycle(hass, freezer, ARM_AT)
+    await run_cycle(hass, freezer, WALK_END)
+
+    assert notifications == []
 
 
 # --- the confirmation before setting off ----------------------------------

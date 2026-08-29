@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A notification can now be read twice.** Tapping the message used to open Home Assistant and
+  dismiss the advice on the way, leaving nowhere to look it up: the one copy of the suggestion
+  was gone the moment you tried to read it. The tap now opens the *Walk recommendation* sensor,
+  which holds the whole answer — both times, what each source said, how far the radar reached —
+  and on Android the message itself stays in the notification shade instead of vanishing.
+
+### Fixed
+
+- **A notification no longer outlives the walk it is about.** Now that the message survives being
+  opened, the integration takes it off every phone when the walk window ends — so tomorrow's
+  advice never arrives underneath yesterday's. A walk nobody was notified about is left alone.
+
 ## [1.0.0] - 2026-08-27
 
 The first stable release. Nothing about how the integration predicts rain changed here — that

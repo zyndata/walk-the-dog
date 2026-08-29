@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Final
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.const import ATTR_ATTRIBUTION
 
+from .const import ENTITY_KEY_RECOMMENDATION
 from .engine import (
     DIRECTION_EARLIER,
     DIRECTION_LATER,
@@ -67,7 +68,7 @@ class WalkRecommendationSensor(WalkEntity, SensorEntity):
 
     def __init__(self, coordinator: WalkCoordinator, entry: ConfigEntry) -> None:
         """Name the entity after the recommendation it carries."""
-        super().__init__(coordinator, entry, "recommendation")
+        super().__init__(coordinator, entry, ENTITY_KEY_RECOMMENDATION)
 
     @property
     def native_value(self) -> str | None:

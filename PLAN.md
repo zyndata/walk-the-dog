@@ -372,3 +372,67 @@ modules, `tests/*`, `docs/CONFIG.md`, `CHANGELOG.md`, `STATE.md`.
 - End-of-phase ritual completed.
 
 **Files touched:** `README.md`, `info.md`, `docs/*`, `manifest.json`, `CHANGELOG.md`, `STATE.md`.
+
+---
+
+## Phase 10 — Shortening the walk to fit a shorter dry window
+
+**Post-1.0.** Everything up to phase 9 shipped as 1.0.0; this is the first phase of the next
+minor release. Written after live use: told there is rain around the walk, the integration today
+searches only for a dry window of the **full** configured length and says `no_dry_window` when it
+cannot find one — even when the radar plainly shows a ten-minute clearing at the scheduled time.
+A shorter walk in the dry is a real answer, and the data to give it is already scored.
+
+**Goal:** when no full-length dry window exists, offer the longest dry window that is still worth
+going out for, and say plainly how long it is.
+
+**Inputs:** `CLAUDE.md`, `STATE.md`, this phase, `docs/ARCHITECTURE.md` (§ Walk-window evaluation
+& recommendation search, § Material change), `docs/CONFIG.md`.
+
+**Design decisions to make and record in `STATE.md` before coding:**
+
+- **When shortening is offered at all.** Proposed: only after the full-duration search over the
+  whole margin has failed, so a full walk moved in time always beats a shortened one — the dog
+  would rather walk longer at a different hour than less at this one.
+- **How short is still worth it.** New option `min_walk_duration_min` (docs/CONFIG.md), 5-minute
+  steps, bounded below by `MIN_WALK_DURATION_MIN` and above by the walk's own duration. Default
+  proposed **off**: no shortening unless the user asks for it, so an upgrade changes nothing
+  until it is configured.
+- **Whether a shortened window must be radar-backed.** A ten-minute gap seen only by an hourly
+  model is not a gap, it is rounding. Proposed: offer a shortened window only where
+  `nowcast_covered` holds, and never mark one `provisional`.
+- **Ranking among shortened candidates.** Proposed: longest duration first, then nearest to the
+  scheduled start, earlier beating later at equal distance — the existing tie-break.
+
+**Tasks:**
+
+1. `engine/window.py`: extend `Search` with the minimum duration and add the second pass to
+   `recommend()`; durations step by `SLOT` (a shortening the grid cannot see is not a
+   shortening). Add `DIRECTION_SHORTER` and carry the recommended length on `Recommendation`
+   (`recommended_duration_s`) alongside the scheduled one. Keep the module pure.
+2. `is_material_change`: a changed recommended **length** is a material change of its own — the
+   existing rules all speak about times.
+3. Config flow + options flow: the new option, validated against the walk duration, with the
+   `long_walk`-style guard rails and both translations.
+4. `sensor.py`: `shorter` joins `OPTIONS`; the payload and the attributes gain the recommended
+   duration (documented in `docs/CONFIG.md` § Event payload — it is a public contract).
+5. `notifier.py` + `strings.json` + `translations/pl.json`: a `notification_shorter` text that
+   names the start **and** the length, and the confirmation wording that goes with it.
+6. Tests: the engine cases (a shortened window found, a full one preferred over it, the minimum
+   respected, a model-only gap refused), the notification text, and the config-flow validation.
+7. Update `docs/ARCHITECTURE.md`, `docs/CONFIG.md` and `README.md`.
+
+**Acceptance criteria:**
+
+- With a 10-minute clearing inside a 20-minute walk and the minimum set to 10, the integration
+  recommends the shorter walk and names its length; with the minimum unset it still says
+  `no_dry_window`.
+- A full-length window anywhere in the margins always wins over a shortened one.
+- Suite green offline, ruff clean, no new lint or type errors.
+- `STATE.md` records the four decisions above with their rationale; `CHANGELOG.md` gets a `1.1.0`
+  entry (new user-facing behavior → minor, not patch).
+- End-of-phase ritual completed.
+
+**Files touched:** `custom_components/walk_the_dog/engine/window.py`, `const.py`, `config_flow.py`,
+`sensor.py`, `notifier.py`, `coordinator.py`, `strings.json`, `translations/*.json`, `tests/*`,
+`docs/ARCHITECTURE.md`, `docs/CONFIG.md`, `README.md`, `CHANGELOG.md`, `STATE.md`.

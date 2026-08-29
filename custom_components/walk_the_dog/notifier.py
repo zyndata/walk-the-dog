@@ -34,6 +34,12 @@ The entry-wide device is exempt from all of it: mute, both away entities and its
 own tracker. It is the phone the user asked to be told about every walk, and only
 the alerting switch takes that away.
 
+A push is a summary, and a summary is worth being able to re-read. Tapping one
+opens the recommendation sensor rather than merely the app, and — on Android, which
+is the platform that offers the choice — the message stays in the shade instead of
+being taken away by the tap that opened it. What removes it is the walk ending, the
+*Already went* button, or the user; not the act of reading it.
+
 The `walk_the_dog_alert` event fires whenever a notification *would* fire, even
 when nothing is sent — an automation may well want to know while nobody is home.
 Its payload is `WalkData.payload()`, documented in docs/CONFIG.md.
@@ -46,14 +52,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
-from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN, Platform
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
 from .const import (
     ACTION_WALKED,
     CLEAR_NOTIFICATION,
+    CONF_AUTO_MUTE_ENTITY,
+    CONF_FIRE_EVENT,
+    CONF_NOTIFY_SERVICE,
     DOMAIN,
+    ENTITY_KEY_RECOMMENDATION,
     EVENT_ALERT,
     NOTIFY_DOMAIN,
     NOTIFY_SERVICE_PREFIX,
@@ -69,6 +80,7 @@ from .engine import (
 )
 
 if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
     from .coordinator import WalkData
@@ -109,6 +121,19 @@ TRACKER_DOMAIN: Final = "device_tracker"
 #: A tracker in one of these states is not saying "away", it is saying nothing.
 UNREADABLE_STATES: Final = frozenset({STATE_UNKNOWN, STATE_UNAVAILABLE})
 
+#: Where tapping the body of a notification lands: the more-info dialog of the
+#: recommendation sensor, whose attributes carry the whole answer — both times, the
+#: per-source verdicts, how far the radar reached. Android reads `clickAction` and
+#: iOS reads `url`; the `entityId:` scheme is the companion apps' own, and a target
+#: neither app understands costs nothing more than the tap already did.
+CLICK_ENTITY_PREFIX: Final = "entityId:"
+
+#: Keeps an Android notification in the shade after it has been tapped. Without it
+#: the tap opens Home Assistant and takes the advice away with it — which is exactly
+#: the moment the user wants to read it again. The message is still swipeable; it is
+#: sticky, not persistent, so the user is never left with one they cannot get rid of.
+STICKY: Final = "true"
+
 #: Groups every alert about one walk under a single companion-app notification, so
 #: a revised recommendation replaces the one it supersedes instead of stacking a
 #: second, contradictory message underneath it.
@@ -147,17 +172,23 @@ class WalkNotifier:
     def __init__(
         self,
         hass: HomeAssistant,
+        entry: ConfigEntry,
         *,
-        notify_service: str | None,
-        fire_event: bool,
-        mute_entity: str | None,
         confirm_margin: timedelta | None = None,
     ) -> None:
-        """Take the notification options; they only change when the entry reloads."""
+        """Read the notification options off the entry; a change reloads it anyway.
+
+        The entry rather than the four values it holds, because the notifier needs
+        its id as well: that is what resolves the recommendation sensor a tapped
+        message opens. `confirm_margin` stays a parameter — the coordinator derives
+        it from the same options and has to agree with this about when it is due.
+        """
         self.hass = hass
-        self._default_service = notify_service
-        self._fire_event = fire_event
-        self._mute_entity = mute_entity
+        self._entry_id = entry.entry_id
+        options = entry.options
+        self._default_service = options.get(CONF_NOTIFY_SERVICE)
+        self._fire_event = bool(options.get(CONF_FIRE_EVENT, False))
+        self._mute_entity = options.get(CONF_AUTO_MUTE_ENTITY)
         self._confirm_margin = confirm_margin
         self._walk_start: datetime | None = None
         self._notified: Any = None
@@ -173,6 +204,18 @@ class WalkNotifier:
         self._walk_start = None
         self._notified = None
         self._confirmed = False
+
+    def has_spoken(self, walk_start: datetime | None) -> bool:
+        """Whether anything was said about this particular walk.
+
+        The coordinator asks before taking a finished walk's notification down: a
+        walk nobody was told about has nothing on the phones to remove, and asking
+        every device to clear a tag that was never used spends a service call
+        saying nothing.
+        """
+        return (
+            walk_start is not None and walk_start == self._walk_start and self._notified is not None
+        )
 
     def away_entity_for(self, target: WalkTarget) -> str | None:
         """Whose absence stands in for a phone that cannot answer for itself."""
@@ -364,8 +407,9 @@ class WalkNotifier:
             return
         texts = await self._async_translations()
         title, message = _compose(texts, recommendation, key)
-        data = {
+        data: dict[str, Any] = {
             "tag": walk_tag(self._walk_start),
+            "sticky": STICKY,
             "actions": [
                 {
                     "action": walked_action(self._walk_start),
@@ -373,6 +417,11 @@ class WalkNotifier:
                 }
             ],
         }
+        if (click := self._click_target()) is not None:
+            # The two companion apps spell the same idea differently; sending both
+            # is what makes one message behave the same way on either phone.
+            data["clickAction"] = click
+            data["url"] = click
         for service in registered:
             await self.hass.services.async_call(
                 NOTIFY_DOMAIN,
@@ -408,6 +457,20 @@ class WalkNotifier:
             service,
         )
         return False
+
+    def _click_target(self) -> str | None:
+        """What a tapped notification should open, or None while it does not exist.
+
+        Resolved at every send rather than stored once: the entity id belongs to the
+        user, who may rename it, and the registry is the only thing that knows the
+        current one. Before the sensor is registered — the first cycle of a fresh
+        install — there is nothing to point at, and the tap falls back to opening
+        the app, which is what it did before.
+        """
+        entity_id = er.async_get(self.hass).async_get_entity_id(
+            Platform.SENSOR, DOMAIN, f"{self._entry_id}_{ENTITY_KEY_RECOMMENDATION}"
+        )
+        return None if entity_id is None else f"{CLICK_ENTITY_PREFIX}{entity_id}"
 
     async def _async_translations(self) -> dict[str, str]:
         """Every string this module can say, in the user's language."""
@@ -494,7 +557,9 @@ def walk_start_from_action(action: str) -> datetime | None:
 
 __all__ = [
     "ALERT_DIRECTIONS",
+    "CLICK_ENTITY_PREFIX",
     "DEFAULT_TARGET",
+    "STICKY",
     "TAG_PREFIX",
     "TEXT_ACTION_WALKED",
     "TEXT_CONFIRMED",

@@ -1572,3 +1572,57 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     Polish speaker's read of the phase 7 strings. Unchanged.
   - **The maintainer's radar-image-in-the-alert idea** is still a feasibility note only, not in
     `PLAN.md`. Nothing implemented.
+
+## Post-1.0 change — a notification that can be read twice (2026-08-29)
+
+- **Status:** done (code, tests and docs; 516 tests green offline, ruff clean)
+
+- **Why:** live use found the first message unreadable in practice. Tapping the push opened Home
+  Assistant on whatever dashboard happened to be there and dismissed the notification on the way
+  — so the one place the advice existed was gone the moment the user tried to look at it, and
+  nothing in the app said which walk had been talked about or what the suggestion had been.
+
+- **What was built:**
+  - **The tap opens the recommendation sensor.** `notifier.py` resolves the sensor's entity id
+    from the entity registry at every send and puts it in both `clickAction` (Android) and `url`
+    (iOS) as `entityId:<entity_id>`. The sensor's attributes already carry the whole answer, so
+    the notification becomes a summary with somewhere to go rather than the only copy.
+  - **The message survives the tap.** `sticky` keeps it in the Android shade after it is opened.
+    Deliberately `sticky` and not `persistent`: a message the user cannot get rid of would be a
+    worse bug than the one being fixed.
+  - **A take-down at the end of the walk.** Because the push now outlives the tap, something has
+    to remove it: `WalkCoordinator._async_take_down` clears the walk's tag on the cycle that
+    lands exactly on `walk end` — the one that was already moving the coordinator on to the next
+    walk. `WalkNotifier.has_spoken` gates it, so a walk nobody was told about costs no call.
+  - **`WalkNotifier` now takes the config entry** instead of four values off it. It needed the
+    entry id for the lookup above, which would have made six constructor arguments; taking the
+    entry reads its own options in one place and keeps the argument count honest.
+  - `ENTITY_KEY_RECOMMENDATION` in `const.py` — the sensor's translation key and the tail of its
+    unique id, now that two modules have to mean the same entity by it.
+
+- **Decisions:**
+  - **Both platform keys are sent, always.** `clickAction` and `url` carry the same value; the
+    app that does not know a key ignores it, and one message then behaves the same on either
+    phone. Only Android was verifiable here — iOS `url` handling of the `entityId:` scheme is
+    from the companion documentation, not from a device on the maintainer's desk.
+  - **No new option.** The tap target is the integration's own sensor, not a configurable
+    dashboard path: a setting would be one more thing to fill in during a wizard that is already
+    long, and the sensor is the one place guaranteed to hold this walk's answer.
+  - **Resolved per send, not cached.** The entity id belongs to the user, who may rename it. Two
+    registry lookups an hour is not a cost worth optimising against a stale link.
+  - **The take-down rides the existing cycle**, not a new timer. The coordinator already wakes
+    exactly at `walk end`; adding a timer for this would have spent a wakeup on tidying up.
+
+- **Not covered:** alerting switched off mid-window leaves the message on the phone until the
+  user swipes it. Rare, harmless, and clearing it would mean pushing to phones about a walk the
+  user has just stopped caring about.
+
+- **Deviation from `PLAN.md`:** none — this is post-1.0 maintenance, in the same class as the
+  earlier post-phase-6 fixes.
+
+- **Added to `PLAN.md`: phase 10 — shortening the walk to fit a shorter dry window.** From the
+  same live-use conversation: with a 20-minute walk and a 10-minute clearing on the radar, the
+  search only ever looks for a dry window of the *full* length and reports `no_dry_window`. The
+  phase is written but **not started** — it is the next conversation's work, and the four design
+  decisions it opens with (when shortening is offered, how short is worth it, whether a shortened
+  window must be radar-backed, how candidates rank) are to be recorded here before coding.

@@ -411,6 +411,16 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
   queued — the decision state advances either way, so coming home does not release a stale
   message. The module is `notifier.py`, not `notify.py`: a file named after a platform inside an
   integration *is* that platform to Home Assistant, and this one is not a notify platform.
+- **Reading the advice again** (added after the first live test): a push is a summary, and the
+  detail behind it lives in the recommendation sensor — so tapping the message opens that entity
+  (`clickAction` on Android, `url` on iOS, both carrying the companion apps' own `entityId:`
+  scheme) instead of merely opening the app. The entity id is resolved from the entity registry
+  at every send, because it is the user's to rename. The message is also `sticky`, so the tap
+  that opens it does not take it away: what removes it is the *Already went* button, the user, or
+  the coordinator's take-down at the end of the walk — the cycle that lands exactly on `walk end`
+  clears the tag before it moves on to the next walk, so tomorrow's advice never arrives
+  underneath yesterday's. A walk nobody was told about is not cleared: there is nothing on the
+  phone to remove, and the `clear_notification` would be a request spent saying nothing.
 - **Per-walk targets** (added after the first live test): each walk carries its own list of
   companion-app devices, its own mute switch and its own away entity, so the morning walk and the
   evening walk can belong to different people. The coordinator resolves the walk to a `Walk` — the
