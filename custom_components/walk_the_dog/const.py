@@ -32,6 +32,7 @@ CONF_INTENSITY_THRESHOLD: Final = "intensity_threshold"
 CONF_EARLIER_MARGIN_MIN: Final = "earlier_margin_min"
 CONF_LATER_MARGIN_MIN: Final = "later_margin_min"
 CONF_WALK_DURATION_MIN: Final = "walk_duration_min"
+CONF_MIN_WALK_DURATION_MIN: Final = "min_walk_duration_min"
 CONF_SCHEDULE_MODE: Final = "schedule_mode"
 CONF_SCHEDULE: Final = "schedule"
 CONF_NOTIFY_SERVICE: Final = "notify_service"
@@ -92,6 +93,19 @@ DEFAULT_FIRE_EVENT: Final = False
 
 # Time grid: all window evaluation happens on a 10-minute UTC grid
 SLOT_MINUTES: Final = 10
+
+#: The step the "shortest walk still worth it" option moves in, and — since it is
+#: also the option's smallest non-zero value — the shortest walk the integration
+#: will ever propose. One grid slot is one LibreWXR radar frame, the finest step
+#: any source publishes: a five-minute window starting on the grid covers exactly
+#: the slots a ten-minute one covers, so anything finer would promise a precision
+#: nothing behind it has (docs/CONFIG.md § Shortening the walk).
+SHORT_WALK_STEP_MIN: Final = SLOT_MINUTES
+
+#: Shortening is on out of the box, at one slot. Told there is rain around the
+#: walk, "ten dry minutes at 07:20" is a better answer than "no dry window"; a user
+#: who disagrees sets the option to 0, which switches it off entirely.
+DEFAULT_MIN_WALK_DURATION_MIN: Final = SHORT_WALK_STEP_MIN
 
 #: Cycle length used in the final approach to setting off, where a source publishes
 #: fast enough to make it worth it. A convective cell can form and arrive inside one

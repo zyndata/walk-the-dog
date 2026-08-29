@@ -1626,3 +1626,115 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   phase is written but **not started** — it is the next conversation's work, and the four design
   decisions it opens with (when shortening is offered, how short is worth it, whether a shortened
   window must be radar-backed, how candidates rank) are to be recorded here before coding.
+
+## Phase 10 — Shortening the walk to fit a shorter dry window
+
+- **Status:** done (538 tests green offline, ruff clean, pre-commit clean)
+- **Date:** 2026-08-29
+
+- **The four design decisions the phase opens with, settled before any code was written:**
+
+  1. **Shortening is offered only after the full-length search has failed** — over the whole
+     margin, exactly as `PLAN.md` proposed. A full walk moved to another hour beats a shortened
+     walk at this one: the dog would rather walk its whole hour later than half of it now. So
+     `recommend()` keeps its existing two answers untouched and gains a *third* pass that runs
+     only where it used to return `no_dry_window`.
+  2. **How short is still worth it: `min_walk_duration_min`, moving in whole 10-minute slots,
+     default 10, `0` switching it off.** Ten minutes is one grid slot, and the grid slot is one
+     LibreWXR radar frame (`SLOT_MINUTES`, `engine/grid.py`) — the finest step any source
+     publishes. A five-minute window starting on the grid covers exactly the slots a ten-minute
+     one covers, so a five-minute step would offer the user a precision no forecast behind it
+     has. The same argument fixes the *candidate* lengths: they are whole multiples of `SLOT`
+     strictly shorter than the walk, not `duration − k·SLOT`, so a 25-minute walk is offered 20
+     or 10 and never a "15" that scores identically to 20.
+  3. **A shortened window must be radar-backed.** Offered only where `nowcast_covered` holds, so
+     a shortened recommendation is never `provisional` — it comes out of `provisional` as `False`
+     by construction, with no special case. A ten-minute gap seen only by an hourly model is not
+     a gap, it is rounding: the models know *whether* far better than they know *when*, and
+     "when" is the entire content of this advice.
+  4. **Ranking: longest first, then nearest to the scheduled start, earlier beating later at
+     equal distance.** The last two are the existing tie-break, unchanged, so a shortened search
+     reuses `candidate_starts` as it stands and only iterates lengths around it. Twenty dry
+     minutes half an hour away beats ten dry minutes now.
+
+- **Deviation from `PLAN.md` (recorded before proceeding):**
+  1. **The option ships on, not off.** `PLAN.md` proposed defaulting it to off so that an upgrade
+     changes nothing until the user asks. Maintainer's decision, taken this session: default
+     **10 minutes**, i.e. the shortest window the radar can resolve at all. The reasoning is the
+     one that produced the phase — told there is rain around the walk, "ten dry minutes at 07:20"
+     is a better answer than "no dry window", and a user who disagrees sets the option to `0`.
+     The upgrade note in `CHANGELOG.md` says so explicitly, because it *is* a behavior change on
+     upgrade and users should not have to discover it from a notification.
+  2. **The guard rail is a hard error, not a `long_walk`-style confirmation.** Task 3 asks for
+     the latter. A minimum longer than the walk itself is not a preference a user could mean —
+     it asks for a window that is both shorter than the walk and longer than it — so it is
+     refused on the field rather than confirmed. The two existing confirmation steps both guard
+     choices that are legitimate but unreliable; this one guards a choice that is empty.
+
+- **What was built:**
+  - **`engine/window.py` — a third pass.** `Search` gained `min_duration`; `recommend()` keeps
+    its two existing answers byte-for-byte and adds `_find_shorter` where it used to return
+    `no_dry_window`. `shorter_durations()` is the length arithmetic on its own — whole slots,
+    descending, strictly shorter than the walk — so the rule that a shortening the grid cannot
+    see is not a shortening is one testable function rather than a loop bound. `Recommendation`
+    carries `recommended_duration_s` (set by `shorter` alone) and a `recommended_duration`
+    property, which is what `recommended_end` now adds to the start: a shortened walk gets home
+    sooner, and the message says so.
+  - **The scheduled start rejoins the candidates for the shortened pass only.** The full-length
+    search excludes it because it is the window that just failed; a *shorter* walk beginning at
+    the normal time is the most ordinary form the advice takes, so `recommend` prepends it —
+    still bounded by `now`, like everything else the search offers.
+  - **Material change grew a fifth thing to compare.** Direction and recommended length are
+    checked as one pair: the other rules all speak about times, and a walk cut from twenty dry
+    minutes to ten is different advice with every time in it unchanged.
+  - **`min_walk_duration_min`** in `const.py`, the config flow and the options flow — a
+    10-minute-step number field from 0 to the walk-duration maximum, defaulting to 10, refused
+    with `min_walk_too_long` when it exceeds the walk itself.
+  - **`shorter`** joins the sensor's enum options and `notifier.ALERT_DIRECTIONS`;
+    `recommended_duration_min` joins the payload — sensor attributes and the
+    `walk_the_dog_alert` event alike, documented in `docs/CONFIG.md` § Event payload because it
+    is a public contract.
+  - **Two new texts in both languages**, `notification_shorter` and
+    `notification_confirmed_shorter`. The confirmation needed its own wording: "still on" that
+    quietly drops the one unusual thing about this advice — that the walk is cut short — would
+    be worse than no confirmation.
+  - **Tests: 22 new.** Engine — the clearing found, the same clearing refused with shortening
+    off, a full-length window winning, a clearing under the minimum refused, the longest of
+    several winning over the nearest, a start at the scheduled time, a model-only gap refused,
+    never provisional, a start that has passed refused, the length arithmetic as a table, and
+    the material-change rule. Notifier — the whole chain from radar frames to the words on the
+    phone, its `no_dry_window` counterpart with the option at 0, and the shortened confirmation.
+    Config flow — the field's step and default, the minimum-longer-than-the-walk error, the
+    equal-to-the-walk boundary, and 0 never being too long.
+
+- **A note on what makes this fire at all.** The consensus needs *two* sources to call a slot wet
+  (weights 1.0 / 0.9 / 0.8, threshold 0.5), so a radar disagreeing with both models can never
+  produce a wet slot on its own. A ten-minute clearing therefore appears only where the radar and
+  one model both clear it while the other model is still raining — which is exactly the shape the
+  notifier test builds. It is the existing consensus rule, not something this phase changed, but
+  it is worth knowing before wondering why the new advice is rare in practice.
+
+- **Deliberately not changed:** `WalkCoordinator._walk_end` still extends the watched window by
+  the *full* walk duration, not the shortened one. It is the window the coordinator keeps
+  scoring in and the moment the notification is taken off the phones; a user who ignores the
+  advice and walks their usual half-hour should not have the message vanish mid-walk. Watching
+  ten minutes longer than needed costs one cycle.
+
+- **Version cut, tag not pushed.** `CHANGELOG.md` has a dated `[1.1.0]` section — which absorbs
+  the post-1.0 notification work that was sitting under `[Unreleased]`, since that is a minor
+  change by the same reckoning — and `manifest.json` reads `1.1.0`, so `test_release.py` holds.
+  **Tagging `v1.1.0` and publishing the GitHub release is left to the maintainer**, the same way
+  phase 9 left the HACS pull request: the Release workflow publishes from the section above the
+  moment the tag lands.
+
+- **Open questions carried forward:** all of phase 9's, unchanged — the benchmark on real
+  hardware, the re-issued LibreWXR frame, the first frame's 8-minute wait, the one-hour
+  publication-lag measurement, the p90 for the LibreWXR disc, the unrecorded phase 6 smoke test
+  and phase 7 Polish read-through, and the radar-image-in-the-alert idea. Added by this phase:
+  - **Nobody has seen a shortened recommendation in the field yet.** The consensus note above
+    says it will be rarer than the live-use conversation implied. Whether the answer is to leave
+    it, to weight a radar higher when it is the only source with the resolution to see the gap,
+    or to accept a shortened window on a radar-plus-one-model vote is a question for real events
+    to settle — the same log of wrong calls that 1.0.x was already meant to collect.
+  - **A shortened walk's end is not the watched window's end.** See *Deliberately not changed*.
+    If the take-down ever wants to be exact, that is where it goes.

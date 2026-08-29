@@ -55,6 +55,7 @@
           "earlier_margin_min": "Search this far earlier",
           "later_margin_min": "Search this far later",
           "walk_duration_min": "Average walk duration",
+          "min_walk_duration_min": "Shortest walk still worth it",
           "confirm_margin_min": "Second message shortly before you leave",
           "notify_service": "Always notify this device",
           "fire_event": "Fire a custom event",
@@ -66,6 +67,7 @@
           "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives, so keep it at 60 minutes or less: that is as far ahead as the rain radars forecast, and a message sent earlier than that can only be based on hourly models.",
           "later_margin_min": "How much later than the scheduled time you are willing to set off. Going later is always checked again as the time approaches — the radars will have seen it long before you have to leave — so a wide margin here costs nothing but a few more forecast requests.",
           "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested, so a walk longer than the 60 minutes the radars forecast can never be fully radar-backed at the moment you are told to go.",
+          "min_walk_duration_min": "When no dry window of the full length can be found anywhere in the margins, offer the longest dry window that is at least this long: a short walk in the dry beats a full one in the rain. It moves in 10-minute steps because that is one radar frame — the shortest gap any source can actually see — and a shortened walk is only ever suggested where the radar reaches. 0 switches it off, and you are then only told about a full-length walk or a raincoat.",
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
           "notify_service": "The companion app device that receives every walk's alert. Nothing silences it — not being away, not muting a single walk — except the Alerting switch. Phones added to an individual walk are notified alongside it. Leave empty to notify only the per-walk phones.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
@@ -90,7 +92,8 @@
     "error": {
       "invalid_time": "A walk time could not be read. Use the 24-hour form, for example 07:30.",
       "no_walk_times": "Add at least one walk time.",
-      "invalid_notify_service": "Pick one of the listed devices, or type a notify service name that starts with mobile_app_."
+      "invalid_notify_service": "Pick one of the listed devices, or type a notify service name that starts with mobile_app_.",
+      "min_walk_too_long": "The shortest walk still worth it cannot be longer than the walk itself. Lower it, or set it to 0 to never shorten a walk."
     }
   },
   "options": {
@@ -141,6 +144,7 @@
           "earlier_margin_min": "Search this far earlier",
           "later_margin_min": "Search this far later",
           "walk_duration_min": "Average walk duration",
+          "min_walk_duration_min": "Shortest walk still worth it",
           "confirm_margin_min": "Second message shortly before you leave",
           "notify_service": "Always notify this device",
           "fire_event": "Fire a custom event",
@@ -152,6 +156,7 @@
           "earlier_margin_min": "How much earlier than the scheduled time you are willing to set off. This is also when the notification arrives, so keep it at 60 minutes or less: that is as far ahead as the rain radars forecast, and a message sent earlier than that can only be based on hourly models.",
           "later_margin_min": "How much later than the scheduled time you are willing to set off. Going later is always checked again as the time approaches — the radars will have seen it long before you have to leave — so a wide margin here costs nothing but a few more forecast requests.",
           "walk_duration_min": "How long a walk takes. The whole walk has to stay dry for a time to be suggested, so a walk longer than the 60 minutes the radars forecast can never be fully radar-backed at the moment you are told to go.",
+          "min_walk_duration_min": "When no dry window of the full length can be found anywhere in the margins, offer the longest dry window that is at least this long: a short walk in the dry beats a full one in the rain. It moves in 10-minute steps because that is one radar frame — the shortest gap any source can actually see — and a shortened walk is only ever suggested where the radar reaches. 0 switches it off, and you are then only told about a full-length walk or a raincoat.",
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
           "notify_service": "The companion app device that receives every walk's alert. Nothing silences it — not being away, not muting a single walk — except the Alerting switch. Phones added to an individual walk are notified alongside it. Leave empty to notify only the per-walk phones.",
           "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
@@ -176,7 +181,8 @@
     "error": {
       "invalid_time": "A walk time could not be read. Use the 24-hour form, for example 07:30.",
       "no_walk_times": "Add at least one walk time.",
-      "invalid_notify_service": "Pick one of the listed devices, or type a notify service name that starts with mobile_app_."
+      "invalid_notify_service": "Pick one of the listed devices, or type a notify service name that starts with mobile_app_.",
+      "min_walk_too_long": "The shortest walk still worth it cannot be longer than the walk itself. Lower it, or set it to 0 to never shorten a walk."
     }
   },
   "selector": {
@@ -208,6 +214,7 @@
           "ok": "Walk as planned",
           "earlier": "Go earlier",
           "later": "Go later",
+          "shorter": "Walk a shorter one",
           "no_dry_window": "No dry window"
         },
         "state_attributes": {
@@ -225,6 +232,9 @@
           },
           "duration_min": {
             "name": "Walk duration"
+          },
+          "recommended_duration_min": {
+            "name": "Suggested duration"
           },
           "risk": {
             "name": "Rain risk"
@@ -300,6 +310,7 @@
     "notification_title": "Walk the dog",
     "notification_earlier": "Rain is expected around {scheduled}. Set off at {recommended} instead — {shift} minutes earlier — and the whole {duration}-minute walk should stay dry, back home by {until}.",
     "notification_later": "Rain is expected around {scheduled}. Wait until {recommended} — {shift} minutes later — and the whole {duration}-minute walk should stay dry, back home by {until}.",
+    "notification_shorter": "Rain is expected around {scheduled} and there is no dry {duration}-minute window nearby. A shorter walk fits: set off at {recommended} and be back by {until} — {recommended_duration} dry minutes.",
     "notification_provisional": "The radar does not reach that far ahead yet, so this is a model estimate — I am still watching and will tell you if it changes.",
     "notification_no_dry_window": "Rain is expected around {scheduled} and there is no dry {duration}-minute window nearby. Take a raincoat.",
     "walk_slot_all": "every day",
@@ -313,6 +324,7 @@
     "walk_slot_sat": "Saturday",
     "walk_slot_sun": "Sunday",
     "notification_confirmed": "Still on: set off at {recommended}, back home by {until}. Nothing has changed since the last message.",
+    "notification_confirmed_shorter": "Still on: set off at {recommended} for a shorter walk of {recommended_duration} minutes, back home by {until}. Nothing has changed since the last message.",
     "notification_stand_down": "Rain is no longer expected around {scheduled} — walk at the normal time after all.",
     "notification_action_walked": "Already went",
     "default_device_unset": "whichever device you set as \"Always notify this device\" in Alert settings"

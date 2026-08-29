@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-29
+
+### Added
+
+- **A shorter walk is now a real answer.** Told there is rain around your walk, the integration
+  used to look only for a dry window of the *whole* length you configured, and said *No dry
+  window* when it could not find one — even when the radar plainly showed a ten-minute clearing
+  at the scheduled time. It now looks for the longest dry window that is still worth going out
+  for, and the message names both the time and the length: *set off at 07:20 and be back by
+  07:30 — 10 dry minutes.*
+
+  A full-length walk moved to another hour always wins over a shortened one: the dog would
+  rather walk its whole half-hour later than half of it now. A shortened window is only ever
+  offered where the rain radar reaches, because a ten-minute gap seen by an hourly model alone
+  is rounding rather than weather.
+
+  **This changes what you are told after the upgrade.** The new *Shortest walk still worth it*
+  setting starts at **10 minutes** — one radar frame, the shortest gap any source can actually
+  see — so a walk that used to report *No dry window* may now suggest a short one instead. Set
+  it to `0` in the integration's options to keep the old behaviour, or raise it if ten minutes
+  is not worth the lead.
+
+- **`recommended_duration_min`** on the *Walk recommendation* sensor and in the
+  `walk_the_dog_alert` event payload: how long the suggested walk is, which is the same as
+  `duration_min` unless the advice is to cut it short.
+
 ### Changed
 
 - **A notification can now be read twice.** Tapping the message used to open Home Assistant and
@@ -536,6 +562,7 @@ way; all of it is written up in `docs/DATA_SOURCES.md` § CHMI:
 - RainViewer is no longer a candidate: its public API serves past radar frames only, and the
   live `radar.nowcast` array is empty.
 
-[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.1.0
 [1.0.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.0.0
 [0.8.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v0.8.0

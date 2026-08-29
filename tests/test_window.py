@@ -29,6 +29,7 @@ from custom_components.walk_the_dog.engine.window import (
     DIRECTION_LATER,
     DIRECTION_NO_DRY_WINDOW,
     DIRECTION_NONE,
+    DIRECTION_SHORTER,
     DIRECTION_UNKNOWN,
     VERDICT_DRY,
     VERDICT_UNKNOWN,
@@ -42,6 +43,7 @@ from custom_components.walk_the_dog.engine.window import (
     is_actionable,
     is_material_change,
     recommend,
+    shorter_durations,
     source_breakdown,
     superseded_by_the_clock,
 )
@@ -100,8 +102,16 @@ def _agreed(*wet_indices: int, length: int = SLOT_COUNT, **kwargs):
     return _consensus({source_id: list(values) for source_id in ALL_SOURCES}, **kwargs)
 
 
-def _recommend(consensus, *, duration: timedelta = DURATION, later: timedelta = LATER, **kwargs):
-    search = Search(duration, kwargs.pop("earlier", EARLIER), later)
+def _recommend(
+    consensus,
+    *,
+    duration: timedelta = DURATION,
+    later: timedelta = LATER,
+    minimum: timedelta | None = None,
+    **kwargs,
+):
+    """`minimum` left None is shortening switched off — the pre-phase-10 behaviour."""
+    search = Search(duration, kwargs.pop("earlier", EARLIER), later, min_duration=minimum)
     return recommend(consensus, scheduled_start=T, search=search, **kwargs)
 
 
@@ -401,6 +411,7 @@ def _rec(
     risk: float,
     peak: float = 0.0,
     recommended: datetime | None = None,
+    duration_s: int | None = None,
 ) -> Recommendation:
     """A hand-built recommendation, so each material-change rule can be isolated."""
     verdict = WindowVerdict(
@@ -421,6 +432,7 @@ def _rec(
         duration_s=int(DURATION.total_seconds()),
         scheduled=verdict,
         recommended_start=recommended,
+        recommended_duration_s=duration_s,
     )
 
 
@@ -624,3 +636,136 @@ def test_a_window_souring_while_it_is_still_ahead_is_news() -> None:
     current = _rec(DIRECTION_NO_DRY_WINDOW, dry=False, risk=1.0)
 
     assert not superseded_by_the_clock(previous, current, T)
+
+
+# --- shortening the walk to fit a shorter dry window -----------------------
+
+#: The walk of the acceptance criterion: 20 minutes, so a single dry slot is the
+#: only thing that can be offered and the arithmetic stays readable.
+SHORT_WALK = timedelta(minutes=20)
+TEN = timedelta(minutes=10)
+TWENTY = timedelta(minutes=20)
+
+#: Every slot in the search range except 07:10 — no two consecutive slots are dry,
+#: so nothing of the full length fits anywhere in the margins.
+ONE_GAP = tuple(index for index in range(SLOT_COUNT) if index != SCHEDULED_INDEX + 1)
+
+#: The same, with the one dry slot at the scheduled start itself.
+GAP_AT_THE_START = tuple(index for index in range(SLOT_COUNT) if index != SCHEDULED_INDEX)
+
+
+def test_a_ten_minute_clearing_is_offered_when_the_minimum_allows_it() -> None:
+    """The phase's whole point: a shorter walk in the dry is a real answer."""
+    result = _recommend(_agreed(*ONE_GAP), duration=SHORT_WALK, minimum=TEN)
+
+    assert result.direction == DIRECTION_SHORTER
+    assert result.recommended_start == T + SLOT
+    assert result.recommended_duration_s == 600
+    assert result.recommended_end == T + 2 * SLOT
+    assert result.duration_s == int(SHORT_WALK.total_seconds())
+
+
+def test_the_same_clearing_is_no_dry_window_with_shortening_off() -> None:
+    """Switched off, the engine answers exactly as it did before phase 10."""
+    result = _recommend(_agreed(*ONE_GAP), duration=SHORT_WALK)
+
+    assert result.direction == DIRECTION_NO_DRY_WINDOW
+    assert result.recommended_start is None
+    assert result.recommended_duration_s is None
+
+
+def test_a_full_length_window_always_beats_a_shortened_one() -> None:
+    """The dog would rather walk its whole half-hour later than half of it now."""
+    result = _recommend(_agreed(0, 1, 2, 4, 5, 6, 7, 8), minimum=TEN)
+
+    assert result.direction == DIRECTION_LATER
+    assert result.recommended_start == T + 3 * SLOT
+    assert result.recommended_duration_s is None
+
+
+def test_a_clearing_shorter_than_the_minimum_is_refused() -> None:
+    """Ten dry minutes is not an answer for someone who said twenty is the least."""
+    result = _recommend(_agreed(*ONE_GAP), minimum=TWENTY)
+
+    assert result.direction == DIRECTION_NO_DRY_WINDOW
+
+
+def test_the_longest_shortened_window_wins_over_the_nearest() -> None:
+    """Twenty dry minutes half an hour away beats ten dry minutes right now."""
+    wet = tuple(index for index in range(SLOT_COUNT) if index not in {6, 9, 10})
+
+    result = _recommend(_agreed(*wet), minimum=TEN)
+
+    assert result.direction == DIRECTION_SHORTER
+    assert result.recommended_start == T + 3 * SLOT
+    assert result.recommended_duration_s == 1200
+
+
+def test_a_shortened_walk_may_start_at_the_scheduled_time() -> None:
+    """ "Go now, come back sooner" is the most ordinary form this advice takes."""
+    result = _recommend(_agreed(*GAP_AT_THE_START), minimum=TEN)
+
+    assert result.direction == DIRECTION_SHORTER
+    assert result.recommended_start == T
+    assert result.shift == timedelta(0)
+    assert result.recommended_duration_s == 600
+
+
+def test_a_gap_only_the_models_see_is_not_a_gap() -> None:
+    """Ten minutes of clearing inside an hourly forecast is rounding, not weather."""
+    values = _pattern(*ONE_GAP)
+    models = _consensus(
+        {SOURCE_KNMI: list(values), SOURCE_ICON_EU: list(values)}, duration=SHORT_WALK
+    )
+
+    result = _recommend(models, duration=SHORT_WALK, minimum=TEN)
+
+    assert result.direction == DIRECTION_NO_DRY_WINDOW
+
+
+def test_a_shortened_recommendation_is_never_provisional() -> None:
+    """It is radar-backed by construction, so there is nothing left to confirm."""
+    result = _recommend(_agreed(*ONE_GAP), duration=SHORT_WALK, minimum=TEN)
+
+    assert result.direction == DIRECTION_SHORTER
+    assert not result.provisional
+
+
+def test_a_shortened_start_that_has_passed_is_not_offered() -> None:
+    """The clock bounds this search too — advice for 07:00 is useless at 07:05."""
+    result = _recommend(_agreed(*GAP_AT_THE_START), minimum=TEN, now=T + timedelta(minutes=5))
+
+    assert result.direction == DIRECTION_NO_DRY_WINDOW
+
+
+@pytest.mark.parametrize(
+    ("duration", "minimum", "expected"),
+    [
+        # Whole slots only, and strictly shorter than the walk itself.
+        (timedelta(minutes=30), TEN, (TWENTY, TEN)),
+        # A 25-minute walk is offered 20 or 10; a "15" would score the same slots
+        # as the 20 and promise a precision the grid does not have.
+        (timedelta(minutes=25), TEN, (TWENTY, TEN)),
+        # One slot long already: there is nothing shorter to offer.
+        (TEN, TEN, ()),
+        # A minimum between slots rounds up — 15 minutes means "at least 15".
+        (timedelta(minutes=30), timedelta(minutes=15), (TWENTY,)),
+        # Off.
+        (timedelta(minutes=30), None, ()),
+    ],
+)
+def test_shortened_lengths_step_by_whole_slots(
+    duration: timedelta, minimum: timedelta | None, expected: tuple[timedelta, ...]
+) -> None:
+    """The grid decides which lengths are distinguishable, so it decides the offers."""
+    assert shorter_durations(Search(duration, EARLIER, LATER, min_duration=minimum)) == expected
+
+
+def test_a_changed_walk_length_is_a_material_change() -> None:
+    """Twenty dry minutes cut to ten is different advice with every time unchanged."""
+    previous = _rec(DIRECTION_SHORTER, dry=False, risk=0.9, recommended=T, duration_s=1200)
+    same = _rec(DIRECTION_SHORTER, dry=False, risk=0.9, recommended=T, duration_s=1200)
+    shorter = _rec(DIRECTION_SHORTER, dry=False, risk=0.9, recommended=T, duration_s=600)
+
+    assert not is_material_change(previous, same)
+    assert is_material_change(previous, shorter)

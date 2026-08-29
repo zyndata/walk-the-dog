@@ -20,6 +20,7 @@ from custom_components.walk_the_dog.const import (
     CONF_AUTO_MUTE_ENTITY,
     CONF_CONFIRM_MARGIN_MIN,
     CONF_FIRE_EVENT,
+    CONF_MIN_WALK_DURATION_MIN,
     CONF_NOTIFY_SERVICE,
     CONF_TARGET_AWAY_ENTITY,
     CONF_TARGET_MUTE,
@@ -27,10 +28,12 @@ from custom_components.walk_the_dog.const import (
     CONF_WALK_TARGETS,
     EVENT_ALERT,
     NOTIFY_DOMAIN,
+    SOURCE_ICON_EU,
+    SOURCE_KNMI,
     SOURCE_LIBREWXR,
 )
 from custom_components.walk_the_dog.coordinator import CYCLE, WalkCoordinator
-from custom_components.walk_the_dog.engine import DIRECTION_EARLIER
+from custom_components.walk_the_dog.engine import DIRECTION_EARLIER, DIRECTION_SHORTER
 from custom_components.walk_the_dog.notifier import (
     CLICK_ENTITY_PREFIX,
     STICKY,
@@ -1065,3 +1068,97 @@ async def test_nothing_is_confirmed_that_was_never_announced(
         moment += CYCLE
 
     assert notifications == []
+
+
+# --- shortening the walk ---------------------------------------------------
+
+#: The one shape a ten-minute clearing can really take. A slot is wet only when at
+#: least two sources call it wet, so a radar disagreeing with both models can never
+#: make one — the gap has to be a slot where the radar *and* the model that was
+#: raining both fall silent. Here KNMI has a dry hour at 05:00, ICON-EU is raining
+#: through it, and the radar clears for exactly one frame at 05:10.
+GAP_AT_TEN_PAST = datetime(2026, 8, 25, 5, 10, tzinfo=UTC)
+
+#: Radar frames from 03:30 to 06:00 inclusive: wet everywhere but that one frame.
+RADAR_GAP = [0.0 if index == 10 else 3.0 for index in range(16)]
+
+
+def _one_clearing(now: datetime) -> Any:
+    """A search range with no dry half-hour in it and one dry ten minutes."""
+    series, statuses = hourly_sources(now, [0.0, 3.0, 3.0, 3.0, 0.0], source_ids=(SOURCE_ICON_EU,))
+    dry_hour, dry_status = hourly_sources(now, [0.0, 3.0, 0.0, 3.0, 0.0], source_ids=(SOURCE_KNMI,))
+    series += dry_hour
+    statuses += dry_status
+    series.append(
+        make_series(SOURCE_LIBREWXR, RADAR_GAP, start=WINDOW_START, step_s=600, issued_at=now)
+    )
+    statuses.append(make_status(SOURCE_LIBREWXR, age_s=0, contributed=True))
+    return series, statuses
+
+
+async def test_a_ten_minute_clearing_is_offered_as_a_shorter_walk(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """The message names the new start *and* the new length — both are the advice."""
+    fetch.build = _one_clearing
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
+    message = notifications[0].data["message"]
+    assert "05:10" in message
+    assert "05:20" in message
+    assert "10 dry minutes" in message
+
+    assert alerts[0].data["direction"] == DIRECTION_SHORTER
+    assert alerts[0].data["duration_min"] == 30
+    assert alerts[0].data["recommended_duration_min"] == 10
+
+
+async def test_the_same_clearing_says_no_dry_window_with_shortening_off(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Setting the minimum to 0 restores exactly the pre-phase-10 message."""
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
+            CONF_MIN_WALK_DURATION_MIN: 0,
+        },
+    )
+    freezer.move_to(IDLE)
+    await setup_entry(hass, entry)
+    fetch.build = _one_clearing
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 1
+    assert "Take a raincoat" in notifications[0].data["message"]
+
+
+async def test_the_shortened_walk_is_confirmed_in_its_own_words(
+    hass: HomeAssistant,
+    confirming: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """ "Still on" must not quietly drop the fact that the walk is cut short."""
+    fetch.build = _one_clearing
+
+    await run_cycle(hass, freezer, ARM_AT)
+    await run_cycle(hass, freezer, GAP_AT_TEN_PAST - timedelta(minutes=15))
+
+    assert len(notifications) == 2
+    assert "10 minutes" in notifications[1].data["message"]
+    assert "05:20" in notifications[1].data["message"]

@@ -47,6 +47,7 @@ config entry. The **location is entry data, not an option**: it is set once in t
 | Earlier margin | `earlier_margin_min` | int minutes, 0–180, 10-min steps | 60 | How far back to search for a dry window — **and when the notification arrives**. Values over 60 min require confirming the `beyond_radar` warning: the radars forecast 60 minutes ahead, so a message sent earlier than that can only rest on hourly models |
 | Later margin | `later_margin_min` | int minutes, 0–180, 10-min steps | 30 | How far forward to search. Needs no warning: a later window is always re-checked as it comes into radar range, so a wide margin costs only a few more requests |
 | Average walk duration | `walk_duration_min` | int minutes, 5–240, 5-min steps | **required, no default** | Values over 30 min require confirming the `long_walk` warning (nowcast reliability) |
+| Shortest walk still worth it | `min_walk_duration_min` | int minutes, 0–240, 10-min steps | **10** | When no dry window of the full length exists anywhere in the margins, offer the longest dry window that is at least this long. Moves in whole 10-minute steps because one step is one radar frame — the shortest gap any source publishes — and is refused if it exceeds `walk_duration_min`, which would ask for a window both shorter than the walk and longer than it. `0` switches shortening off entirely. See [Shortening the walk](#shortening-the-walk) |
 | Second message shortly before you leave | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, or the rain has gone and the walk is back to its normal time. Goes to the same devices as the first message, and is only ever sent when something was already said about that walk |
 | Always notify this device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. **Receives every walk's alert.** Per-walk devices are notified *in addition* to it, never instead of it, and the combined list is de-duplicated so a device named in both places gets one push. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means only the per-walk devices are notified. |
 | Per-walk alerts | `walk_targets` | map | *(unset)* | One entry per walk the user configured something for. See [Per-walk alerts](#per-walk-alerts). |
@@ -78,6 +79,32 @@ is the whole question. So:
 
 A recommendation the radar has not yet reached is marked `provisional` in the payload, and the
 push says so in words.
+
+### Shortening the walk
+
+Rain around the walk does not always mean there is nowhere to go. When nothing of the full
+length is dry anywhere between the two margins, the integration makes one more pass and looks
+for the longest window that is dry and at least `min_walk_duration_min` long — reported as the
+`shorter` direction, with the suggested length in `recommended_duration_min`.
+
+Four rules bound it, and each of them is there to stop the advice being worse than silence:
+
+- **A full-length walk always wins.** The shortened pass runs only where the search used to give
+  up, so a whole walk moved to another hour is never traded for half a walk at this one.
+- **Lengths move in whole 10-minute slots.** That is the grid every source is projected onto and
+  the cadence of the fastest of them, so a "15-minute" window would cover exactly the slots a
+  20-minute one covers — a precision nothing behind it has. A 25-minute walk can therefore be
+  shortened to 20 minutes or to 10, never to 15.
+- **The radar has to reach it.** A shortened window is offered only where a nowcast covers every
+  slot of it, so a shortened recommendation is never `provisional`. Ten minutes of clearing
+  inside an hourly model's forecast is rounding, not weather.
+- **Longest first.** Among the windows that qualify, the longest wins; ties go to the one
+  nearest the scheduled time, and at equal distance to the earlier one — the same tie-break the
+  full-length search uses.
+
+Setting the option to `0` removes the pass entirely and restores the pre-1.1.0 behaviour: a walk
+with no full-length dry window is reported as `no_dry_window` and the message suggests a
+raincoat.
 
 ## Per-walk alerts
 
@@ -194,7 +221,8 @@ question, which is why they are not one entity with more attributes.
 | `ok` | The scheduled walk window looks dry — go as planned |
 | `earlier` | Rain during the walk; a dry window of the full duration exists earlier |
 | `later` | Same, but the dry window is later |
-| `no_dry_window` | Rain during the walk and no dry window anywhere within the margins |
+| `shorter` | No window of the full length is dry anywhere, but a shorter walk is — see [Shortening the walk](#shortening-the-walk) |
+| `no_dry_window` | Rain during the walk and no dry window anywhere within the margins, not even a shorter one |
 | `unknown` | No source reaches the walk, or there is no walk to reach. **Never good news** |
 
 `unavailable` means the coordinator itself has no data — a bug or a failed setup, not a
@@ -299,6 +327,7 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
   "recommended_end": "2026-08-25T05:00:00+00:00",
   "shift_min": -30,
   "duration_min": 30,
+  "recommended_duration_min": 30,
   "risk": 1.0,
   "confidence": 0.8,
   "expected_intensity": "moderate",
@@ -325,12 +354,13 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
 
 | Key | Type | Meaning |
 |---|---|---|
-| `direction` | `none` \| `earlier` \| `later` \| `no_dry_window` \| `unknown` | The engine's word; the sensor renders `none` as `ok` |
+| `direction` | `none` \| `earlier` \| `later` \| `shorter` \| `no_dry_window` \| `unknown` | The engine's word; the sensor renders `none` as `ok` |
 | `scheduled_start` | ISO-8601 UTC \| `null` | The walk as configured |
 | `recommended_start` | ISO-8601 UTC \| `null` | Where to move it; equals `scheduled_start` when the walk is already dry, `null` when there is nowhere to move it. Never a moment that has already passed |
-| `recommended_end` | ISO-8601 UTC \| `null` | `recommended_start + duration` — when the suggested walk gets home |
+| `recommended_end` | ISO-8601 UTC \| `null` | `recommended_start + recommended_duration_min` — when the suggested walk gets home |
 | `shift_min` | int \| `null` | Signed minutes; negative means earlier |
-| `duration_min` | int \| `null` | `average_walk_duration` |
+| `duration_min` | int \| `null` | `average_walk_duration` — the walk as configured |
+| `recommended_duration_min` | int \| `null` | How long the *suggested* walk is. Equal to `duration_min` unless `direction` is `shorter`; `null` when there is nothing suggested |
 | `risk` | 0.0–1.0 \| `null` | Weighted fraction of sources predicting rain in the worst slot of the scheduled window. **Not a probability of rain** |
 | `confidence` | 0.0–1.0 \| `null` | Agreement between sources, capped by how many actually voted |
 | `expected_intensity` | `none` \| `light` \| `moderate` \| `heavy` \| `null` | Heaviest expected rain over the scheduled window |
@@ -407,6 +437,7 @@ never change afterwards, and can be renamed in the entity registry.
   "earlier_margin_min": 60,
   "later_margin_min": 30,
   "walk_duration_min": 30,
+  "min_walk_duration_min": 10,
   "fire_event": false,
   "notify_service": "mobile_app_phone",
   "auto_mute_entity": "person.owner",

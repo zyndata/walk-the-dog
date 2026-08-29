@@ -33,6 +33,12 @@ back — and says plainly that the radar cannot see that far yet, so the time ma
   costs nothing — no setting to turn on, and nothing changes if you live outside it.
 - **Actionable advice** — "go 20 minutes earlier" or "wait half an hour", searched on a
   10-minute grid within your configured margins; not just "rain expected".
+- **A shorter walk when there is no room for a whole one** — if nothing of your usual length is
+  dry anywhere in the margins, it offers the longest dry window that is still worth going out
+  for and names it: *set off at 07:20 and be back by 07:30 — 10 dry minutes.* A full walk moved
+  to another hour always wins over a shortened one, and a short window is only ever offered
+  where the radar can actually see it. Set the shortest walk you would accept, or `0` to never
+  be offered one.
 - **One notification at the right moment** — pushed at the last actionable time
   (`walk − earlier margin`), re-sent only when the recommendation materially changes, and
   **never about a time that has already passed**. Optional auto-mute while you are away from
@@ -105,11 +111,12 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and
 window around each scheduled walk, the integration samples each source's precipitation
 forecast over a disc around your location, normalizes everything to a common mm/h scale,
 computes a weighted-vote risk and confidence per 10-minute slot, evaluates your walk window,
-and searches for the nearest dry window of the full walk duration.
+and searches for the nearest dry window of the full walk duration — falling back, when there
+is none, to the longest radar-backed window that still meets your minimum.
 
 ## Maturity
 
-`1.0.0` is feature-complete: everything described above is built, tested and measured. What it
+`1.1.0` is feature-complete: everything described above is built, tested and measured. What it
 is **not** is field-proven — the forecasts have been checked against recorded data, not against
 a season of actual weather, and nobody has yet counted how often the advice was right. If it
 tells you to wait and the rain never comes, that is worth an

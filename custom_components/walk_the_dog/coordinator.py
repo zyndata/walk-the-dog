@@ -41,6 +41,7 @@ from .const import (
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
+    CONF_MIN_WALK_DURATION_MIN,
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
@@ -53,6 +54,7 @@ from .const import (
     DEFAULT_EARLIER_MARGIN_MIN,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
+    DEFAULT_MIN_WALK_DURATION_MIN,
     DEFAULT_RADIUS_KM,
     DOMAIN,
     EVENT_MOBILE_APP_ACTION,
@@ -148,6 +150,7 @@ class WalkData:
             "recommended_end": None,
             "shift_min": None,
             "duration_min": None,
+            "recommended_duration_min": None,
             "risk": None,
             "confidence": None,
             "expected_intensity": None,
@@ -169,6 +172,13 @@ class WalkData:
                 "recommended_end": _iso(recommendation.recommended_end),
                 "shift_min": None if shift is None else int(shift.total_seconds() // 60),
                 "duration_min": recommendation.duration_s // 60,
+                # How long the *suggested* walk is. Equal to `duration_min` unless
+                # the advice is `shorter`, and null when there is nothing suggested.
+                "recommended_duration_min": (
+                    None
+                    if recommendation.recommended_start is None
+                    else int(recommendation.recommended_duration.total_seconds()) // 60
+                ),
                 "risk": round(recommendation.risk, 3) if known else None,
                 "confidence": round(recommendation.confidence, 3) if known else None,
                 "expected_intensity": recommendation.peak_intensity if known else None,
@@ -201,6 +211,12 @@ def _source_payload(source: SourceBreakdown) -> dict[str, Any]:
         "peak_mm_h": None if source.peak_mm_h is None else round(source.peak_mm_h, 2),
         "peak_intensity": source.peak_intensity,
     }
+
+
+def _min_walk_duration(options: Any) -> timedelta | None:
+    """The shortest walk still worth going out for, or None when shortening is off."""
+    minutes = int(options.get(CONF_MIN_WALK_DURATION_MIN, DEFAULT_MIN_WALK_DURATION_MIN))
+    return timedelta(minutes=minutes) if minutes > 0 else None
 
 
 def _confirm_margin(options: Any) -> timedelta | None:
@@ -246,6 +262,7 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
             later_margin=timedelta(
                 minutes=int(options.get(CONF_LATER_MARGIN_MIN, DEFAULT_LATER_MARGIN_MIN))
             ),
+            min_duration=_min_walk_duration(options),
         )
         self._targets: dict[str, Any] = options.get(CONF_WALK_TARGETS) or {}
 

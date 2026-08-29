@@ -23,6 +23,7 @@ from .engine import (
     DIRECTION_LATER,
     DIRECTION_NO_DRY_WINDOW,
     DIRECTION_NONE,
+    DIRECTION_SHORTER,
     DIRECTION_UNKNOWN,
 )
 from .entity import WalkEntity
@@ -39,12 +40,19 @@ STATE_OK: Final = "ok"
 
 #: Every state the sensor can report, minus `unknown` — which HA renders itself
 #: when the value is None, and which an enum sensor may not list as an option.
-OPTIONS: Final = [STATE_OK, DIRECTION_EARLIER, DIRECTION_LATER, DIRECTION_NO_DRY_WINDOW]
+OPTIONS: Final = [
+    STATE_OK,
+    DIRECTION_EARLIER,
+    DIRECTION_LATER,
+    DIRECTION_SHORTER,
+    DIRECTION_NO_DRY_WINDOW,
+]
 
 _STATES: Final = {
     DIRECTION_NONE: STATE_OK,
     DIRECTION_EARLIER: DIRECTION_EARLIER,
     DIRECTION_LATER: DIRECTION_LATER,
+    DIRECTION_SHORTER: DIRECTION_SHORTER,
     DIRECTION_NO_DRY_WINDOW: DIRECTION_NO_DRY_WINDOW,
     DIRECTION_UNKNOWN: None,
 }

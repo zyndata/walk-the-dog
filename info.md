@@ -12,6 +12,8 @@ later** so the walk stays dry.
   composite — joins in automatically; elsewhere it stays silent.
 - One recommendation sensor for the next upcoming walk: risk, confidence, suggested time,
   per-source breakdown.
+- When no dry window of your usual length exists at all, it offers the longest shorter one that
+  is still worth going out for — and says how long it is.
 - Push notification at the last actionable moment, re-sent only when the advice materially
   changes. Optional auto-mute while you are away and an optional event for automations.
 - Designed for low-end hardware: polls only around your walk times, samples only the pixels
@@ -23,7 +25,7 @@ Everything is set up from the UI: a three-step wizard (where you walk, when you 
 want to be told) and an options flow for later changes. Requires Home Assistant 2026.8 or newer
 and a location in Poland.
 
-`1.0.0` is feature-complete and measured, but not yet field-proven — the advice has been tested
+`1.1.0` is feature-complete and measured, but not yet field-proven — the advice has been tested
 against recorded data, not against a season of real weather. Reports of a wrong call are
 welcome on the [issue tracker](https://github.com/zyndata/walk-the-dog/issues).
 

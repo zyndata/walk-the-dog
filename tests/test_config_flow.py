@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.walk_the_dog.config_flow import (
     CONF_CONFIRM,
     ERROR_INVALID_NOTIFY_SERVICE,
+    ERROR_MIN_WALK_TOO_LONG,
 )
 from custom_components.walk_the_dog.const import (
     CONF_AUTO_MUTE_ENTITY,
@@ -28,6 +29,7 @@ from custom_components.walk_the_dog.const import (
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
+    CONF_MIN_WALK_DURATION_MIN,
     CONF_NOTIFY_SERVICE,
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
@@ -41,6 +43,7 @@ from custom_components.walk_the_dog.const import (
     DEFAULT_EARLIER_MARGIN_MIN,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
+    DEFAULT_MIN_WALK_DURATION_MIN,
     DEFAULT_RADIUS_KM,
     DOMAIN,
     INTENSITY_THRESHOLD_MODERATE,
@@ -50,6 +53,8 @@ from custom_components.walk_the_dog.const import (
     SCHEDULE_MODE_DAILY,
     SCHEDULE_MODE_PER_DAY,
     SCHEDULE_MODE_WEEKDAY_WEEKEND,
+    SHORT_WALK_STEP_MIN,
+    SLOT_MINUTES,
     WALK_DURATION_WARN_MIN,
 )
 from custom_components.walk_the_dog.schedule import DAY_KEYS, ERROR_NO_WALK_TIMES, target_key
@@ -66,6 +71,7 @@ PARAMS: dict[str, Any] = {
     CONF_EARLIER_MARGIN_MIN: DEFAULT_EARLIER_MARGIN_MIN,
     CONF_LATER_MARGIN_MIN: DEFAULT_LATER_MARGIN_MIN,
     CONF_WALK_DURATION_MIN: 30,
+    CONF_MIN_WALK_DURATION_MIN: DEFAULT_MIN_WALK_DURATION_MIN,
     CONF_CONFIRM_MARGIN_MIN: DEFAULT_CONFIRM_MARGIN_MIN,
     CONF_FIRE_EVENT: False,
 }
@@ -579,6 +585,7 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
             CONF_EARLIER_MARGIN_MIN: 90,
             CONF_LATER_MARGIN_MIN: 20,
             CONF_WALK_DURATION_MIN: 25,
+            CONF_MIN_WALK_DURATION_MIN: 20,
             CONF_CONFIRM_MARGIN_MIN: 15,
             CONF_FIRE_EVENT: True,
         },
@@ -599,6 +606,7 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
         CONF_EARLIER_MARGIN_MIN: 90,
         CONF_LATER_MARGIN_MIN: 20,
         CONF_WALK_DURATION_MIN: 25,
+        CONF_MIN_WALK_DURATION_MIN: 20,
         CONF_CONFIRM_MARGIN_MIN: 15,
         CONF_FIRE_EVENT: True,
     }
@@ -724,3 +732,52 @@ async def test_both_timing_warnings_are_shown_in_turn(hass: HomeAssistant) -> No
 
     result = await advance(hass, result, {CONF_CONFIRM: True})
     assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+# --- shortening the walk ---------------------------------------------------
+
+
+async def test_the_shortest_walk_moves_in_whole_radar_frames(hass: HomeAssistant) -> None:
+    """One grid slot is one radar frame, and nothing finer is worth offering."""
+    result = await to_params(hass)
+
+    config = selector_config(result["data_schema"], CONF_MIN_WALK_DURATION_MIN)
+    assert config["step"] == SHORT_WALK_STEP_MIN == SLOT_MINUTES
+    # 0 is on the scale because it is how the feature is switched off.
+    assert config["min"] == 0
+    assert marker_for(result["data_schema"], CONF_MIN_WALK_DURATION_MIN).default() == 10
+
+
+async def test_a_minimum_longer_than_the_walk_is_refused(hass: HomeAssistant) -> None:
+    """A window both shorter than the walk and longer than it is not a preference."""
+    result = await to_params(hass)
+
+    result = await advance(
+        hass,
+        result,
+        {**PARAMS, CONF_WALK_DURATION_MIN: 20, CONF_MIN_WALK_DURATION_MIN: 30},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "params"
+    assert result["errors"] == {CONF_MIN_WALK_DURATION_MIN: ERROR_MIN_WALK_TOO_LONG}
+
+
+async def test_a_minimum_equal_to_the_walk_is_accepted(hass: HomeAssistant) -> None:
+    """The boundary is legitimate: it simply means nothing shorter is ever offered."""
+    result = await run_wizard(
+        hass, params={**PARAMS, CONF_WALK_DURATION_MIN: 20, CONF_MIN_WALK_DURATION_MIN: 20}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_MIN_WALK_DURATION_MIN] == 20
+
+
+async def test_shortening_switched_off_is_never_too_long(hass: HomeAssistant) -> None:
+    """0 means "never shorten a walk", which no walk duration can contradict."""
+    result = await run_wizard(
+        hass, params={**PARAMS, CONF_WALK_DURATION_MIN: 20, CONF_MIN_WALK_DURATION_MIN: 0}
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_MIN_WALK_DURATION_MIN] == 0

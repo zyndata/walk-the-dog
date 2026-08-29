@@ -15,6 +15,11 @@ those extra cycles from talking about the past.
 
 Nothing is ever sent about a walk that looks dry: silence means "go as planned".
 
+When nothing of the full length is dry, the advice may be to walk a shorter one.
+That message has to name the length as well as the time — "set off at 07:20" is
+not the whole of it if the walk is twenty minutes shorter than usual — and so does
+the confirmation that follows it.
+
 Who is interrupted is decided per walk, not per integration: each configured walk
 carries its own list of companion-app devices, its own mute switch and its own
 away entity (docs/CONFIG.md § Per-walk alerts), because the morning walk and the
@@ -74,6 +79,7 @@ from .engine import (
     DIRECTION_LATER,
     DIRECTION_NO_DRY_WINDOW,
     DIRECTION_NONE,
+    DIRECTION_SHORTER,
     is_actionable,
     is_material_change,
     superseded_by_the_clock,
@@ -90,7 +96,9 @@ _LOGGER = logging.getLogger(__name__)
 
 #: Directions worth interrupting the user for. `none` means the walk is fine and
 #: `unknown` means we do not know — neither is news.
-ALERT_DIRECTIONS: Final = frozenset({DIRECTION_EARLIER, DIRECTION_LATER, DIRECTION_NO_DRY_WINDOW})
+ALERT_DIRECTIONS: Final = frozenset(
+    {DIRECTION_EARLIER, DIRECTION_LATER, DIRECTION_SHORTER, DIRECTION_NO_DRY_WINDOW}
+)
 
 #: strings.json section the notification texts live in, so phase 7 translates them
 #: the same way as everything else the user reads. `common` is the only top-level
@@ -103,9 +111,12 @@ TEXT_PREFIX: Final = "notification_"
 #: knows the suggestion is an early answer that is still being checked.
 TEXT_PROVISIONAL: Final = "provisional"
 
-#: The two shapes the optional confirmation takes shortly before setting off: the
-#: plan still stands, or the rain has gone and the walk is back to its normal time.
+#: The shapes the optional confirmation takes shortly before setting off: the plan
+#: still stands, or the rain has gone and the walk is back to its normal time. A
+#: shortened plan gets its own wording — "still on" must not quietly drop the one
+#: thing that makes this advice unusual, which is that the walk is cut short.
 TEXT_CONFIRMED: Final = "confirmed"
+TEXT_CONFIRMED_SHORTER: Final = "confirmed_shorter"
 TEXT_STAND_DOWN: Final = "stand_down"
 
 #: Label on the one action button the push carries.
@@ -371,6 +382,8 @@ class WalkNotifier:
         if recommendation.direction == DIRECTION_NONE:
             return TEXT_STAND_DOWN
         if recommendation.direction in ALERT_DIRECTIONS and is_actionable(recommendation, now):
+            if recommendation.direction == DIRECTION_SHORTER:
+                return TEXT_CONFIRMED_SHORTER
             return TEXT_CONFIRMED
         return None
 
@@ -509,6 +522,9 @@ def _compose(
         "until": _local_time(recommendation.recommended_end),
         "shift": str(abs(int(shift.total_seconds() // 60))) if shift else "0",
         "duration": str(recommendation.duration_s // 60),
+        # How long the walk being suggested actually is — the same number as
+        # `duration` unless the advice is to cut the walk short.
+        "recommended_duration": str(int(recommendation.recommended_duration.total_seconds()) // 60),
         "intensity": recommendation.peak_intensity,
     }
     title = _lookup(texts, "title", placeholders)
@@ -563,6 +579,7 @@ __all__ = [
     "TAG_PREFIX",
     "TEXT_ACTION_WALKED",
     "TEXT_CONFIRMED",
+    "TEXT_CONFIRMED_SHORTER",
     "TEXT_PREFIX",
     "TEXT_PROVISIONAL",
     "TEXT_STAND_DOWN",

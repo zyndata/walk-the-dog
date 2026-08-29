@@ -5,6 +5,11 @@ score the scheduled walk window, and when it is not dry look outwards on the
 10-minute grid for the nearest window that is — earlier beating later at equal
 distance, because the dog waits less and nearer-term forecasts are better.
 
+When no window of the full length is dry anywhere in the margins, a shorter walk
+in the dry is still a real answer, and one last pass looks for it: whole grid
+slots only, longest first, and only where a radar reaches every slot of it — a
+ten-minute gap seen by an hourly model alone is not a gap, it is rounding.
+
 The search is bounded by the present as well as by the margins: a window that has
 already begun is not advice, it is history, so `recommend` takes `now` and never
 offers a start before it. `is_actionable` is the matching rule for the caller —
@@ -39,6 +44,8 @@ if TYPE_CHECKING:
 DIRECTION_NONE = "none"
 DIRECTION_EARLIER = "earlier"
 DIRECTION_LATER = "later"
+#: A walk of the full length fits nowhere, but a shorter one does.
+DIRECTION_SHORTER = "shorter"
 DIRECTION_NO_DRY_WINDOW = "no_dry_window"
 DIRECTION_UNKNOWN = "unknown"
 
@@ -70,11 +77,17 @@ class Search:
     The three travel together everywhere the search goes — the slot grid to score,
     the candidate starts, the window each candidate covers — so they are one value
     rather than three parameters restated at every call.
+
+    `min_duration` is the fourth, and the only optional one: the shortest walk the
+    user would still go out for when nothing of the full length is dry. `None`
+    switches shortening off, and the search behaves exactly as it did before it
+    existed.
     """
 
     duration: timedelta
     earlier_margin: timedelta
     later_margin: timedelta
+    min_duration: timedelta | None = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +155,9 @@ class Recommendation:
     scheduled: WindowVerdict
     recommended_start: datetime | None = None
     recommended: WindowVerdict | None = None
+    #: Length of the *suggested* walk when it differs from the scheduled one — set
+    #: only by `shorter`, so `None` reads as "as long as it was going to be".
+    recommended_duration_s: int | None = None
     sources: tuple[SourceBreakdown, ...] = ()
 
     @property
@@ -177,11 +193,18 @@ class Recommendation:
         return self.recommended_start - self.scheduled_start
 
     @property
+    def recommended_duration(self) -> timedelta:
+        """How long the suggested walk is — the scheduled length unless it was cut."""
+        if self.recommended_duration_s is None:
+            return timedelta(seconds=self.duration_s)
+        return timedelta(seconds=self.recommended_duration_s)
+
+    @property
     def recommended_end(self) -> datetime | None:
         """When the suggested walk would get home — the other half of the advice."""
         if self.recommended_start is None:
             return None
-        return self.recommended_start + timedelta(seconds=self.duration_s)
+        return self.recommended_start + self.recommended_duration
 
     @property
     def provisional(self) -> bool:
@@ -296,6 +319,27 @@ def candidate_starts(
     return tuple(starts)
 
 
+def shorter_durations(search: Search) -> tuple[timedelta, ...]:
+    """Walk lengths worth offering when the full one fits nowhere, longest first.
+
+    Whole multiples of `SLOT`, strictly shorter than the walk and no shorter than
+    `min_duration` — not `duration - k*SLOT`, because the grid is what decides
+    which lengths are distinguishable at all. A 25-minute walk is therefore offered
+    20 minutes or 10, never a "15" that scores exactly the same slots as the 20.
+
+    Empty when shortening is off, and empty when the walk is already one slot long:
+    there is nothing shorter than a single frame to offer.
+    """
+    if search.min_duration is None or search.min_duration <= timedelta(0):
+        return ()
+    slot_s = int(SLOT.total_seconds())
+    # Strictly shorter: a walk that is an exact number of slots may not be offered
+    # its own length back as a "shortening".
+    longest = (int(search.duration.total_seconds()) - 1) // slot_s
+    shortest = max(1, -(-int(search.min_duration.total_seconds()) // slot_s))
+    return tuple(SLOT * count for count in range(longest, shortest - 1, -1))
+
+
 def source_breakdown(
     consensus: Consensus, start: datetime, duration: timedelta
 ) -> tuple[SourceBreakdown, ...]:
@@ -333,6 +377,33 @@ def source_breakdown(
             )
         )
     return tuple(breakdown)
+
+
+def _find_shorter(
+    consensus: Consensus,
+    *,
+    scheduled_start: datetime,
+    search: Search,
+    starts: tuple[datetime, ...],
+) -> tuple[datetime, timedelta, WindowVerdict] | None:
+    """The best shorter walk that is dry, or None if there is not one.
+
+    Ranked longest first, and within one length by the order `starts` already has:
+    nearest to the scheduled time, earlier beating later at equal distance. Twenty
+    dry minutes half an hour away beats ten dry minutes now — the dog is better off
+    walking longer than sooner.
+
+    A candidate must be radar-backed to count. The whole content of this advice is
+    *when* the gap is, and that is precisely what an hourly model cannot tell us; a
+    ten-minute clearing it appears to show is rounding, not weather. It also means
+    a shortened recommendation is never `provisional`, without a rule saying so.
+    """
+    for duration in shorter_durations(search):
+        for start in starts:
+            candidate = evaluate_window(consensus, start, duration)
+            if candidate.dry and candidate.nowcast_covered:
+                return start, duration, candidate
+    return None
 
 
 def recommend(
@@ -380,6 +451,24 @@ def recommend(
                 recommended=candidate,
                 **base,
             )
+
+    # Only now, with a full-length walk ruled out everywhere in the margins: a walk
+    # of the whole length at another hour always beats a shortened one at this one.
+    # The scheduled start rejoins the candidates here — it was excluded from the
+    # search above because it is the window that failed, but a *shorter* walk
+    # beginning at the normal time is the most ordinary answer of all.
+    passed = now is not None and scheduled_start < now
+    starts = candidates if passed else (scheduled_start, *candidates)
+    found = _find_shorter(consensus, scheduled_start=scheduled_start, search=search, starts=starts)
+    if found is not None:
+        start, duration, candidate = found
+        return Recommendation(
+            direction=DIRECTION_SHORTER,
+            recommended_start=start,
+            recommended=candidate,
+            recommended_duration_s=int(duration.total_seconds()),
+            **base,
+        )
 
     return Recommendation(direction=DIRECTION_NO_DRY_WINDOW, **base)
 
@@ -435,7 +524,13 @@ def is_material_change(previous: Recommendation | None, current: Recommendation)
     """
     if previous is None:
         return True
-    if current.direction != previous.direction:
+    # What to do, and — for a shortened walk — for how long. The rules below all
+    # speak about times, yet a walk cut from twenty dry minutes to ten is different
+    # advice with every time in it unchanged, so the length belongs in this pair.
+    if (current.direction, current.recommended_duration_s) != (
+        previous.direction,
+        previous.recommended_duration_s,
+    ):
         return True
     if (
         previous.recommended_start is not None
@@ -457,6 +552,7 @@ __all__ = [
     "DIRECTION_LATER",
     "DIRECTION_NONE",
     "DIRECTION_NO_DRY_WINDOW",
+    "DIRECTION_SHORTER",
     "DIRECTION_UNKNOWN",
     "HYSTERESIS_DRY",
     "HYSTERESIS_WET",
@@ -474,6 +570,7 @@ __all__ = [
     "is_actionable",
     "is_material_change",
     "recommend",
+    "shorter_durations",
     "source_breakdown",
     "superseded_by_the_clock",
 ]

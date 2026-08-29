@@ -55,6 +55,7 @@
           "earlier_margin_min": "Szukaj tyle wcześniej",
           "later_margin_min": "Szukaj tyle później",
           "walk_duration_min": "Średnia długość spaceru",
+          "min_walk_duration_min": "Najkrótszy spacer, który ma sens",
           "confirm_margin_min": "Druga wiadomość tuż przed wyjściem",
           "notify_service": "Zawsze powiadamiaj to urządzenie",
           "fire_event": "Wywołuj własne zdarzenie",
@@ -66,6 +67,7 @@
           "earlier_margin_min": "O ile wcześniej niż o zaplanowanej godzinie możesz wyjść z domu. To jest zarazem moment, w którym przychodzi powiadomienie, więc zostaw tu 60 minut lub mniej: tak daleko sięgają prognozy radarów opadów, a wiadomość wysłana wcześniej może opierać się już tylko na modelach godzinowych.",
           "later_margin_min": "O ile później niż o zaplanowanej godzinie możesz wyjść z domu. Późniejsze wyjście jest zawsze sprawdzane ponownie, w miarę jak ta godzina się zbliża — radary zobaczą je na długo przed tym, zanim trzeba będzie wychodzić — więc szeroki margines kosztuje tu tylko kilka zapytań o prognozę więcej.",
           "walk_duration_min": "Ile trwa spacer. Żeby jakaś godzina została zaproponowana, cały spacer musi pozostać suchy, więc spacer dłuższy niż 60 minut, na które prognozują radary, nigdy nie będzie w całości potwierdzony radarem w chwili, gdy dostajesz wiadomość.",
+          "min_walk_duration_min": "Gdy w całym zakresie nie ma suchego okna na cały spacer, zaproponuj najdłuższe suche okno trwające co najmniej tyle: krótki spacer bez deszczu jest lepszy niż pełny w deszczu. Wartość zmienia się co 10 minut, bo tyle trwa jedna klatka radaru — krótszej przerwy żadne źródło i tak nie widzi — a skrócony spacer jest proponowany tylko tam, gdzie sięga radar. Wartość 0 wyłącza skracanie: usłyszysz wtedy wyłącznie o pełnym spacerze albo o kurtce przeciwdeszczowej.",
           "confirm_margin_min": "Druga, krótka wiadomość tyle minut przed faktycznym wyjściem, mówiąca, że otrzymany plan jest nadal aktualny — albo że deszcz odpuścił i można jednak iść o zwykłej porze. Trafia na te same urządzenia co pierwsza. Wartość 0 wyłącza ją i jest ustawieniem domyślnym: brak wiadomości oznacza, że nic się nie zmieniło.",
           "notify_service": "Urządzenie z aplikacją Home Assistant, które dostaje alert o każdym spacerze. Nie wycisza go ani nieobecność, ani wyciszenie pojedynczego spaceru — tylko przełącznik Alerty. Telefony dodane do pojedynczego spaceru dostają powiadomienie razem z nim. Zostaw puste, aby powiadamiać wyłącznie telefony przypisane do spacerów.",
           "fire_event": "Wywołuje zdarzenie walk_the_dog_alert, na które mogą reagować Twoje własne automatyzacje.",
@@ -90,7 +92,8 @@
     "error": {
       "invalid_time": "Nie udało się odczytać godziny spaceru. Użyj zapisu 24-godzinnego, na przykład 07:30.",
       "no_walk_times": "Podaj przynajmniej jedną godzinę spaceru.",
-      "invalid_notify_service": "Wybierz jedno z urządzeń z listy albo wpisz nazwę usługi notify zaczynającą się od mobile_app_."
+      "invalid_notify_service": "Wybierz jedno z urządzeń z listy albo wpisz nazwę usługi notify zaczynającą się od mobile_app_.",
+      "min_walk_too_long": "Najkrótszy spacer nie może trwać dłużej niż sam spacer. Zmniejsz tę wartość albo ustaw 0, żeby nigdy nie skracać spaceru."
     }
   },
   "options": {
@@ -141,6 +144,7 @@
           "earlier_margin_min": "Szukaj tyle wcześniej",
           "later_margin_min": "Szukaj tyle później",
           "walk_duration_min": "Średnia długość spaceru",
+          "min_walk_duration_min": "Najkrótszy spacer, który ma sens",
           "confirm_margin_min": "Druga wiadomość tuż przed wyjściem",
           "notify_service": "Zawsze powiadamiaj to urządzenie",
           "fire_event": "Wywołuj własne zdarzenie",
@@ -152,6 +156,7 @@
           "earlier_margin_min": "O ile wcześniej niż o zaplanowanej godzinie możesz wyjść z domu. To jest zarazem moment, w którym przychodzi powiadomienie, więc zostaw tu 60 minut lub mniej: tak daleko sięgają prognozy radarów opadów, a wiadomość wysłana wcześniej może opierać się już tylko na modelach godzinowych.",
           "later_margin_min": "O ile później niż o zaplanowanej godzinie możesz wyjść z domu. Późniejsze wyjście jest zawsze sprawdzane ponownie, w miarę jak ta godzina się zbliża — radary zobaczą je na długo przed tym, zanim trzeba będzie wychodzić — więc szeroki margines kosztuje tu tylko kilka zapytań o prognozę więcej.",
           "walk_duration_min": "Ile trwa spacer. Żeby jakaś godzina została zaproponowana, cały spacer musi pozostać suchy, więc spacer dłuższy niż 60 minut, na które prognozują radary, nigdy nie będzie w całości potwierdzony radarem w chwili, gdy dostajesz wiadomość.",
+          "min_walk_duration_min": "Gdy w całym zakresie nie ma suchego okna na cały spacer, zaproponuj najdłuższe suche okno trwające co najmniej tyle: krótki spacer bez deszczu jest lepszy niż pełny w deszczu. Wartość zmienia się co 10 minut, bo tyle trwa jedna klatka radaru — krótszej przerwy żadne źródło i tak nie widzi — a skrócony spacer jest proponowany tylko tam, gdzie sięga radar. Wartość 0 wyłącza skracanie: usłyszysz wtedy wyłącznie o pełnym spacerze albo o kurtce przeciwdeszczowej.",
           "confirm_margin_min": "Druga, krótka wiadomość tyle minut przed faktycznym wyjściem, mówiąca, że otrzymany plan jest nadal aktualny — albo że deszcz odpuścił i można jednak iść o zwykłej porze. Trafia na te same urządzenia co pierwsza. Wartość 0 wyłącza ją i jest ustawieniem domyślnym: brak wiadomości oznacza, że nic się nie zmieniło.",
           "notify_service": "Urządzenie z aplikacją Home Assistant, które dostaje alert o każdym spacerze. Nie wycisza go ani nieobecność, ani wyciszenie pojedynczego spaceru — tylko przełącznik Alerty. Telefony dodane do pojedynczego spaceru dostają powiadomienie razem z nim. Zostaw puste, aby powiadamiać wyłącznie telefony przypisane do spacerów.",
           "fire_event": "Wywołuje zdarzenie walk_the_dog_alert, na które mogą reagować Twoje własne automatyzacje.",
@@ -176,7 +181,8 @@
     "error": {
       "invalid_time": "Nie udało się odczytać godziny spaceru. Użyj zapisu 24-godzinnego, na przykład 07:30.",
       "no_walk_times": "Podaj przynajmniej jedną godzinę spaceru.",
-      "invalid_notify_service": "Wybierz jedno z urządzeń z listy albo wpisz nazwę usługi notify zaczynającą się od mobile_app_."
+      "invalid_notify_service": "Wybierz jedno z urządzeń z listy albo wpisz nazwę usługi notify zaczynającą się od mobile_app_.",
+      "min_walk_too_long": "Najkrótszy spacer nie może trwać dłużej niż sam spacer. Zmniejsz tę wartość albo ustaw 0, żeby nigdy nie skracać spaceru."
     }
   },
   "selector": {
@@ -208,6 +214,7 @@
           "ok": "Idź o zwykłej porze",
           "earlier": "Wyjdź wcześniej",
           "later": "Wyjdź później",
+          "shorter": "Skróć spacer",
           "no_dry_window": "Brak suchego okna pogodowego"
         },
         "state_attributes": {
@@ -225,6 +232,9 @@
           },
           "duration_min": {
             "name": "Długość spaceru"
+          },
+          "recommended_duration_min": {
+            "name": "Sugerowana długość"
           },
           "risk": {
             "name": "Ryzyko deszczu"
@@ -300,6 +310,7 @@
     "notification_title": "Idź już z psem",
     "notification_earlier": "Deszcz spodziewany około {scheduled}. Wyjdź o {recommended} — {shift} min wcześniej — a cały {duration}-minutowy spacer powinien być suchy; z powrotem w domu o {until}.",
     "notification_later": "Deszcz spodziewany około {scheduled}. Poczekaj do {recommended} — {shift} min później — a cały {duration}-minutowy spacer powinien być suchy; z powrotem w domu o {until}.",
+    "notification_shorter": "Deszcz spodziewany około {scheduled} i nie ma w pobliżu suchego {duration}-minutowego okna. Zmieści się krótszy spacer: wyjdź o {recommended} i wróć do {until} — {recommended_duration} minut bez deszczu.",
     "notification_provisional": "Radar nie sięga jeszcze tak daleko, więc to szacunek z modelu — obserwuję dalej i dam znać, jeśli coś się zmieni.",
     "notification_no_dry_window": "Deszcz spodziewany około {scheduled} i nie ma w pobliżu suchego {duration}-minutowego okna. Weź kurtkę przeciwdeszczową.",
     "walk_slot_all": "codziennie",
@@ -313,6 +324,7 @@
     "walk_slot_sat": "w soboty",
     "walk_slot_sun": "w niedziele",
     "notification_confirmed": "Plan aktualny: wyjdź o {recommended}, z powrotem w domu o {until}. Od poprzedniej wiadomości nic się nie zmieniło.",
+    "notification_confirmed_shorter": "Plan aktualny: wyjdź o {recommended} na krótszy spacer, {recommended_duration} minut, z powrotem w domu o {until}. Od poprzedniej wiadomości nic się nie zmieniło.",
     "notification_stand_down": "Deszcz około {scheduled} już nie jest spodziewany — można iść o zwykłej porze.",
     "notification_action_walked": "Już byliśmy",
     "default_device_unset": "urządzenie, które za chwilę ustawisz w polu „Zawsze powiadamiaj to urządzenie” w ustawieniach alertów"

@@ -47,6 +47,7 @@ from .const import (
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
+    CONF_MIN_WALK_DURATION_MIN,
     CONF_NOTIFY_SERVICE,
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
@@ -62,6 +63,7 @@ from .const import (
     DEFAULT_FIRE_EVENT,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
+    DEFAULT_MIN_WALK_DURATION_MIN,
     DEFAULT_RADIUS_KM,
     DOMAIN,
     INTEGRATION_NAME,
@@ -79,6 +81,7 @@ from .const import (
     NOWCAST_HORIZON_MIN,
     RADIUS_STEP_KM,
     SCHEDULE_MODE_DAILY,
+    SHORT_WALK_STEP_MIN,
     TITLE_CATEGORY,
     WALK_DURATION_STEP_MIN,
     WALK_DURATION_WARN_MIN,
@@ -102,6 +105,15 @@ if TYPE_CHECKING:
 CONF_CONFIRM: Final = "confirm"
 
 ERROR_INVALID_NOTIFY_SERVICE: Final = "invalid_notify_service"
+
+#: A shortest-acceptable walk longer than the walk itself. Refused rather than
+#: confirmed like `long_walk` and `beyond_radar`: those two guard choices that are
+#: legitimate but unreliable, and this one guards a choice that is empty — it asks
+#: for a window both shorter than the walk and longer than it.
+ERROR_MIN_WALK_TOO_LONG: Final = "min_walk_too_long"
+
+#: The value of `min_walk_duration_min` that switches shortening off entirely.
+SHORTENING_OFF: Final = 0
 
 #: The notification step names the days a walk belongs to in its description, and
 #: that text belongs to no form field. `common` is the only top-level strings.json
@@ -181,6 +193,9 @@ def _collect_params(user_input: dict[str, Any], *, keep_notify: bool = True) -> 
         CONF_EARLIER_MARGIN_MIN: int(user_input[CONF_EARLIER_MARGIN_MIN]),
         CONF_LATER_MARGIN_MIN: int(user_input[CONF_LATER_MARGIN_MIN]),
         CONF_WALK_DURATION_MIN: int(user_input[CONF_WALK_DURATION_MIN]),
+        CONF_MIN_WALK_DURATION_MIN: int(
+            user_input.get(CONF_MIN_WALK_DURATION_MIN, DEFAULT_MIN_WALK_DURATION_MIN)
+        ),
         CONF_CONFIRM_MARGIN_MIN: int(
             user_input.get(CONF_CONFIRM_MARGIN_MIN, DEFAULT_CONFIRM_MARGIN_MIN)
         ),
@@ -193,6 +208,17 @@ def _collect_params(user_input: dict[str, Any], *, keep_notify: bool = True) -> 
     if notify_service := _validate_notify_service(user_input.get(CONF_NOTIFY_SERVICE)):
         params[CONF_NOTIFY_SERVICE] = notify_service
     return params
+
+
+def _shortening_exceeds_walk(params: Mapping[str, Any]) -> bool:
+    """True when the shortest acceptable walk is longer than the walk itself.
+
+    Not a preference anybody could mean, so it is an error on the field rather
+    than one more confirmation step. Shortening switched off is never wrong,
+    however long the walk is.
+    """
+    minimum = int(params[CONF_MIN_WALK_DURATION_MIN])
+    return minimum != SHORTENING_OFF and minimum > int(params[CONF_WALK_DURATION_MIN])
 
 
 def _collect_target(user_input: Mapping[str, Any]) -> dict[str, Any]:
@@ -461,6 +487,12 @@ class _WalkFlowSteps:
                 _marker(CONF_WALK_DURATION_MIN, current): _minutes_selector(
                     MIN_WALK_DURATION_MIN, MAX_WALK_DURATION_MIN, WALK_DURATION_STEP_MIN
                 ),
+                # Whole slots only, and 0 for "never shorten": the grid cannot tell
+                # a five-minute window from a ten-minute one, so a finer step would
+                # offer a precision no source publishes.
+                _marker(
+                    CONF_MIN_WALK_DURATION_MIN, current, DEFAULT_MIN_WALK_DURATION_MIN
+                ): _minutes_selector(SHORTENING_OFF, MAX_WALK_DURATION_MIN, SHORT_WALK_STEP_MIN),
                 _marker(
                     CONF_CONFIRM_MARGIN_MIN, current, DEFAULT_CONFIRM_MARGIN_MIN
                 ): _minutes_selector(MIN_MARGIN_MIN, MAX_CONFIRM_MARGIN_MIN, CONFIRM_STEP_MIN),
@@ -488,7 +520,9 @@ class _WalkFlowSteps:
                 # Keep everything else the user typed; only the bad field is flagged.
                 self._params = _collect_params(user_input, keep_notify=False)
                 errors[CONF_NOTIFY_SERVICE] = ERROR_INVALID_NOTIFY_SERVICE
-            else:
+            if _shortening_exceeds_walk(self._params):
+                errors[CONF_MIN_WALK_DURATION_MIN] = ERROR_MIN_WALK_TOO_LONG
+            if not errors:
                 return await self._async_check_long_walk()
 
         return self.async_show_form(

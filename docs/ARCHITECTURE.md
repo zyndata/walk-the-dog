@@ -292,6 +292,20 @@ starting at `s` covers the slots in `[s, s + D)`.
   nothing else in the engine knows what time it is. `recommend(now=…)` is therefore not optional
   for the coordinator; omitting it searches the whole margin, past included, which only a test
   evaluating the geometry in isolation should want.
+- **Shortening** (added in 1.1.0, and only when `min_walk_duration_min` is set): when the search
+  above finds nothing, one more pass looks for the longest window that is *shorter* than the walk
+  and dry. Candidate lengths are whole multiples of the slot, strictly shorter than `D` and no
+  shorter than the configured minimum — not `D − k·SLOT`, because the grid decides which lengths
+  are distinguishable at all, so a 25-minute walk is offered 20 minutes or 10 and never a "15"
+  that scores exactly the slots the 20 does. Candidate starts are the same ones as above **plus
+  `T` itself**, which the full-length search excludes because it is the window that failed:
+  "go now, come back sooner" is the most ordinary form this advice takes. Ranked longest first,
+  then by the existing tie-break — nearest to `T`, earlier beating later at equal distance —
+  because the dog is better off walking longer than sooner. A shortened candidate must be
+  `nowcast_covered`: the whole content of this advice is *when* the gap is, and that is precisely
+  what an hourly model cannot say, so a shortened recommendation is never `provisional` and needs
+  no rule saying so. The result is `direction = shorter` with `recommended_duration_s` set; every
+  other direction leaves it `None`, meaning "as long as it was going to be".
 - **Nowcast coverage.** Each window verdict records whether a *radar* source reaches every one of
   its slots (`nowcast_covered`). The radars forecast 60 minutes ahead and the models 12 hours, so
   a walk moved further out than the radar's reach is answered by the models alone: sound about
@@ -299,7 +313,8 @@ starting at `s` covers the slots in `[s, s + D)`.
   nowcast-covered is `provisional` — an early answer the coordinator keeps re-checking, and the
   notification says so.
 - **Output** (`Recommendation` dataclass): `direction` (`none` = walk as planned / `earlier` /
-  `later` / `no_dry_window` / `unknown`), `recommended_start`, scheduled-window risk + confidence +
+  `later` / `shorter` / `no_dry_window` / `unknown`), `recommended_start`,
+  `recommended_duration_s` (set by `shorter` alone), scheduled-window risk + confidence +
   peak intensity class, per-source breakdown (each source's verdict over the scheduled window +
   its `SourceStatus`), `degraded` and `horizon_limited` flags. `unknown` is the phase 4 precision
   of the sensor's `unknown` state: no source reaches the scheduled window at all, so no search
@@ -307,8 +322,10 @@ starting at `s` covers the slots in `[s, s + D)`.
 
 **Material change** (gates re-notification after the first dispatch; any one suffices):
 
-1. `direction` changes (any transition between none / earlier / later / no_dry_window /
-   unknown);
+1. `direction` changes (any transition between none / earlier / later / shorter /
+   no_dry_window / unknown), **or the recommended length changes** — a walk cut from twenty dry
+   minutes to ten is different advice with every time in it unchanged, and the three rules below
+   all speak about times;
 2. `recommended_start` moves by ≥ 20 min (2 slots) from the last **notified** value;
 3. the scheduled-window verdict flips with hysteresis — wet→dry only when window risk < 0.4,
    dry→wet only when ≥ 0.6 (crossing 0.5 alone never re-notifies, preventing flapping);
