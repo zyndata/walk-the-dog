@@ -1720,12 +1720,27 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   advice and walks their usual half-hour should not have the message vanish mid-walk. Watching
   ten minutes longer than needed costs one cycle.
 
-- **Version cut, tag not pushed.** `CHANGELOG.md` has a dated `[1.1.0]` section — which absorbs
-  the post-1.0 notification work that was sitting under `[Unreleased]`, since that is a minor
-  change by the same reckoning — and `manifest.json` reads `1.1.0`, so `test_release.py` holds.
-  **Tagging `v1.1.0` and publishing the GitHub release is left to the maintainer**, the same way
-  phase 9 left the HACS pull request: the Release workflow publishes from the section above the
-  moment the tag lands.
+- **Released as [`v1.1.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.1.0)**
+  (2026-08-29, at `6b3b0f6`). `CHANGELOG.md`'s dated `[1.1.0]` section absorbs the post-1.0
+  notification work that had been sitting under `[Unreleased]`, since that is a minor change by
+  the same reckoning; `manifest.json` reads `1.1.0`, so `test_release.py` holds. **CI**,
+  **Validate** (hassfest + HACS, no ignores) and **Release** all green on the tag, and the
+  release is published, not a draft and not a pre-release.
+
+- **The HACS default-inclusion pull request is still deliberately un-opened.** Unchanged from
+  phase 9, and re-confirmed by the maintainer on 2026-08-29 when the release was cut: everything
+  [hacs/default](https://github.com/hacs/default) checks is already true — public, description,
+  issues enabled, 11 topics, valid `hacs.json` and manifest, brand assets, two published
+  releases, HACS action and hassfest green with no ignores — and the repository is not yet listed
+  there and has no open pull request. It is one line added alphabetically to the `integration`
+  file, from a branch on the maintainer's own fork, submitted as editable. Left for a moment when
+  the shortened-walk advice has been seen working on real weather.
+
+  One thing to watch when it is opened: that pull request runs a **brands** check of its own, and
+  `walk_the_dog` is *not* in [home-assistant/brands](https://github.com/home-assistant/brands) —
+  the integration ships its own images under `custom_components/walk_the_dog/brand/` instead (see
+  `docs/BRANDING.md`). The HACS action accepts that with no ignores; whether hacs/default's check
+  does is untested.
 
 - **Open questions carried forward:** all of phase 9's, unchanged — the benchmark on real
   hardware, the re-issued LibreWXR frame, the first frame's 8-minute wait, the one-hour
