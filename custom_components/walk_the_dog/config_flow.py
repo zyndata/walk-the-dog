@@ -43,7 +43,6 @@ from .const import (
     CONF_AUTO_MUTE_ENTITY,
     CONF_CONFIRM_MARGIN_MIN,
     CONF_EARLIER_MARGIN_MIN,
-    CONF_FIRE_EVENT,
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
@@ -60,7 +59,6 @@ from .const import (
     CONFIRM_STEP_MIN,
     DEFAULT_CONFIRM_MARGIN_MIN,
     DEFAULT_EARLIER_MARGIN_MIN,
-    DEFAULT_FIRE_EVENT,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
     DEFAULT_MIN_WALK_DURATION_MIN,
@@ -199,7 +197,6 @@ def _collect_params(user_input: dict[str, Any], *, keep_notify: bool = True) -> 
         CONF_CONFIRM_MARGIN_MIN: int(
             user_input.get(CONF_CONFIRM_MARGIN_MIN, DEFAULT_CONFIRM_MARGIN_MIN)
         ),
-        CONF_FIRE_EVENT: bool(user_input[CONF_FIRE_EVENT]),
     }
     if auto_mute := user_input.get(CONF_AUTO_MUTE_ENTITY):
         params[CONF_AUTO_MUTE_ENTITY] = auto_mute
@@ -503,7 +500,6 @@ class _WalkFlowSteps:
                         custom_value=True,
                     )
                 ),
-                _marker(CONF_FIRE_EVENT, current, DEFAULT_FIRE_EVENT): BooleanSelector(),
                 _marker(CONF_AUTO_MUTE_ENTITY, current, required=False): EntitySelector(
                     EntitySelectorConfig(domain=["person", "device_tracker"])
                 ),

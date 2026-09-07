@@ -51,7 +51,6 @@ config entry. The **location is entry data, not an option**: it is set once in t
 | Second message shortly before you leave | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, or the rain has gone and the walk is back to its normal time. Goes to the same devices as the first message, and is only ever sent when something was already said about that walk |
 | Always notify this device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. **Receives every walk's alert.** Per-walk devices are notified *in addition* to it, never instead of it, and the combined list is de-duplicated so a device named in both places gets one push. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means only the per-walk devices are notified. |
 | Per-walk alerts | `walk_targets` | map | *(unset)* | One entry per walk the user configured something for. See [Per-walk alerts](#per-walk-alerts). |
-| Fire custom event | `fire_event` | bool | `false` | Emits `walk_the_dog_alert`; payload documented below |
 | Auto-mute entity | `auto_mute_entity` | entity id | *(unset)* | Optional `person`/`device_tracker`; pushes suppressed for **every** walk while it is not `home`. A walk that sets its own `away_entity` follows that one instead. |
 
 Optional options that are left empty are **absent** from the stored options, never stored as
@@ -316,8 +315,15 @@ the cycle continues.
 ## Event payload
 
 `walk_the_dog_alert` fires whenever a notification **would** fire — including when auto-mute
-suppresses the push, because an automation may well want to know while nobody is home. It is
-opt-in via the `fire_event` option. Times are ISO-8601 UTC.
+suppresses the push, because an automation may well want to know while nobody is home. Times are
+ISO-8601 UTC.
+
+It is not opt-in. Up to 1.1.0 it sat behind a `fire_event` option, default off; since 1.2.0 the
+line each alert leaves in the recommendation sensor's own "Activity" list is rendered from this
+event, and that list is what a tapped notification opens — the last place advice should be
+withheld from. The option was removed rather than left switching nothing. An entry configured
+before 1.2.0 keeps a `fire_event` key in its stored options until the next time the options flow
+is saved; nothing reads it.
 
 ```json
 {
@@ -337,6 +343,8 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
   "data_age_s": 0,
   "muted": false,
   "confirmation": false,
+  "entity_id": "sensor.walk_the_dog_walk_recommendation",
+  "summary": "Earlier — 04:30",
   "sources": [
     {
       "source_id": "icon_eu",
@@ -370,6 +378,8 @@ opt-in via the `fire_event` option. Times are ISO-8601 UTC.
 | `data_age_s` | int \| `null` | Age of the freshest source that voted |
 | `muted` | bool | Nobody was reached at all. One phone being skipped does not set it; an entry with an always-notified device effectively never does |
 | `confirmation` | bool | This is the pre-departure reassurance rather than a new recommendation |
+| `entity_id` | entity id \| `null` | The recommendation sensor this alert is filed under in the logbook. `null` when the alert leaves no line on that sensor's screen — the "still on" reassurance, which changes nothing — and also on the very first cycle of a fresh install, before the sensor is registered |
+| `summary` | string | The same advice as one short line, in the user's language: `Earlier — 04:30`, `Shorter — 05:10, 10 min`, `No dry window`. Rendered here because the logbook platform's callback is synchronous and cannot load translations per event ([ARCHITECTURE.md](ARCHITECTURE.md) § Outputs) |
 | `sources` | list | One entry per source: its own verdict over the scheduled window, its status, its weight and its peak |
 
 `weight` is the source's static reliability decayed by how old its data is — except for `chmi`,
@@ -438,7 +448,6 @@ never change afterwards, and can be renamed in the entity registry.
   "later_margin_min": 30,
   "walk_duration_min": 30,
   "min_walk_duration_min": 10,
-  "fire_event": false,
   "notify_service": "mobile_app_phone",
   "auto_mute_entity": "person.owner",
   "walk_targets": {

@@ -42,7 +42,11 @@ back — and says plainly that the radar cannot see that far yet, so the time ma
 - **One notification at the right moment** — pushed at the last actionable time
   (`walk − earlier margin`), re-sent only when the recommendation materially changes, and
   **never about a time that has already passed**. Optional auto-mute while you are away from
-  home, and an optional `walk_the_dog_alert` event for your own automations.
+  home, and a `walk_the_dog_alert` event for your own automations.
+- **Every alert leaves a line in the sensor's history** — tapping the notification opens the
+  *Walk recommendation* sensor, and its *Activity* list now reads *Later — 18:15* rather than
+  just *later*. The hour is on the screen the notification takes you to, so you can look up what
+  you were told without opening the attributes.
 - **It keeps watching, and says when it is not sure yet** — the radars see one hour ahead and the
   hourly models see the day, so "wait until 14:00" decided at 12:00 is marked as an estimate and
   re-checked as 14:00 comes into radar range. You are told again only if the answer changes. In
@@ -99,7 +103,8 @@ three things, and the options flow lets you change any of them later.
 What it creates: a **recommendation sensor** for the next walk (risk, confidence, suggested
 time, per-source breakdown), a **binary sensor** that is on while a walk window is being
 watched, and a **switch** that turns alerting off entirely. Notifications carry an *Already
-went* button, and a `walk_the_dog_alert` event fires alongside them for your own automations.
+went* button; a `walk_the_dog_alert` event fires alongside them for your own automations, and
+each alert leaves one short line in the recommendation sensor's *Activity* list.
 
 See [docs/CONFIG.md](docs/CONFIG.md) for every option and its semantics, including
 [what it costs to run](docs/CONFIG.md#what-it-costs-to-run) in requests and megabytes.

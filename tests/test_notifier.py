@@ -16,10 +16,10 @@ from homeassistant.const import STATE_HOME, STATE_NOT_HOME, STATE_UNAVAILABLE, S
 from pytest_homeassistant_custom_component.common import async_capture_events, async_mock_service
 
 from custom_components.walk_the_dog.const import (
+    ATTR_SUMMARY,
     CLEAR_NOTIFICATION,
     CONF_AUTO_MUTE_ENTITY,
     CONF_CONFIRM_MARGIN_MIN,
-    CONF_FIRE_EVENT,
     CONF_MIN_WALK_DURATION_MIN,
     CONF_NOTIFY_SERVICE,
     CONF_TARGET_AWAY_ENTITY,
@@ -127,7 +127,6 @@ async def coordinator(
         options={
             **entry.options,
             CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
-            CONF_FIRE_EVENT: True,
             CONF_AUTO_MUTE_ENTITY: MUTE_ENTITY,
         },
     )
@@ -349,7 +348,7 @@ async def test_an_unregistered_notify_service_is_reported_not_raised(
     """A phone configured before its companion service exists must not break a cycle."""
     hass.config_entries.async_update_entry(
         entry,
-        options={**entry.options, CONF_NOTIFY_SERVICE: "mobile_app_missing", CONF_FIRE_EVENT: True},
+        options={**entry.options, CONF_NOTIFY_SERVICE: "mobile_app_missing"},
     )
     freezer.move_to(IDLE)
     fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
@@ -368,8 +367,12 @@ async def test_no_notify_service_still_fires_the_event(
     freezer: FrozenDateTimeFactory,
     alerts: list,
 ) -> None:
-    """Push notification is optional; the event is a separate opt-in."""
-    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_FIRE_EVENT: True})
+    """Push notification is optional; the event is not optional at all.
+
+    An entry with nothing configured but a walk: no notify service, and — since
+    1.2.0 — no switch that could hold the event back either, because the logbook
+    line on the sensor's own screen is rendered from it.
+    """
     freezer.move_to(IDLE)
     fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
     await setup_entry(hass, entry)
@@ -408,7 +411,6 @@ async def setup_with_target(
     """
     options: dict[str, object] = {
         **entry.options,
-        CONF_FIRE_EVENT: True,
         CONF_WALK_TARGETS: {WALK_KEY: target},
     }
     if default_device:
@@ -973,7 +975,6 @@ async def confirming(
         options={
             **entry.options,
             CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
-            CONF_FIRE_EVENT: True,
             CONF_AUTO_MUTE_ENTITY: MUTE_ENTITY,
             CONF_CONFIRM_MARGIN_MIN: 15,
         },
@@ -1118,6 +1119,9 @@ async def test_a_ten_minute_clearing_is_offered_as_a_shorter_walk(
     assert alerts[0].data["direction"] == DIRECTION_SHORTER
     assert alerts[0].data["duration_min"] == 30
     assert alerts[0].data["recommended_duration_min"] == 10
+    # The same advice as one line for the sensor's history: the length is the one
+    # thing a shortened walk cannot leave out, however short the line has to be.
+    assert alerts[0].data[ATTR_SUMMARY] == "Shorter — 05:10, 10 min"
 
 
 async def test_the_same_clearing_says_no_dry_window_with_shortening_off(
@@ -1126,6 +1130,7 @@ async def test_the_same_clearing_says_no_dry_window_with_shortening_off(
     fetch: FakeFetch,
     freezer: FrozenDateTimeFactory,
     notifications: list[ServiceCall],
+    alerts: list,
 ) -> None:
     """Setting the minimum to 0 restores exactly the pre-phase-10 message."""
     hass.config_entries.async_update_entry(
@@ -1144,6 +1149,8 @@ async def test_the_same_clearing_says_no_dry_window_with_shortening_off(
 
     assert len(notifications) == 1
     assert "Take a raincoat" in notifications[0].data["message"]
+    # The line for a walk with nowhere to move it names no hour, because there is none.
+    assert alerts[0].data[ATTR_SUMMARY] == "No dry window"
 
 
 async def test_the_shortened_walk_is_confirmed_in_its_own_words(

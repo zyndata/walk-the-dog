@@ -569,10 +569,24 @@ Phase 0 effective resolutions (measured): LibreWXR/OPERA ~2 km; KNMI 5.5 km; ICO
   alerting disabled makes no request even once.
 - **Notification**: via the configured `notify.mobile_app_*` service, per the dispatch rules
   above; content localized (phase 7).
-- **Event** `walk_the_dog_alert` (opt-in): fired whenever a notification would fire (even if
-  muted by auto-mute — automations may want it), payload = the `Recommendation` serialized,
-  plus `muted`. Schema in [CONFIG.md](CONFIG.md) § Event payload.
+- **Event** `walk_the_dog_alert`: fired whenever a notification would fire (even if muted by
+  auto-mute — automations may want it), payload = the `Recommendation` serialized, plus `muted`,
+  `confirmation`, `entity_id` and `summary`. Schema in [CONFIG.md](CONFIG.md) § Event payload.
+  It is unconditional; the `fire_event` option that used to gate it was removed in 1.2.0, when
+  the logbook line below became something rendered from this event.
+- **Logbook line** (`logbook.py`): one short line per alert in the recommendation sensor's own
+  "Activity" list — `Later — 18:15` — because that list is what a tapped notification opens and
+  it can only show the state word on its own. `async_describe_events` is registered once and its
+  callback is synchronous, so the *notifier* renders the text into the payload (`summary`) while
+  the translations are loaded and the platform echoes it; loading translations in the platform
+  would freeze the language at start-up and write the history in two of them. Home Assistant
+  renders every instance of a described event type, so nothing can be skipped — what is decided
+  instead is where a line is *filed*: the payload's `entity_id` is `null` for the reassurance
+  that an unchanged plan still stands, which keeps it in the whole-home logbook and off the
+  sensor's screen.
 - **Notification texts** live under the `common` key of `strings.json` with a `notification_`
-  prefix and are read at runtime through `homeassistant.helpers.translation`. That is the only
-  top-level key hassfest allows for user-facing strings that belong to no form and no entity —
-  verified against the real hassfest image, which rejects any other.
+  prefix — the logbook lines beside them with a `logbook_` prefix, deliberately separate because
+  one is a sentence the user was interrupted with and the other is a couple of words read later
+  in a list. Both are read at runtime through `homeassistant.helpers.translation`. `common` is
+  the only top-level key hassfest allows for user-facing strings that belong to no form and no
+  entity — verified against the real hassfest image, which rejects any other.

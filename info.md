@@ -15,7 +15,9 @@ later** so the walk stays dry.
 - When no dry window of your usual length exists at all, it offers the longest shorter one that
   is still worth going out for — and says how long it is.
 - Push notification at the last actionable moment, re-sent only when the advice materially
-  changes. Optional auto-mute while you are away and an optional event for automations.
+  changes. Optional auto-mute while you are away, and an event for automations.
+- Every alert leaves one short line naming the hour in the recommendation sensor's Activity
+  list — the screen the notification opens.
 - Designed for low-end hardware: polls only around your walk times, samples only the pixels
   around your location, stays within strict request and memory budgets.
 

@@ -36,7 +36,6 @@ CONF_MIN_WALK_DURATION_MIN: Final = "min_walk_duration_min"
 CONF_SCHEDULE_MODE: Final = "schedule_mode"
 CONF_SCHEDULE: Final = "schedule"
 CONF_NOTIFY_SERVICE: Final = "notify_service"
-CONF_FIRE_EVENT: Final = "fire_event"
 CONF_AUTO_MUTE_ENTITY: Final = "auto_mute_entity"
 CONF_WALK_TARGETS: Final = "walk_targets"
 CONF_CONFIRM_MARGIN_MIN: Final = "confirm_margin_min"
@@ -88,8 +87,6 @@ NOTIFY_SERVICE_PREFIX: Final = "mobile_app_"
 #: entity id: tapping a notification opens the entity that holds the same advice in
 #: full, so the two modules have to mean the same entity by it.
 ENTITY_KEY_RECOMMENDATION: Final = "recommendation"
-
-DEFAULT_FIRE_EVENT: Final = False
 
 # Time grid: all window evaluation happens on a 10-minute UTC grid
 SLOT_MINUTES: Final = 10
@@ -190,8 +187,23 @@ def publish_settle_s(source_id: str) -> int:
 #: user's margins against this.
 NOWCAST_HORIZON_MIN: Final = 60
 
-# Event fired when a notification would fire (opt-in; payload documented in phase 6)
+#: Fired whenever a notification would fire, whether or not one is actually sent.
+#: Unconditional since 1.2.0: the logbook line the user reads on the sensor's own
+#: screen is rendered from this event (`logbook.py`), so an option that could
+#: withhold it would withhold the advice from the place the advice is looked up.
+#: Payload documented in docs/CONFIG.md § Event payload.
 EVENT_ALERT: Final = "walk_the_dog_alert"
+
+#: Payload field holding the recommendation in one word. Named here only because
+#: `logbook.py` falls back to it for alerts recorded before 1.2.0, which carry no
+#: `summary`; `WalkData.payload()` writes it by its literal name alongside the rest.
+ATTR_DIRECTION: Final = "direction"
+
+#: Payload field carrying the one-line form of the advice — "Later — 18:15" — in
+#: the user's language, rendered by the notifier at fire time. Its presence is also
+#: the rule for *whether* the alert earns a logbook line: absent means it does not
+#: (docs/CONFIG.md § Event payload).
+ATTR_SUMMARY: Final = "summary"
 
 #: Home Assistant fires this when a companion-app notification action is tapped. Named
 #: here rather than imported: `mobile_app` is not a dependency of this integration and

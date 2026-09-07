@@ -48,6 +48,19 @@ being taken away by the tap that opened it. What removes it is the walk ending, 
 The `walk_the_dog_alert` event fires whenever a notification *would* fire, even
 when nothing is sent — an automation may well want to know while nobody is home.
 Its payload is `WalkData.payload()`, documented in docs/CONFIG.md.
+
+It fires unconditionally. It used to sit behind a `fire_event` option, but since
+1.2.0 it is also what puts a line in the sensor's own "Activity" list (`logbook.py`),
+and the screen the user opens by tapping the push is the last place advice should be
+withheld from. Two fields are added here rather than in the coordinator, because both
+are things only this module knows at fire time: `summary`, the same advice in one short
+line, rendered in the user's language while the translations are loaded anyway, and the
+recommendation sensor's entity id, which files the line under the entity the user is
+looking at. Every alert gets a summary — Home Assistant renders every instance of an
+event type it has been taught, so one without a line of its own would leave a blank row.
+What the entity id decides is *where* the line goes: it is null for the reassurance that
+an unchanged plan still stands, which keeps that off the sensor's screen without losing
+it from the whole-home logbook.
 """
 
 from __future__ import annotations
@@ -57,16 +70,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
-from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN, Platform
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
+    STATE_HOME,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    Platform,
+)
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
 from .const import (
     ACTION_WALKED,
+    ATTR_SUMMARY,
     CLEAR_NOTIFICATION,
     CONF_AUTO_MUTE_ENTITY,
-    CONF_FIRE_EVENT,
     CONF_NOTIFY_SERVICE,
     DOMAIN,
     ENTITY_KEY_RECOMMENDATION,
@@ -107,6 +126,12 @@ ALERT_DIRECTIONS: Final = frozenset(
 TRANSLATION_CATEGORY: Final = "common"
 TEXT_PREFIX: Final = "notification_"
 
+#: The same strings file, a second and far shorter set of texts: what one alert
+#: looks like as a single line in the sensor's history. Deliberately not the
+#: `notification_` sentences — a log entry is a couple of words and a time, and the
+#: reasoning stays in the push the user just read (docs/ARCHITECTURE.md § Outputs).
+LOGBOOK_PREFIX: Final = "logbook_"
+
 #: Appended when the recommended window is beyond the radar's reach, so the user
 #: knows the suggestion is an early answer that is still being checked.
 TEXT_PROVISIONAL: Final = "provisional"
@@ -118,6 +143,25 @@ TEXT_PROVISIONAL: Final = "provisional"
 TEXT_CONFIRMED: Final = "confirmed"
 TEXT_CONFIRMED_SHORTER: Final = "confirmed_shorter"
 TEXT_STAND_DOWN: Final = "stand_down"
+
+#: Which short text stands for which message. Only the confirmations need naming —
+#: an alert is its own direction — and the two "still on" wordings share one line,
+#: because the difference between them is the walk's length and the push they repeat
+#: already spelled that out.
+LOGBOOK_KEYS: Final[dict[str, str]] = {
+    TEXT_CONFIRMED: TEXT_CONFIRMED,
+    TEXT_CONFIRMED_SHORTER: TEXT_CONFIRMED,
+    TEXT_STAND_DOWN: TEXT_STAND_DOWN,
+}
+
+#: Which messages leave their line on the recommendation sensor's own screen: the
+#: advice, and the stand-down that withdraws it. Both are news. The reassurance that
+#: an unchanged plan still stands is not, and it is left off that screen so it cannot
+#: push the one line the user opened it to read out of sight. It is still described
+#: for the whole-home logbook, where a record of every message sent is the point:
+#: Home Assistant renders every instance of an event type it has been taught, so an
+#: alert cannot be silently dropped — only filed somewhere else.
+LOGGED_UNDER_ENTITY: Final = frozenset({TEXT_STAND_DOWN})
 
 #: Label on the one action button the push carries.
 TEXT_ACTION_WALKED: Final = "action_walked"
@@ -198,7 +242,6 @@ class WalkNotifier:
         self._entry_id = entry.entry_id
         options = entry.options
         self._default_service = options.get(CONF_NOTIFY_SERVICE)
-        self._fire_event = bool(options.get(CONF_FIRE_EVENT, False))
         self._mute_entity = options.get(CONF_AUTO_MUTE_ENTITY)
         self._confirm_margin = confirm_margin
         self._walk_start: datetime | None = None
@@ -395,30 +438,39 @@ class WalkNotifier:
         *,
         key: str | None,
     ) -> None:
-        """Fire the event and, unless muted, push. `key` None means a normal alert."""
+        """Fire the event and, unless muted, push. `key` None means a normal alert.
+
+        The translations are loaded before the event rather than inside the push,
+        because the event carries a rendered sentence of its own now and a walk
+        nobody is at home for still deserves its line in the history.
+        """
         payload = data.payload()
         recipients = self.recipients_for(target)
         # `muted` says nobody at all was reached, not that one phone was skipped:
         # an automation cares whether the advice got out, not to how many phones.
         payload["muted"] = not recipients
         payload["confirmation"] = key is not None
-        if self._fire_event:
-            self.hass.bus.async_fire(EVENT_ALERT, payload)
+        texts = await self._async_translations()
+        entity_id = self._recommendation_entity_id()
+        payload[ATTR_ENTITY_ID] = entity_id if _filed_under_entity(key) else None
+        payload[ATTR_SUMMARY] = _summarize(texts, recommendation, key)
+        self.hass.bus.async_fire(EVENT_ALERT, payload)
         if recipients:
-            await self._async_send(recommendation, recipients, key=key)
+            await self._async_send(texts, recommendation, recipients, key=key, entity_id=entity_id)
 
     async def _async_send(
         self,
+        texts: dict[str, str],
         recommendation: Recommendation,
         services: tuple[str, ...],
         *,
         key: str | None,
+        entity_id: str | None,
     ) -> None:
         """Call every companion-app notify service this walk is addressed to."""
         registered = [service for service in services if self._registered(service)]
         if not registered:
             return
-        texts = await self._async_translations()
         title, message = _compose(texts, recommendation, key)
         data: dict[str, Any] = {
             "tag": walk_tag(self._walk_start),
@@ -430,7 +482,8 @@ class WalkNotifier:
                 }
             ],
         }
-        if (click := self._click_target()) is not None:
+        if entity_id is not None:
+            click = f"{CLICK_ENTITY_PREFIX}{entity_id}"
             # The two companion apps spell the same idea differently; sending both
             # is what makes one message behave the same way on either phone.
             data["clickAction"] = click
@@ -471,19 +524,22 @@ class WalkNotifier:
         )
         return False
 
-    def _click_target(self) -> str | None:
-        """What a tapped notification should open, or None while it does not exist.
+    def _recommendation_entity_id(self) -> str | None:
+        """The sensor holding this advice in full, or None while it does not exist.
 
-        Resolved at every send rather than stored once: the entity id belongs to the
-        user, who may rename it, and the registry is the only thing that knows the
-        current one. Before the sensor is registered — the first cycle of a fresh
-        install — there is nothing to point at, and the tap falls back to opening
-        the app, which is what it did before.
+        Two things want it: the tap target of the push, and the event payload, whose
+        line in that same sensor's history has to be filed under the entity or it
+        shows up against the integration instead. One lookup answers both.
+
+        Resolved at every dispatch rather than stored once: the entity id belongs to
+        the user, who may rename it, and the registry is the only thing that knows
+        the current one. Before the sensor is registered — the first cycle of a fresh
+        install — there is nothing to point at, the tap falls back to opening the app,
+        and the alert leaves no line.
         """
-        entity_id = er.async_get(self.hass).async_get_entity_id(
+        return er.async_get(self.hass).async_get_entity_id(
             Platform.SENSOR, DOMAIN, f"{self._entry_id}_{ENTITY_KEY_RECOMMENDATION}"
         )
-        return None if entity_id is None else f"{CLICK_ENTITY_PREFIX}{entity_id}"
 
     async def _async_translations(self) -> dict[str, str]:
         """Every string this module can say, in the user's language."""
@@ -492,9 +548,15 @@ class WalkNotifier:
         )
 
 
-def _lookup(texts: dict[str, str], key: str, placeholders: dict[str, str]) -> str:
+def _lookup(
+    texts: dict[str, str],
+    key: str,
+    placeholders: dict[str, str],
+    *,
+    prefix: str = TEXT_PREFIX,
+) -> str:
     """One translated string, formatted — falling back to the key if it is missing."""
-    template = texts.get(f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.{TEXT_PREFIX}{key}")
+    template = texts.get(f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.{prefix}{key}")
     if template is None:
         return key
     try:
@@ -509,12 +571,10 @@ def _local_time(moment: datetime | None) -> str:
     return "" if moment is None else dt_util.as_local(moment).strftime("%H:%M")
 
 
-def _compose(
-    texts: dict[str, str], recommendation: Recommendation, key: str | None
-) -> tuple[str, str]:
-    """Title and body for one message. `key` None means the ordinary alert."""
+def _placeholders(recommendation: Recommendation) -> dict[str, str]:
+    """Everything a text about this recommendation can name, as strings."""
     shift = recommendation.shift
-    placeholders = {
+    return {
         "scheduled": _local_time(recommendation.scheduled_start),
         "recommended": _local_time(recommendation.recommended_start),
         # The other half of the advice: a walk that starts later also ends later,
@@ -527,6 +587,33 @@ def _compose(
         "recommended_duration": str(int(recommendation.recommended_duration.total_seconds()) // 60),
         "intensity": recommendation.peak_intensity,
     }
+
+
+def _summarize(texts: dict[str, str], recommendation: Recommendation, key: str | None) -> str:
+    """This message as one short line: a couple of words and a time.
+
+    Not a shortened notification — a different text for a different place. The push
+    carries the reasoning because the user has just been interrupted and is owed
+    one; the log entry is read later, in a list, and is only ever asked *when*.
+    """
+    name = LOGBOOK_KEYS.get(key, key) if key is not None else recommendation.direction
+    return _lookup(texts, name, _placeholders(recommendation), prefix=LOGBOOK_PREFIX)
+
+
+def _filed_under_entity(key: str | None) -> bool:
+    """Whether this message's line belongs on the recommendation sensor's screen.
+
+    The stand-down is a confirmation and is filed all the same: "walk at the normal
+    time after all" is the hour changing back, which is the whole subject of this log.
+    """
+    return key is None or key in LOGGED_UNDER_ENTITY
+
+
+def _compose(
+    texts: dict[str, str], recommendation: Recommendation, key: str | None
+) -> tuple[str, str]:
+    """Title and body for one message. `key` None means the ordinary alert."""
+    placeholders = _placeholders(recommendation)
     title = _lookup(texts, "title", placeholders)
     if key is not None:
         return title, _lookup(texts, key, placeholders)
@@ -575,6 +662,9 @@ __all__ = [
     "ALERT_DIRECTIONS",
     "CLICK_ENTITY_PREFIX",
     "DEFAULT_TARGET",
+    "LOGBOOK_KEYS",
+    "LOGBOOK_PREFIX",
+    "LOGGED_UNDER_ENTITY",
     "STICKY",
     "TAG_PREFIX",
     "TEXT_ACTION_WALKED",

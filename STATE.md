@@ -1756,8 +1756,8 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Phase 11 — The advice in the logbook
 
-- **Status:** not started
-- **Date:** planned 2026-09-07
+- **Status:** done (554 tests green offline, ruff clean, pre-commit clean)
+- **Date:** 2026-09-07
 - **Why it exists:** live use on Android. Tapping the push opens the recommendation sensor, and
   the "Activity" list on that screen shows only the state word, because the state is an enum and
   the recommended hour lives in the attributes, which the logbook does not display. The screen the
@@ -1771,7 +1771,120 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - The single `unavailable` was a reload of the config entry, not a fault.
 - **Constraint set by the user:** the logbook line must be **a very short text** — a couple of
   words and a time, not a sentence. The notification keeps the reasoning; this is a log.
-- **Open questions carried forward:** all of phase 10's, unchanged.
+- **Deviation from `PLAN.md`, recorded before any code was written.** The phase's second design
+  decision rests on the `walk_the_dog_alert` event being "already fired with the whole payload".
+  It is not: `notifier._async_dispatch` fires it only behind `CONF_FIRE_EVENT`, an option that
+  defaults to `False`, so a logbook platform describing that event would have produced **no line
+  at all** on a default install — including the maintainer's, which is the install the phase was
+  written from. The phase's own first acceptance criterion would have been false out of the box.
+
+  Three ways out were put to the maintainer, who chose the first on 2026-09-07:
+  1. **Fire the event unconditionally and remove the option.** Taken. `fire_event` would gate
+     nothing that matters once the logbook depends on the event, and an option whose "off" does
+     not turn anything off is worse than no option. Firing on the bus costs nothing; the recorder
+     rows are a handful per walk per day. The mechanism `PLAN.md` chose — `logbook.py` with
+     `async_describe_events` — is kept intact, and past alerts render retroactively because the
+     description is applied at read time.
+  2. *Rejected:* write the line with `logbook.async_log_entry` from the notifier. Changes no
+     public contract at all, but abandons the platform `PLAN.md` chose, makes `logbook` a real
+     dependency to be guarded, and writes a second kind of row for an event that already exists.
+  3. *Rejected:* build the platform as planned and document that the line needs `fire_event` on.
+     A feature nobody sees without first finding a checkbox is not the feature that was asked for.
+
+  Removing the option is the one thing here a user can notice. Existing entries keep a stale
+  `fire_event` key in their options; nothing reads it, and the options flow drops it on the next
+  save. `CHANGELOG.md` says so under **Removed**.
+
+- **The five design decisions the phase opens with, settled before any code was written:**
+
+  1. **A logbook platform, not a second entity and not a richer state.** Exactly as `PLAN.md`
+     proposed, and for its reasons: the state is a `SensorDeviceClass.ENUM` with a closed
+     `OPTIONS` list, so a time in it would break the enum, the translations and every automation
+     matching on it, and a separate timestamp sensor would have a history of its own but still
+     not appear in *this* list. `logbook.py` describing `walk_the_dog_alert` puts the line
+     exactly where the user is looking.
+  2. **How short is short: `{direction} — {recommended}`**, in new `logbook_*` keys under
+     `common`, deliberately separate from the `notification_*` sentences. Rendered: *Later —
+     18:15*, *Wcześniej — 04:30*, *Shorter — 05:10, 10 min*, *No dry window*, *Walk as planned*.
+     The longest of them renders to 23 characters against a 40-character ceiling asserted in
+     `tests/test_strings.py`, which is a guard against a translation turning into prose rather
+     than a typographic rule.
+  3. **Which events earn a line — refined, because the mechanism does not allow the rule as
+     written.** `PLAN.md` asked for no line at all from a confirmation. Home Assistant's
+     `_humanify` yields a row for *every* recorded instance of a described event type and has no
+     skip: a description returning `{}` produces a blank row, not no row. So the rule moved from
+     *whether* to *where*. Every alert carries a `summary` and is described; the payload's
+     `entity_id` is what files it, and the "still on" reassurance carries `null` there. The
+     entity-scoped logbook query matches events by the entity id inside the event JSON
+     (`logbook/queries/entities.py`), so that alert never reaches the sensor's Activity list —
+     which is the list the acceptance criterion is about — while the whole-home logbook still
+     records that a message was sent. The stand-down keeps its entity id: the hour moving back is
+     the whole subject of this log. Confirmations are off by default (`confirm_margin_min` is 0),
+     so on a stock install this distinction is invisible anyway.
+  4. **The notifier renders the line, the platform echoes it.** `async_describe_events` is
+     registered once and its callback is synchronous, so it cannot await translations per event,
+     and `hass.config.language` can change under it. The notifier already holds the loaded
+     translations at fire time. *Rejected:* the platform loading translations itself at
+     registration — it would freeze the language at whatever it was when Home Assistant started,
+     and a user who switched to Polish would find their history written in two languages.
+  5. **`entity_id` joins the payload**, a backward-compatible extension of a public contract,
+     documented in `docs/CONFIG.md` § Event payload. It reuses the lookup that already resolves
+     the push's `clickAction`, as `PLAN.md` asked: `_click_target()` became
+     `_recommendation_entity_id()` and the two callers build what they need from it. The click
+     target is still resolved for confirmations, which keeps their tap behaviour unchanged even
+     though their payload files no line.
+
+- **What was built:**
+  - **`logbook.py`** — `async_describe_events` for `EVENT_ALERT`, returning name, message and
+    (when the payload names one) entity id. It reads only the event, so it works with no config
+    entry loaded, and lines appear for alerts already in the recorder, as far back as history
+    goes. An alert recorded before 1.2.0 has no `summary`; it falls back to `direction` rather
+    than rendering a blank row.
+  - **`notifier.py`** — the event fires unconditionally; `summary` and `entity_id` join the
+    payload; `_summarize` and `_filed_under_entity` are the two new rules; `_placeholders` was
+    lifted out of `_compose` so the sentence and the line are formatted from one dict. The
+    translations are now loaded before the event rather than inside the push, because a walk
+    nobody is at home for still earns its line.
+  - **Six texts in both languages**, `logbook_earlier`, `logbook_later`, `logbook_shorter`,
+    `logbook_no_dry_window`, `logbook_stand_down`, `logbook_confirmed`. The two "still on"
+    wordings share one line: the difference between them is the walk's length, and the push they
+    repeat already spelled that out.
+  - **`manifest.json`: no dependency added, version bumped to 1.2.0.** Task 4 asked whether
+    `logbook` belongs in `after_dependencies`. It does not: `logbook` is in hassfest's
+    `ALLOWED_USED_COMPONENTS`, `async_process_integration_platforms` finds a custom integration's
+    `logbook.py` whenever either is set up first, and the core integrations that ship one
+    (`deconz`, `bthome`) declare nothing. This repo's own `sensor.py` already imports
+    `homeassistant.components.sensor` against an empty `requirements`/dependencies and hassfest is
+    green. **CI is the arbiter that confirms it** — the hassfest job runs on the push.
+  - **Tests: 12 new.** `tests/test_logbook.py` (7): the payload carrying its own line, the line
+    naming the hour and filed under the sensor, a revised recommendation earning a line, the
+    reassurance kept off the sensor's screen while still describable, the stand-down filed, a
+    1.1.0 payload still reading, and a line about an entity that no longer exists. `test_strings.py`
+    (3): every direction and every confirmation has a `logbook_*` text, and the rendered length
+    holds in `en` and `pl`. `test_notifier.py` (2 assertions added): the `shorter` line naming the
+    length and the `no_dry_window` line naming no hour, in the scenarios that already build them.
+
+- **Deliberately out of scope, as `PLAN.md` says:** the `unknown` between walks. It is what
+  "nothing is being watched right now" looks like and it is correct — the coordinator does not
+  poll outside `[T − earlier_margin − lead_time, walk end]` by design. The logbook lines are what
+  make that history readable.
+
+- **Not released.** `manifest.json` reads `1.2.0` and `CHANGELOG.md` has its dated `[1.2.0]`
+  section, which is what `test_release.py` requires; the `v1.2.0` tag that publishes it is the
+  maintainer's to push, as it was for 1.0.0 and 1.1.0.
+
+- **Open questions carried forward:** all of phase 10's, unchanged, including the HACS
+  default-inclusion pull request. Added by this phase:
+  - **Nobody has seen the line on a real phone yet.** The reasoning about which screen shows what
+    is read out of `homeassistant/components/logbook/processor.py` and `queries/entities.py`, not
+    off a device: that a described event with no entity id stays out of an entity's Activity list
+    and still appears in the whole-home logbook is asserted at the platform's callback, which is
+    as far as a test without a recorder reaches. Worth one look at the sensor's screen after the
+    next real alert.
+  - **The frontend renders `name` in front of `message`.** The line is therefore *Walk
+    recommendation Later — 18:15* rather than bare *Later — 18:15* wherever Home Assistant
+    chooses to show the name. Nothing here can shorten that half; if it reads badly on a phone,
+    the answer is the entity's own name, not the text.
 
 ## Dev-environment fix — a venv that survives a snap update (2026-09-07, out of phase)
 

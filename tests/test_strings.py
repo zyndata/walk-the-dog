@@ -26,7 +26,12 @@ from custom_components.walk_the_dog.const import (
     INTEGRATION_NAME,
     INTENSITY_MM_H,
 )
-from custom_components.walk_the_dog.notifier import ALERT_DIRECTIONS, TEXT_PREFIX
+from custom_components.walk_the_dog.notifier import (
+    ALERT_DIRECTIONS,
+    LOGBOOK_KEYS,
+    LOGBOOK_PREFIX,
+    TEXT_PREFIX,
+)
 from custom_components.walk_the_dog.schedule import DAY_KEYS, SCHEDULE_KEYS, SCHEDULE_MODES
 from custom_components.walk_the_dog.sensor import OPTIONS
 
@@ -151,6 +156,54 @@ def test_every_notification_has_a_text() -> None:
     }
 
     assert expected <= set(STRINGS["common"])
+
+
+#: Everything a notification or a logbook line can name, with a value of the right
+#: shape, so a text can be measured at the length the user actually sees.
+SAMPLE_PLACEHOLDERS = {
+    "scheduled": "18:00",
+    "recommended": "18:15",
+    "until": "18:45",
+    "shift": "15",
+    "duration": "30",
+    "recommended_duration": "20",
+    "intensity": "moderate",
+}
+
+#: A logbook line is a couple of words and a time — the reasoning stays in the push
+#: (PLAN.md phase 11). Well above what the texts render to and well below a
+#: sentence: this catches a translation turning into prose, not a stray character.
+MAX_LOGBOOK_LINE = 40
+
+
+def test_every_alert_has_a_logbook_line() -> None:
+    """Every message the notifier can send needs its one-line form for the history.
+
+    Home Assistant renders every instance of an event type it has been taught to
+    describe, so a message with no short text of its own would leave a blank row —
+    the confirmations included, even the one that never reaches the sensor's screen.
+    """
+    expected = {f"{LOGBOOK_PREFIX}{direction}" for direction in ALERT_DIRECTIONS} | {
+        f"{LOGBOOK_PREFIX}{key}" for key in LOGBOOK_KEYS.values()
+    }
+
+    assert expected <= set(STRINGS["common"])
+
+
+@pytest.mark.parametrize("code", ["en", *TRANSLATED])
+def test_a_logbook_line_stays_one_line(code: str) -> None:
+    """The constraint the phase was written under, asserted rather than trusted."""
+    lines = {
+        path: text.format(**SAMPLE_PLACEHOLDERS)
+        for path, text in _language(code).items()
+        if path.startswith(f"common.{LOGBOOK_PREFIX}")
+    }
+    assert lines, f"{code} has no logbook texts at all"
+
+    too_long = {path: text for path, text in lines.items() if len(text) > MAX_LOGBOOK_LINE}
+
+    assert too_long == {}
+    assert [path for path, text in lines.items() if "\n" in text] == []
 
 
 def test_every_schedule_slot_has_a_day_label() -> None:

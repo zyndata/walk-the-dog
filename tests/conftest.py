@@ -21,7 +21,6 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.walk_the_dog.const import (
     CONF_EARLIER_MARGIN_MIN,
-    CONF_FIRE_EVENT,
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
@@ -176,7 +175,6 @@ ENTRY_OPTIONS: dict[str, Any] = {
     CONF_EARLIER_MARGIN_MIN: 60,
     CONF_LATER_MARGIN_MIN: 30,
     CONF_WALK_DURATION_MIN: 30,
-    CONF_FIRE_EVENT: False,
 }
 
 

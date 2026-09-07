@@ -58,7 +58,6 @@
           "min_walk_duration_min": "Shortest walk still worth it",
           "confirm_margin_min": "Second message shortly before you leave",
           "notify_service": "Always notify this device",
-          "fire_event": "Fire a custom event",
           "auto_mute_entity": "Skip phones while this person is away"
         },
         "data_description": {
@@ -70,7 +69,6 @@
           "min_walk_duration_min": "When no dry window of the full length can be found anywhere in the margins, offer the longest dry window that is at least this long: a short walk in the dry beats a full one in the rain. It moves in 10-minute steps because that is one radar frame — the shortest gap any source can actually see — and a shortened walk is only ever suggested where the radar reaches. 0 switches it off, and you are then only told about a full-length walk or a raincoat.",
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
           "notify_service": "The companion app device that receives every walk's alert. Nothing silences it — not being away, not muting a single walk — except the Alerting switch. Phones added to an individual walk are notified alongside it. Leave empty to notify only the per-walk phones.",
-          "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
           "auto_mute_entity": "A fallback presence rule for phones that cannot say where they are. A companion app phone has a tracker of its own and answers for itself; only a phone without one asks about this person, and falls silent while they are away. The always-notified device is never affected."
         }
       },
@@ -147,7 +145,6 @@
           "min_walk_duration_min": "Shortest walk still worth it",
           "confirm_margin_min": "Second message shortly before you leave",
           "notify_service": "Always notify this device",
-          "fire_event": "Fire a custom event",
           "auto_mute_entity": "Skip phones while this person is away"
         },
         "data_description": {
@@ -159,7 +156,6 @@
           "min_walk_duration_min": "When no dry window of the full length can be found anywhere in the margins, offer the longest dry window that is at least this long: a short walk in the dry beats a full one in the rain. It moves in 10-minute steps because that is one radar frame — the shortest gap any source can actually see — and a shortened walk is only ever suggested where the radar reaches. 0 switches it off, and you are then only told about a full-length walk or a raincoat.",
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
           "notify_service": "The companion app device that receives every walk's alert. Nothing silences it — not being away, not muting a single walk — except the Alerting switch. Phones added to an individual walk are notified alongside it. Leave empty to notify only the per-walk phones.",
-          "fire_event": "Fires the walk_the_dog_alert event so your own automations can react.",
           "auto_mute_entity": "A fallback presence rule for phones that cannot say where they are. A companion app phone has a tracker of its own and answers for itself; only a phone without one asks about this person, and falls silent while they are away. The always-notified device is never affected."
         }
       },
@@ -327,7 +323,13 @@
     "notification_confirmed_shorter": "Still on: set off at {recommended} for a shorter walk of {recommended_duration} minutes, back home by {until}. Nothing has changed since the last message.",
     "notification_stand_down": "Rain is no longer expected around {scheduled} — walk at the normal time after all.",
     "notification_action_walked": "Already went",
-    "default_device_unset": "whichever device you set as \"Always notify this device\" in Alert settings"
+    "default_device_unset": "whichever device you set as \"Always notify this device\" in Alert settings",
+    "logbook_earlier": "Earlier — {recommended}",
+    "logbook_later": "Later — {recommended}",
+    "logbook_shorter": "Shorter — {recommended}, {recommended_duration} min",
+    "logbook_no_dry_window": "No dry window",
+    "logbook_stand_down": "Walk as planned",
+    "logbook_confirmed": "Still on — {recommended}"
   },
   "services": {
     "walked": {

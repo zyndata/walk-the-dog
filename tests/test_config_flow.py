@@ -25,7 +25,6 @@ from custom_components.walk_the_dog.const import (
     CONF_AUTO_MUTE_ENTITY,
     CONF_CONFIRM_MARGIN_MIN,
     CONF_EARLIER_MARGIN_MIN,
-    CONF_FIRE_EVENT,
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
@@ -73,7 +72,6 @@ PARAMS: dict[str, Any] = {
     CONF_WALK_DURATION_MIN: 30,
     CONF_MIN_WALK_DURATION_MIN: DEFAULT_MIN_WALK_DURATION_MIN,
     CONF_CONFIRM_MARGIN_MIN: DEFAULT_CONFIRM_MARGIN_MIN,
-    CONF_FIRE_EVENT: False,
 }
 
 STORED_PARAMS: dict[str, Any] = {**PARAMS, CONF_WALK_DURATION_MIN: 30}
@@ -587,7 +585,6 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
             CONF_WALK_DURATION_MIN: 25,
             CONF_MIN_WALK_DURATION_MIN: 20,
             CONF_CONFIRM_MARGIN_MIN: 15,
-            CONF_FIRE_EVENT: True,
         },
     )
     # 90 minutes of notice is more than the radar forecasts, so the flow asks first.
@@ -608,7 +605,6 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
         CONF_WALK_DURATION_MIN: 25,
         CONF_MIN_WALK_DURATION_MIN: 20,
         CONF_CONFIRM_MARGIN_MIN: 15,
-        CONF_FIRE_EVENT: True,
     }
     # The location is entry data, so the options flow never touches it.
     assert entry.data == {CONF_LOCATION: LOCATION}

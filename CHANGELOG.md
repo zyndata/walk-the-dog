@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-07
+
+### Added
+
+- **Every alert now leaves a line in the sensor's own history, and the line names the hour.**
+  Tapping a notification opens the *Walk recommendation* sensor, and the *Activity* list on that
+  screen could only ever show the state word — *later*, *ok* — because the recommended time lives
+  in the attributes, which that list does not display. So the screen the message took you to said
+  *that* the walk should move and never *to when*, while the message you had just tapped said
+  both. It now reads *Later — 18:15*, or *Shorter — 05:10, 10 min*, or *No dry window*, in
+  English or Polish. Deliberately a couple of words and a time: the reasoning stays in the
+  notification, and this is a log.
+
+  The reassurance that an unchanged plan still stands is kept off that screen, so it cannot push
+  the line you came to read out of sight; the stand-down that says the rain has gone is not, because
+  the hour moving back is exactly what this list is for. Lines appear for alerts you were already
+  sent, as far back as your history goes.
+
+- **`entity_id` and `summary`** in the `walk_the_dog_alert` payload: the recommendation sensor the
+  alert is filed under, and the same advice as one short line in your language.
+
+### Removed
+
+- **The *Fire a custom event* option.** `walk_the_dog_alert` now fires on every alert, always. The
+  option existed to keep the event off the bus for people who had no use for it, but the new
+  history line is rendered from that event — and the screen a notification opens is the last place
+  to withhold advice. Nothing else changes: if you had the option on, everything works as before;
+  if you had it off, your automations can now see the event, and a few rows a day join your
+  recorder. An integration set up before this release keeps a harmless, unread `fire_event` key in
+  its stored options until the next time you save its settings.
+
 ## [1.1.0] - 2026-08-29
 
 ### Added
@@ -562,7 +593,8 @@ way; all of it is written up in `docs/DATA_SOURCES.md` § CHMI:
 - RainViewer is no longer a candidate: its public API serves past radar frames only, and the
   live `radar.nowcast` array is empty.
 
-[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.0
 [1.1.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.1.0
 [1.0.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.0.0
 [0.8.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v0.8.0
