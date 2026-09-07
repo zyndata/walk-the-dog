@@ -1753,3 +1753,22 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     to settle — the same log of wrong calls that 1.0.x was already meant to collect.
   - **A shortened walk's end is not the watched window's end.** See *Deliberately not changed*.
     If the take-down ever wants to be exact, that is where it goes.
+
+## Phase 11 — The advice in the logbook
+
+- **Status:** not started
+- **Date:** planned 2026-09-07
+- **Why it exists:** live use on Android. Tapping the push opens the recommendation sensor, and
+  the "Activity" list on that screen shows only the state word, because the state is an enum and
+  the recommended hour lives in the attributes, which the logbook does not display. The screen the
+  notification opens therefore says *that* the walk should move and never *to when*. The
+  `walk_the_dog_alert` event already carries the hour; nothing reads it into that list.
+- **What the same session established** (from reading the code against a real screenshot, all
+  confirmed in the source, nothing changed yet):
+  - The `unknown` entries between walks are `_idle()` — outside
+    `[T − earlier_margin − lead_time, walk end]` no cycle runs, so `recommendation` is `None` and
+    the sensor has nothing to say. Correct, and out of scope for phase 11.
+  - The single `unavailable` was a reload of the config entry, not a fault.
+- **Constraint set by the user:** the logbook line must be **a very short text** — a couple of
+  words and a time, not a sentence. The notification keeps the reasoning; this is a log.
+- **Open questions carried forward:** all of phase 10's, unchanged.

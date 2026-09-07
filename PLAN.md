@@ -436,3 +436,81 @@ going out for, and say plainly how long it is.
 **Files touched:** `custom_components/walk_the_dog/engine/window.py`, `const.py`, `config_flow.py`,
 `sensor.py`, `notifier.py`, `coordinator.py`, `strings.json`, `translations/*.json`, `tests/*`,
 `docs/ARCHITECTURE.md`, `docs/CONFIG.md`, `README.md`, `CHANGELOG.md`, `STATE.md`.
+
+---
+
+## Phase 11 — The advice in the logbook
+
+**Post-1.1.** Written after live use on Android: tapping the push opens the recommendation sensor
+(phase 10's `clickAction`), and the "Activity" list on that screen is the first thing the user
+reads. Today it can only show the state word — `later`, `ok`, `unknown` — because the state is an
+enum and the hour lives in the attributes, which the logbook does not display. So the screen that
+opens says *that* the walk should move, and never *to when*, while the notification the user just
+tapped said both.
+
+**Goal:** every alert leaves one line in that list naming the hour. **The line is a very short
+text** — a couple of words and a time, not a sentence. The notification is where the reasoning
+goes; this is a log.
+
+**Inputs:** `CLAUDE.md`, `STATE.md`, this phase, `docs/ARCHITECTURE.md` (§ Outputs),
+`docs/CONFIG.md` (§ Event payload), `custom_components/walk_the_dog/notifier.py`.
+
+**Design decisions to make and record in `STATE.md` before coding:**
+
+- **Logbook, not a second entity and not a richer state.** The state is a `SensorDeviceClass.ENUM`
+  with a closed `OPTIONS` list; putting a time in it would break the enum, the translations and
+  every automation that matches on it. A separate timestamp sensor would have its own history but
+  would still not appear in *this* list. A `logbook.py` platform describing the
+  `walk_the_dog_alert` event — already fired with the whole payload — puts the line exactly where
+  the user is looking and changes no contract.
+- **How short is short.** Proposed: `{direction} — {recommended}`, e.g. *"Later — 18:15"* /
+  *"Później — 18:15"*, and *"Walk as planned"* / *"No dry window"* with no time at all. Target
+  roughly 30 characters, hard ceiling one line on a phone. New `logbook_*` keys in `common`,
+  deliberately separate from the `notification_*` sentences — the same string cannot serve both.
+- **Which events earn a line.** Proposed: the first alert for a walk and a stand-down yes;
+  confirmations (`confirmation: true` in the payload) no — a confirmation says nothing new, and
+  four of them per walk would bury the one line that matters. Re-alerts after a material change
+  do earn one: the hour moved, which is the whole point.
+- **How the line gets its language.** `async_describe_events` is registered once and its callback
+  is synchronous, so it cannot await translations per event, and `hass.config.language` can change
+  under it. Proposed: the notifier, which already holds the loaded translations at fire time,
+  renders the short text and puts it in the event payload; the logbook platform echoes it. The
+  alternative — the platform loading translations itself at registration — is recorded as
+  rejected, with the reason.
+- **Attaching the line to the entity.** The payload has no `entity_id` today, so the logbook would
+  file the line under the integration rather than under the sensor whose screen the user is on.
+  Adding the field is a backward-compatible extension of a public contract; document it.
+
+**Tasks:**
+
+1. `notifier.py`: add `entity_id` and the rendered short text to the event payload (the entity id
+   is already resolved for `clickAction` — reuse that lookup, do not add a second one).
+2. New `custom_components/walk_the_dog/logbook.py`: `async_describe_events` for `EVENT_ALERT`,
+   returning name, message and `entity_id`, and skipping confirmations.
+3. `strings.json` + `translations/pl.json`: the `logbook_*` texts, very short in both languages.
+4. `manifest.json`: check whether `logbook` belongs in `after_dependencies`; hassfest is the
+   arbiter, and it must stay green with no ignores.
+5. Tests: the described message for each direction, the confirmation producing none, the payload
+   carrying `entity_id`, and a length assertion that keeps the text short as translations change.
+6. Update `docs/ARCHITECTURE.md` (§ Outputs), `docs/CONFIG.md` (§ Event payload) and `README.md`.
+
+**Deliberately out of scope:** the `unknown` between walks. It is what "nothing is being watched
+right now" looks like, and it is correct — the coordinator does not poll outside
+`[T − earlier_margin − lead_time, walk end]` by design. The logbook lines are what make that
+history readable; suppressing the state itself would cost requests for no answer anyone reads.
+
+**Acceptance criteria:**
+
+- After an alert, the sensor's more-info "Activity" list shows a line naming the recommended hour
+  in the user's language; tapping the push and reading that screen answers "when" without opening
+  the attributes.
+- A confirmation adds no line; a materially changed recommendation does.
+- Every `logbook_*` string is one short line in both `en` and `pl`, asserted by a test.
+- Suite green offline, ruff clean, hassfest and HACS validation green with no ignores.
+- `STATE.md` records the five decisions above with their rationale; `CHANGELOG.md` gets a `1.2.0`
+  entry (new user-facing behavior and a new payload field → minor).
+- End-of-phase ritual completed.
+
+**Files touched:** `custom_components/walk_the_dog/logbook.py` (new), `notifier.py`,
+`const.py`, `manifest.json`, `strings.json`, `translations/*.json`, `tests/*`,
+`docs/ARCHITECTURE.md`, `docs/CONFIG.md`, `README.md`, `CHANGELOG.md`, `STATE.md`.
