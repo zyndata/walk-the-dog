@@ -1869,9 +1869,12 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   poll outside `[T − earlier_margin − lead_time, walk end]` by design. The logbook lines are what
   make that history readable.
 
-- **Not released.** `manifest.json` reads `1.2.0` and `CHANGELOG.md` has its dated `[1.2.0]`
-  section, which is what `test_release.py` requires; the `v1.2.0` tag that publishes it is the
-  maintainer's to push, as it was for 1.0.0 and 1.1.0.
+- **Released as [`v1.2.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.0)**
+  (2026-09-07, at `e0b7316`), by the maintainer's decision in the same session, so the logbook
+  line reaches the phone it was written for. `python scripts/release.py --tag` cut it;
+  **CI**, **Validate** (hassfest + HACS, no ignores) and **Release** all green on the tag, and
+  the release is published, not a draft and not a pre-release — HACS hides pre-releases from
+  anyone who has not opted into betas, which would make the update silently not appear.
 
 - **Open questions carried forward:** all of phase 10's, unchanged, including the HACS
   default-inclusion pull request. Added by this phase:
