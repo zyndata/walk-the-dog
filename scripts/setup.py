@@ -10,7 +10,17 @@ from __future__ import annotations
 
 import sys
 
-from _env import PYTHON_VERSION, REPO_ROOT, VENV_DIR, find_uv, run, run_tool, venv_bin
+from _env import (
+    PYTHON_VERSION,
+    REPO_ROOT,
+    VENV_DIR,
+    find_uv,
+    run,
+    run_tool,
+    uv_environ,
+    venv_bin,
+    venv_python_works,
+)
 
 
 def main() -> int:
@@ -25,8 +35,14 @@ def main() -> int:
         )
         return 1
 
-    if not venv_bin("python").is_file():
-        rc = run([uv, "venv", "--python", PYTHON_VERSION, VENV_DIR])
+    env = uv_environ()
+
+    if not venv_python_works():
+        # Covers a venv built before UV_PYTHON_INSTALL_DIR was pinned, whose
+        # interpreter a snap update has since taken away: `uv venv` replaces it.
+        if VENV_DIR.exists():
+            print("existing venv has no working interpreter — rebuilding it")
+        rc = run([uv, "venv", "--python", PYTHON_VERSION, VENV_DIR], env=env)
         if rc != 0:
             return rc
 
@@ -39,7 +55,8 @@ def main() -> int:
             venv_bin("python"),
             "-r",
             REPO_ROOT / "requirements-dev.txt",
-        ]
+        ],
+        env=env,
     )
     if rc != 0:
         return rc

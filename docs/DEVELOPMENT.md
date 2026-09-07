@@ -177,6 +177,15 @@ beta versions, so the update would silently not appear.
   Assistant releases; its version also pins the `homeassistant` package used in tests).
 - The `ruff` pin must match the `rev` in `.pre-commit-config.yaml`.
 - The Python version for the venv is pinned in `scripts/_env.py` (`PYTHON_VERSION`).
+- **Where uv keeps that Python matters on Linux.** uv downloads the interpreter under
+  `XDG_DATA_HOME`, and a snap sets that variable to a *per-revision* directory — the VS Code
+  snap gives `~/snap/code/<revision>/.local/share`. The venv's `python` is a symlink into it,
+  so the next snap update prunes the revision and every script here dies with *required file
+  not found*. `scripts/_env.py` (`uv_environ`) therefore points uv at
+  `~/.local/share/uv/python` **when, and only when, `XDG_DATA_HOME` is inside a snap**;
+  Windows and a plain Linux shell keep uv's own default, so nothing already downloaded is
+  orphaned. Set `UV_PYTHON_INSTALL_DIR` yourself and that wins. If a venv does lose its
+  interpreter, `python scripts/setup.py` now notices and rebuilds it instead of failing.
 - **Shipped code has a syntax floor of Python 3.13**, one release below what the minimum Home
   Assistant runs. A newer grammar is not a degraded feature — the integration fails to import
   and the user gets a traceback instead of a config flow, and the manual install route has no

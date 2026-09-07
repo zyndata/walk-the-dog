@@ -1772,3 +1772,35 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Constraint set by the user:** the logbook line must be **a very short text** — a couple of
   words and a time, not a sentence. The notification keeps the reasoning; this is a log.
 - **Open questions carried forward:** all of phase 10's, unchanged.
+
+## Dev-environment fix — a venv that survives a snap update (2026-09-07, out of phase)
+
+- **Status:** done
+- **Date:** 2026-09-07
+- **The failure:** `pre-commit` could not start —
+  `.venv/bin/python` was a symlink into `~/snap/code/253/.local/share/uv/python/...`, and snap
+  revision 253 no longer exists. Not a one-off: `uv` downloads its managed interpreter under
+  `XDG_DATA_HOME`, the VS Code snap sets that to a **per-revision** directory, so every VS Code
+  update breaks the venv of anyone who ran `scripts/setup.py` from its terminal.
+- **What was built:** `uv_environ()` in `scripts/_env.py` pins `UV_PYTHON_INSTALL_DIR` to
+  `~/.local/share/uv/python`, and `setup.py` runs both `uv` calls with it. `venv_python_works()`
+  makes `setup.py` rebuild a venv whose interpreter has gone, rather than fail later inside a
+  hook. `tests/test_dev_env.py` covers the redirect; `docs/DEVELOPMENT.md` § Versions and pins
+  explains it.
+- **Decisions:**
+  - **Only a snap `XDG_DATA_HOME` is redirected**, not every platform. Windows — the second dev
+    machine — and a plain Linux shell already hand uv a stable directory; moving them would
+    re-download Python 3.14 and orphan a working interpreter to fix a problem they do not have.
+    The Windows setup path is byte-for-byte unchanged.
+  - **An explicit `UV_PYTHON_INSTALL_DIR` always wins** (`setdefault`, not assignment) — the
+    script is fixing an environment bug, not taking the choice away.
+  - **The health check asks whether the interpreter runs, not whether the file exists.** A
+    dangling symlink is the exact shape of this failure, and `is_file()` alone reads it as
+    present on some paths.
+  - **No `CHANGELOG.md` entry:** nothing an integration user can observe. `CHANGELOG.md` is the
+    release page, not the dev log.
+- **Verified on Linux:** venv rebuilt onto `~/.local/share/uv/python/cpython-3.14.7-...`, outside
+  the snap; `scripts/lint.py` clean, 543 tests green, `pre-commit run` green. The dangling-symlink
+  branch was exercised directly before restoring the link.
+- **Not verified:** the Windows machine, which by design takes the unchanged code path. Re-running
+  `python scripts/setup.py` there should be a no-op.
