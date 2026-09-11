@@ -2090,5 +2090,11 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   presence rules; the config flow's validation paths; the LRU cache bounds and store schema; the
   CHMI palette decode, range factor and coverage inset; request budgets per adapter.
 
-- **Open questions carried forward:** the five design calls above, plus everything from
+- **Released as [`v1.2.1`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.1)**
+  (2026-09-11), carrying both this review's fixes and the raincoat fix written up above it —
+  the first release since `v1.2.0`. `python scripts/release.py --tag` cut it; **CI**,
+  **Validate** (hassfest + HACS, no ignores) and **Release** all green on the tag, and the
+  release is published, not a draft and not a pre-release, so HACS will offer it.
+
+- **Open questions carried forward:** the seven design calls above, plus everything from
   phase 11 and the earlier entries, unchanged.
