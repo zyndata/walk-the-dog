@@ -10,6 +10,15 @@ suffixed with the model id (`precipitation_icon_eu`,
 `precipitation_knmi_harmonie_arome_europe`). This adapter always requests both
 models, so the keys are always suffixed; a model absent from the response yields
 no series for it and its source is reported failed rather than silently dry.
+
+Timestamp semantics (Open-Meteo, hourly parameter definitions): `precipitation`
+is the "sum of the **preceding** hour", so the value stamped `H` is the rain that
+falls in `(H - 1 h, H]` — not in the hour that starts at `H`. The series this
+adapter returns is shifted accordingly, so a slot's start is the start of the hour
+the value describes, which is what `engine/grid.align` assumes of every source.
+Without the shift both models voted one hour late: the first value in a response
+is the current hour's stamp, i.e. rain that has already fallen, and it was being
+scored against the hour ahead.
 """
 
 from __future__ import annotations
@@ -48,6 +57,7 @@ MODEL_IDS: dict[str, str] = {
 }
 
 STEP_S = 3600  # hourly series; the 15-minutely one is interpolated and lossy
+_STEP = timedelta(seconds=STEP_S)
 FORECAST_HOURS = 12
 
 #: Fetched every 3rd 10-minute cycle: the freshest model re-runs hourly, so a
@@ -132,11 +142,13 @@ class OpenMeteoAdapter:
                     )
                     for s in stated.statuses
                 ),
+                failed=True,
             )
         return FetchResult(
             statuses=tuple(
                 SourceStatus(sid, STATE_FAILED, detail=detail) for sid in self.source_ids
-            )
+            ),
+            failed=True,
         )
 
     async def _fetch(
@@ -192,9 +204,11 @@ def parse_forecast(payload: Any, fetched_at: datetime) -> list[SourceSeries]:
     """Turn an Open-Meteo response into one `SourceSeries` per model.
 
     Each hourly value is millimetres accumulated over the step, so on an hourly
-    series mm/h equals the value directly. Across the five sample points the
-    intensity is the **max**: the fields are smooth, there is no speckle to reject,
-    and the conservative choice is the right one for "will my walk get wet".
+    series mm/h equals the value directly. The stamp is the *end* of that step
+    (module docstring), so the slot a value is filed under starts one step earlier.
+    Across the five sample points the intensity is the **max**: the fields are
+    smooth, there is no speckle to reject, and the conservative choice is the right
+    one for "will my walk get wet".
 
     `issued_at` is the fetch time: /v1/forecast carries no model-run timestamp
     (checked 2026-08-25), so upstream run age cannot be measured. Freshness then
@@ -221,7 +235,8 @@ def parse_forecast(payload: Any, fetched_at: datetime) -> list[SourceSeries]:
             for raw_time, raw_value in zip(times, values, strict=False):
                 if raw_value is None or not isinstance(raw_time, int | float):
                     continue
-                slot = datetime.fromtimestamp(int(raw_time), tz=UTC)
+                # Stamped at the end of the hour it sums: file it under the start.
+                slot = datetime.fromtimestamp(int(raw_time), tz=UTC) - _STEP
                 value = max(0.0, float(raw_value))
                 # max across the five sample points
                 if value > slots.get(slot, -1.0):

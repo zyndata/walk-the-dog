@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-09-11
+
+### Fixed
+
+- **The two weather models were read one hour late.** Open-Meteo stamps each hourly rain total at
+  the *end* of the hour it covers, so the value marked 08:00 is the rain that fell between 07:00
+  and 08:00. The integration was treating it as the rain expected between 08:00 and 09:00, which
+  put both models' opinions an hour behind the radar's. For a walk at 07:30 the models were being
+  asked about the hour that had just passed. The radar sources were never affected, and because
+  they carry the most weight inside the hour ahead the advice was usually still right — but a
+  shower the models saw coming was credited to the wrong hour, and one that had already passed
+  could keep a warning alive. Values are now filed under the hour they describe.
+- **The stand-in model source now wakes when Open-Meteo really goes down.** MET Norway is only
+  polled after Open-Meteo has failed twice in a row. A failure that happened while the last good
+  answer was still fresh was being counted as a success, because the cached data was still usable,
+  so an outage that began right after a good fetch went unnoticed for up to three hours. The
+  request's own outcome is now what counts, as the rule always said.
+
+### Changed
+
+- **Radar tiles cost less memory to read.** Only the part of a tile that the walk area actually
+  covers is now converted for sampling, instead of the whole tile — the same economy the Czech
+  radar frames already had. Nothing about the result changes; it is the same pixels, read cheaper.
+
 ## [1.2.1] - 2026-09-11
 
 ### Fixed

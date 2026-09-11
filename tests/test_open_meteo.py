@@ -303,3 +303,50 @@ async def test_a_failure_reuses_the_last_series_until_it_goes_stale(
     later = adapter.cached(now + timedelta(hours=4))
     knmi_later = next(s for s in later.statuses if s.source_id == SOURCE_KNMI)
     assert not knmi_later.contributed
+
+
+# --- timestamp semantics -----------------------------------------------------------
+
+
+def test_a_value_is_filed_under_the_hour_it_sums() -> None:
+    """Open-Meteo stamps a value at the *end* of the hour it sums ("preceding hour").
+
+    The grid treats a slot start as the beginning of the interval the value holds
+    over, so the value stamped 08:00 — rain between 07:00 and 08:00 — has to land
+    on the 07:00 slot. Filed under 08:00, every walk was scored against the hour
+    before it, and the first value of a response is rain that has already fallen.
+    """
+    stamp = datetime(2026, 8, 25, 8, 0, tzinfo=UTC)
+    series = parse_forecast(
+        {"hourly": {"time": [int(stamp.timestamp())], "precipitation_icon_eu": [1.2]}},
+        NOW,
+    )
+
+    (entry,) = series
+    assert entry.slots == ((stamp - timedelta(seconds=STEP_S), pytest.approx(1.2)),)
+    assert entry.horizon_end == stamp
+
+
+def test_the_recorded_rain_lands_an_hour_before_its_stamp() -> None:
+    """`wet.json` stamps KNMI's 0.2 mm at 09:00 and 10:00 UTC: it rains 08:00-10:00."""
+    series = {s.source_id: s for s in parse_forecast(load_fixture("open_meteo", "wet.json"), NOW)}
+
+    wet = [slot for slot, value in series[SOURCE_KNMI].slots if value > 0.0]
+
+    assert wet == [
+        datetime(2026, 8, 25, 8, 0, tzinfo=UTC),
+        datetime(2026, 8, 25, 9, 0, tzinfo=UTC),
+    ]
+
+
+def test_the_first_value_of_a_response_describes_the_hour_just_gone() -> None:
+    """`wet.json` was fetched at 07:00 and opens with the 07:00 stamp: the 06:00-07:00 sum.
+
+    That slot is already history when it arrives; the hour ahead is the second
+    value. Pinned so nobody "fixes" the shift back by looking at the first stamp.
+    """
+    series = parse_forecast(load_fixture("open_meteo", "wet.json"), NOW)
+
+    for entry in series:
+        assert entry.slots[0][0] == NOW - timedelta(seconds=STEP_S)
+        assert entry.slots[1][0] == NOW

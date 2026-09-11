@@ -1989,3 +1989,100 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - **The reporting instance runs Home Assistant in English**, so its Polish texts are shipped but
     unseen there — worth remembering when a future report quotes a message in English.
   - Everything carried forward from phase 11 and the earlier entries is unchanged.
+
+## Code review 1.2.2 — the models voted an hour late (2026-09-11, out of phase)
+
+- **Status:** done (code, tests, docs; ruff clean; 562 tests green offline in the Linux container from the Windows machine — five of them new, and four of those verified red against the pre-fix code first; the fifth, the LibreWXR crop, is covered by the existing sampling tests)
+- **Date:** 2026-09-11
+- **Why it exists:** a full read-through of every shipped module and its tests, asked for as a
+  code review looking for bugs, missing tests, and performance and prediction-accuracy
+  improvements. No phase was started or advanced; recorded here as workflow rule 3 requires.
+
+- **What was found and fixed.**
+  1. **Open-Meteo hourly values were filed one hour late** (`sources/open_meteo.py`). Open-Meteo's
+     hourly parameter table defines `precipitation` as the "preceding hour sum": the value stamped
+     `H` is the rain in `(H−1 h, H]`. The adapter put it on the slot starting at `H`, so
+     `engine/grid.align` spread it over `[H, H+1)`. Both model votes — ICON-EU and KNMI, the two
+     sources that see past the radar's hour — were therefore an hour behind the radar on the same
+     grid, and the first value of every response (the current hour's stamp, rain already fallen)
+     was being scored against the hour ahead. Fixed by subtracting one step when parsing; MET
+     Norway's `next_1_hours` at `H` already means `[H, H+1)` and was correct. Three new tests in
+     `tests/test_open_meteo.py`, including one that pins the *first* stamp of a response as the
+     hour just gone, so the shift cannot be "fixed back" by eye.
+  2. **Failover was blind to failures behind a warm cache** (`sources/__init__.py`,
+     `sources/base.py`). `_update_failover` read `FetchResult.ok`, which the adapters' `_failed()`
+     paths return as `True` whenever the previous series are still fresh — correctly, the data is
+     usable. So an Open-Meteo outage that began right after a good fetch registered as a run of
+     successes until KNMI went stale three hours later, and MET Norway — which exists for exactly
+     that outage — slept through it. `FetchResult` gains `failed: bool`, set by every adapter's
+     failure path; the registry counts `ok and not failed` as success. New test:
+     `test_metno_wakes_when_open_meteo_fails_behind_a_warm_cache`.
+  3. **LibreWXR converted the whole tile to RGBA per frame** (`sources/librewxr.py`). The disc
+     touches a rectangle of a few hundred pixels, but `_decode_grey` produced a 256 KB RGBA buffer
+     and a 64 KB grey array for each tile before slicing. It now crops the paletted image to the
+     disc's rectangle first — the economy `chmi._sample` already made. Same pixels, same p90; the
+     existing wet/dry/speckle sampling tests cover it.
+
+- **Decisions.**
+  - **Shift at the adapter, not in the grid.** The engine's rule "a slot starting at `H` holds
+    over `[H, H+1)`" is the right common footing; providers disagree about what a stamp means, and
+    that disagreement belongs where the provider is decoded. `docs/ARCHITECTURE.md` § Consensus
+    scoring and `docs/DATA_SOURCES.md` § Intensity mapping now say so explicitly.
+  - **`failed` is a separate fact, not a change to `ok`.** `ok` answers "is the data usable" and
+    the engine and `restate()` rely on it. Making it false on a cached failure would have dropped
+    good series from the vote for no reason. The two travel together and neither lies.
+  - **Counted as a patch release (1.2.2), not a minor.** Nothing a user configures or reads
+    changed shape; the advice gets more accurate. The CHANGELOG entry is written for the person
+    who will notice their morning alert moved, in plain language.
+  - **Cached series still vote while MET Norway is awake.** With the failover now tripping while
+    Open-Meteo's last series are fresh, KNMI's cached forecast and MET Norway can contribute to
+    the same cycle for up to three hours. The correlation rule in `docs/DATA_SOURCES.md` is about
+    *polling* correlated providers together — spending requests on a dependent vote — and that is
+    still never done. Dropping the cached model series outright would throw away fresher data than
+    the failover replaces it with. Left as is, noted here.
+
+- **Reviewed and deliberately not changed** — accuracy and behaviour observations, each a
+  design call rather than a bug, carried forward as open questions:
+  - **A partly covered walk is moved "earlier" with `risk = 0`.** `recommend()` treats a
+    scheduled window the sources do not fully reach as not dry, and the search then returns the
+    nearest fully covered dry window as `earlier` (pinned by
+    `test_a_partly_covered_walk_still_gets_a_recommendation`). The push then says *"Rain is
+    expected around 07:00"* when no source expects any — the forecast merely ran out. Reachable
+    only when every hourly model is stale or failed and the radar alone is left (its horizon is
+    60 min), i.e. after a provider outage, but that is also when the user most needs the text to
+    be honest. Options: a distinct direction, or `unknown` when nothing covered is wet, or a
+    different sentence when `scheduled.risk == 0`. Wants a decision before it is coded.
+  - **A re-issued LibreWXR nowcast frame is never re-read** (unchanged from phase 8 and 9). This
+    is now the biggest accuracy lever left in the source layer: every LibreWXR slot is scored from
+    the *first* run that predicted it — a +60 min extrapolation — and the observed frame for a slot
+    is never sampled once a prediction for it is cached. `hourly_cap()` already budgets two new
+    frames a cycle and only one is used, so re-reading the observed frame *and* the +10 min frame
+    each cycle fits the existing ceiling. It needs the cache to remember which run a sample came
+    from (a store schema change), which is why it is not in this patch.
+  - **The intensity-class rule in `is_material_change` has no hysteresis.** Risk has a
+    0.4/0.6 band; the class of the weighted-mean intensity flips at exactly 0.1 / 2.5 / 7.6 mm/h
+    and re-notifies on its own. A disc hovering around 0.1 mm/h could alert twice for the same
+    weather. A band of one grey level either side, or comparing the class of the *previous
+    notified* value only when it moved by a full class, would close it.
+  - **The stand-down is only ever sent as a confirmation.** *"Rain is no longer expected — walk
+    at the normal time"* reaches the phone only if `confirm_margin_min` is on (default off). A
+    user told to wait until 14:00 whose forecast then clears is not told so by default. Silence
+    meaning "as planned" was a bootstrap decision and is coherent, but once an alert has gone out
+    the cleared forecast is arguably news. Worth a decision.
+  - **The consensus tie counts as wet.** `SlotScore.wet` is `risk >= 0.5`; two equal-weight
+    sources disagreeing read as rain. Conservative, and probably right for a rain alarm, but the
+    docstring calls it "a strict majority", which it is not. Doc wording only.
+  - **Radar vote weight favours LibreWXR over CHMI by design** (1.00 vs 0.95×range), so where the
+    two radars disagree LibreWXR alone decides. Fine while CZRAD reads ~3× lower than OPERA
+    (phase 8 open question), and this review adds nothing to that question.
+  - **`_walk_end` watches a shortened walk for its full length.** Harmless — a few extra cycles.
+
+- **Also checked, no finding:** grid alignment and slot arithmetic across DST and off-grid walk
+  times; `candidate_starts` ordering and the `now` bound; `superseded_by_the_clock`;
+  coordinator wake arithmetic (`_next_wake`, `_aligned_wake`, sprint cadence) and that
+  `_async_refresh_finished` runs after `self.data` is set in HA 2026.8; the notifier's per-phone
+  presence rules; the config flow's validation paths; the LRU cache bounds and store schema; the
+  CHMI palette decode, range factor and coverage inset; request budgets per adapter.
+
+- **Open questions carried forward:** the five design calls above, plus everything from
+  phase 11 and the earlier entries, unchanged.

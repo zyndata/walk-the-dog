@@ -203,7 +203,11 @@ header and never < 10 min apart.
 
 All computation on the shared 10-minute UTC grid (`engine/grid.py`). An hourly source
 contributes its hour's value to each of the 6 slots the hour covers (accumulation semantics:
-the value for hour H is valid over [H, H+1) — a step function, no interpolation). `librewxr`
+a series slot starting at H is valid over [H, H+1) — a step function, no interpolation). The
+adapters put each provider's stamps on that footing, because the providers disagree about what
+a stamp means: MET Norway's `next_1_hours` at H already describes [H, H+1), while Open-Meteo
+stamps the **preceding** hour's sum at H, so its adapter files the value stamped H under H−1
+(fixed in 1.2.2 — until then both models voted one hour late). `librewxr`
 contributes only to slots within its +60 min horizon; beyond that it is `out_of_range` for the
 slot, not stale.
 

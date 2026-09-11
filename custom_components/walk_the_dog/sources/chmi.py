@@ -516,8 +516,11 @@ class ChmiAdapter:
                             detail=f"reusing cached frames: {detail}",
                         ),
                     ),
+                    failed=True,
                 )
-        return FetchResult(statuses=(SourceStatus(SOURCE_CHMI, STATE_FAILED, detail=detail),))
+        return FetchResult(
+            statuses=(SourceStatus(SOURCE_CHMI, STATE_FAILED, detail=detail),), failed=True
+        )
 
     def _frame_window(self, geometry: SampleGeometry) -> FrameWindow:
         if self._window is None or self._window_key != geometry.key:

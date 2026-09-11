@@ -128,8 +128,16 @@ class SourceRegistry:
         return await adapter.fetch(session, geometry, now)
 
     def _update_failover(self, open_meteo: FetchResult) -> None:
-        """Wake or retire MET Norway based on Open-Meteo's recent record."""
-        if open_meteo.ok:
+        """Wake or retire MET Norway based on Open-Meteo's recent record.
+
+        A failed request counts as a failure even when the adapter re-presents its
+        last series alongside it: the cached data is usable and its statuses say so,
+        but the rule here is about whether the *provider* answers. Without the
+        distinction an outage that began right after a successful fetch stayed
+        invisible until that cache went stale — three hours for KNMI — and MET
+        Norway, which exists for exactly that outage, was never woken for it.
+        """
+        if open_meteo.ok and not open_meteo.failed:
             self._open_meteo_successes += 1
             self._open_meteo_failures = 0
         else:

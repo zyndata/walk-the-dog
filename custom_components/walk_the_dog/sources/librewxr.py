@@ -281,8 +281,11 @@ class LibreWxrAdapter:
                             detail=f"reusing cached frames: {detail}",
                         ),
                     ),
+                    failed=True,
                 )
-        return FetchResult(statuses=(SourceStatus(SOURCE_LIBREWXR, STATE_FAILED, detail=detail),))
+        return FetchResult(
+            statuses=(SourceStatus(SOURCE_LIBREWXR, STATE_FAILED, detail=detail),), failed=True
+        )
 
     def _disc_mask(self, geometry: SampleGeometry) -> DiscMask:
         if self._mask is None or self._mask_key != geometry.key:
@@ -368,8 +371,8 @@ class LibreWxrAdapter:
             if not self._budget.consume(now):
                 raise RuntimeError("hourly request budget exhausted")
             raw = await self._get_bytes(session, url)
-            grey = _decode_grey(raw)
-            collected.append(grey[ry0:ry1, rx0:rx1][tile_mask])
+            grey = _decode_grey(raw, (rx0, ry0, rx1, ry1))
+            collected.append(grey[tile_mask])
             del grey, raw
 
         values = np.concatenate(collected) if len(collected) > 1 else collected[0]
@@ -399,14 +402,19 @@ class LibreWxrAdapter:
         return {"User-Agent": self._user_agent, "Accept-Encoding": "gzip"}
 
 
-def _decode_grey(raw: bytes) -> np.ndarray:
-    """Decode a scheme-0 tile to a uint8 grey array; transparent pixels become 0.
+def _decode_grey(raw: bytes, box: tuple[int, int, int, int]) -> np.ndarray:
+    """Decode the `box` (left, top, right, bottom) of a scheme-0 tile to uint8 grey.
 
-    Scheme 0 is a pure grey ramp, so the red channel *is* the grey level — reading
-    it directly avoids the rounding that a luminance conversion would introduce.
+    Transparent pixels become 0. Scheme 0 is a pure grey ramp, so the red channel
+    *is* the grey level — reading it directly avoids the rounding that a luminance
+    conversion would introduce.
+
+    The PNG has to be decoded whole (64 KB, paletted), but only the disc's own
+    rectangle is converted to RGBA and handed to numpy: a few hundred pixels rather
+    than the 256 KB the full tile would cost, the same economy `chmi._sample` makes.
     """
     with Image.open(io.BytesIO(raw)) as image:
-        rgba = np.asarray(image.convert("RGBA"))
+        rgba = np.asarray(image.crop(box).convert("RGBA"))
     grey = np.where(rgba[..., 3] > 0, rgba[..., 0], 0).astype(np.uint8)
     del rgba
     return grey

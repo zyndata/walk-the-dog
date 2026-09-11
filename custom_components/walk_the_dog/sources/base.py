@@ -201,6 +201,13 @@ class FetchResult:
 
     series: tuple[SourceSeries, ...] = ()
     statuses: tuple[SourceStatus, ...] = ()
+    #: True when the request this cycle *made* did not succeed, whatever the
+    #: statuses say. An adapter that fails re-presents its last series while they
+    #: are fresh, and those statuses honestly read `ok` — the data is usable. But
+    #: the registry's failover rule is about the provider, not the data: two
+    #: failed fetches in a row must wake MET Norway even when a warm cache is still
+    #: answering for Open-Meteo, or the switch waits hours for that cache to go stale.
+    failed: bool = False
 
     @property
     def ok(self) -> bool:

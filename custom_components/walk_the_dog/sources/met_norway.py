@@ -122,8 +122,11 @@ class MetNorwayAdapter:
 
     def _failed(self, now: datetime, detail: str) -> FetchResult:
         if self._last is not None:
-            return restate(self._last, now)
-        return FetchResult(statuses=(SourceStatus(SOURCE_METNO, STATE_FAILED, detail=detail),))
+            stated = restate(self._last, now)
+            return FetchResult(series=stated.series, statuses=stated.statuses, failed=True)
+        return FetchResult(
+            statuses=(SourceStatus(SOURCE_METNO, STATE_FAILED, detail=detail),), failed=True
+        )
 
     async def _fetch(
         self, session: ClientSession, geometry: SampleGeometry, now: datetime

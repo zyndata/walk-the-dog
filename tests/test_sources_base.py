@@ -200,3 +200,19 @@ def test_backoff_spaces_retries_across_cycles_and_resets_on_success() -> None:
     backoff.record_success()
     assert backoff.ready(NOW)
     assert backoff.failures == 0
+
+
+def test_a_failed_fetch_can_still_present_usable_data() -> None:
+    """`failed` is about the request that was made; `ok` is about the data presented.
+
+    An adapter that could not reach its provider re-presents its last series while
+    they are fresh, and their statuses honestly read `ok`. The registry's failover
+    rule needs the other fact — that the provider did not answer — and this is how
+    the two travel together without one lying about the other.
+    """
+    ok = SourceStatus(SOURCE_ICON_EU, STATE_OK, contributed=True)
+
+    assert not FetchResult(statuses=(ok,)).failed
+    result = FetchResult(statuses=(ok,), failed=True)
+    assert result.ok
+    assert result.failed

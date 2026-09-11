@@ -314,3 +314,40 @@ async def test_every_source_is_reported_every_cycle(
     _, statuses = await registry.async_fetch(async_get_clientsession(hass), geometry, now)
 
     assert source_id in {s.source_id for s in statuses}
+
+
+async def test_metno_wakes_when_open_meteo_fails_behind_a_warm_cache(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """An outage that begins right after a good fetch must still trip the failover.
+
+    The adapter re-presents its last series while they are fresh, and their
+    statuses honestly read `ok`. Counted as successes, two real failures went unseen
+    for as long as that cache lasted — three hours for KNMI, nine for ICON-EU — and
+    the source that exists for exactly this outage stayed asleep through it.
+    """
+    _mock_librewxr(aioclient_mock, geometry)
+    aioclient_mock.get(open_meteo.URL, json=load_fixture("open_meteo", "dry.json"))
+    aioclient_mock.get(met_norway.URL, json=load_fixture("met_norway", "compact.json"))
+    registry = SourceRegistry(UA)
+    session = async_get_clientsession(hass)
+    await registry.async_fetch(session, geometry, now)
+    assert not registry.failover_active
+
+    aioclient_mock.clear_requests()
+    _mock_librewxr(aioclient_mock, geometry)
+    aioclient_mock.get(open_meteo.URL, status=500)
+    aioclient_mock.get(met_norway.URL, json=load_fixture("met_norway", "compact.json"))
+
+    # Thirty minutes on: the cadence allows a fetch, it fails, the cached series vote.
+    _, statuses = await registry.async_fetch(session, geometry, now + timedelta(minutes=30))
+    knmi = next(s for s in statuses if s.source_id == SOURCE_KNMI)
+    assert knmi.contributed, "the warm cache is exactly what used to hide the failure"
+    assert not registry.failover_active, "one failure is not enough"
+
+    # The backoff has passed and there has been no success since: second failure.
+    await registry.async_fetch(session, geometry, now + timedelta(minutes=40))
+    assert registry.failover_active

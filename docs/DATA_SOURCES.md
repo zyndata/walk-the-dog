@@ -436,7 +436,10 @@ convention, with the *light* band starting low enough to catch drizzle a dog wal
 Per-source conversion onto that scale:
 
 **Open-Meteo (ICON-EU, KNMI HARMONIE, DMI, IFS).** `precipitation` is millimetres accumulated over
-the step, quantised to 0.1 mm **(measured)**.
+the step, quantised to 0.1 mm **(measured)**. The stamp is the *end* of that step — Open-Meteo's
+hourly parameter table calls the variable a "preceding hour sum" — so the value stamped H describes
+(H−1 h, H] and the adapter files it under H−1 h. MET Norway's `next_1_hours` is the opposite
+convention (the hour *after* the stamp) and needs no shift.
 - hourly series: `mm/h = value`
 - `minutely_15` series: `mm/h = value × 4`
 
