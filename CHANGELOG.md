@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.2] - 2026-09-11
+## [1.2.1] - 2026-09-11
 
 ### Fixed
+
+- **The second message before you leave no longer loses its times.** On a day when rain covers
+  every minute the integration can see, the advice is simply *take a raincoat* — that answer has
+  no suggested hour, because there is no dry window to point at. The reassurance sent shortly
+  before the walk used the wording built around a suggested hour anyway, and the two gaps where
+  the times belong came out empty: *Still on: set off at , back home by .*
+
+  It now repeats the advice it is actually confirming — still no dry window, still a raincoat —
+  and the matching line in the sensor's *Activity* list reads *No dry window* instead of an
+  empty *Still on —*. Only walks with *Second message shortly before you leave* switched on could
+  see this, and only on days with no dry window at all; the first message was always correct.
 
 - **The two weather models were read one hour late.** Open-Meteo stamps each hourly rain total at
   the *end* of the hour it covers, so the value marked 08:00 is the rain that fell between 07:00
@@ -30,21 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Radar tiles cost less memory to read.** Only the part of a tile that the walk area actually
   covers is now converted for sampling, instead of the whole tile — the same economy the Czech
   radar frames already had. Nothing about the result changes; it is the same pixels, read cheaper.
-
-## [1.2.1] - 2026-09-11
-
-### Fixed
-
-- **The second message before you leave no longer loses its times.** On a day when rain covers
-  every minute the integration can see, the advice is simply *take a raincoat* — that answer has
-  no suggested hour, because there is no dry window to point at. The reassurance sent shortly
-  before the walk used the wording built around a suggested hour anyway, and the two gaps where
-  the times belong came out empty: *Still on: set off at , back home by .*
-
-  It now repeats the advice it is actually confirming — still no dry window, still a raincoat —
-  and the matching line in the sensor's *Activity* list reads *No dry window* instead of an
-  empty *Still on —*. Only walks with *Second message shortly before you leave* switched on could
-  see this, and only on days with no dry window at all; the first message was always correct.
 
 ## [1.2.0] - 2026-09-07
 

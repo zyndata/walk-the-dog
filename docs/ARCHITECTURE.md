@@ -138,19 +138,23 @@ Python UA is rejected with 403, measured in phase 0).
    ~96.4 km (≈ 0.377 km/px), so the r ≤ 15 km disc spans ≤ 80 px and touches 1 tile in the
    common case, up to 4 at tile corners.
 3. Per frame not already in the cache: fetch the tile(s) (317–1 631 bytes each, measured),
-   decode with Pillow (paletted 256×256 → 64 KB buffer), convert to a `numpy` uint8 array,
-   apply a precomputed boolean disc mask, take the **90th percentile** of the masked pixels
-   (robust against single-pixel radar speckle; a max would false-alarm on one noisy cell),
-   convert grey → dBZ → mm/h (Marshall–Palmer, boundaries per
-   [DATA_SOURCES.md](DATA_SOURCES.md); the grey→dBZ calibration is **`dBZ = grey − 32`**, pinned
-   in phase 3 from the AGPL-3.0 LibreWXR source and locked by a fixture test).
+   decode with Pillow (paletted 256×256 → 64 KB buffer), **crop to the disc's own rectangle**
+   and only then convert to a `numpy` uint8 array, apply a precomputed boolean disc mask, take
+   the **90th percentile** of the masked pixels (robust against single-pixel radar speckle; a
+   max would false-alarm on one noisy cell), convert grey → dBZ → mm/h (Marshall–Palmer,
+   boundaries per [DATA_SOURCES.md](DATA_SOURCES.md); the grey→dBZ calibration is
+   **`dBZ = grey − 32`**, pinned in phase 3 from the AGPL-3.0 LibreWXR source and locked by a
+   fixture test). Cropping first is what keeps the RGBA conversion to the ≤ 80 px disc rather
+   than the whole 256×256 tile — a few hundred pixels instead of 256 KB (1.2.1; the CHMI
+   adapter always did it this way).
 4. Store only the resulting float per frame in the cache; **discard tile bytes and arrays
    immediately** (function-local, no references escape). Frames are processed sequentially, so
    peak transient memory is one decoded tile (~64 KB + Pillow overhead), never 7.
 
 Full-frame decoding of a 256×256 tile is unavoidable (PNG is not partially decodable) and
 accepted: the buffer is 64 KB, three orders of magnitude under budget. What is *never* done:
-fetching tiles beyond the disc, holding more than one decoded tile, or zoom levels above 8.
+fetching tiles beyond the disc, converting more of a tile than the disc covers, holding more
+than one decoded tile, or zoom levels above 8.
 
 **CHMI (full-domain composites).** Regional, and gated before anything else happens: the adapter
 projects the disc's five sample points into the CZRAD data rectangle (E 11.267–19.624,
@@ -207,7 +211,7 @@ a series slot starting at H is valid over [H, H+1) — a step function, no inter
 adapters put each provider's stamps on that footing, because the providers disagree about what
 a stamp means: MET Norway's `next_1_hours` at H already describes [H, H+1), while Open-Meteo
 stamps the **preceding** hour's sum at H, so its adapter files the value stamped H under H−1
-(fixed in 1.2.2 — until then both models voted one hour late). `librewxr`
+(fixed in 1.2.1 — until then both models voted one hour late). `librewxr`
 contributes only to slots within its +60 min horizon; beyond that it is `out_of_range` for the
 slot, not stale.
 

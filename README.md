@@ -121,12 +121,17 @@ is none, to the longest radar-backed window that still meets your minimum.
 
 ## Maturity
 
-`1.1.0` is feature-complete: everything described above is built, tested and measured. What it
+`1.2.1` is feature-complete: everything described above is built, tested and measured. What it
 is **not** is field-proven — the forecasts have been checked against recorded data, not against
 a season of actual weather, and nobody has yet counted how often the advice was right. If it
 tells you to wait and the rain never comes, that is worth an
 [issue](https://github.com/zyndata/walk-the-dog/issues); tuning the consensus needs real
 misses to tune against.
+
+Two accuracy bugs found by review rather than by use were fixed in `1.2.1` — the two hourly
+models were being read an hour late, and a provider outage could go unnoticed while its last
+answer was still fresh. Both are the kind of thing a season of weather would have surfaced
+slowly, which is the argument for the issue link above.
 
 Home Assistant shows a placeholder icon for the integration in the **HACS store listing** only
 — HACS does not yet read the brand images an integration ships with itself

@@ -1990,7 +1990,7 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     unseen there — worth remembering when a future report quotes a message in English.
   - Everything carried forward from phase 11 and the earlier entries is unchanged.
 
-## Code review 1.2.2 — the models voted an hour late (2026-09-11, out of phase)
+## Code review 1.2.1 — the models voted an hour late (2026-09-11, out of phase)
 
 - **Status:** done (code, tests, docs; ruff clean; 562 tests green offline in the Linux container from the Windows machine — five of them new, and four of those verified red against the pre-fix code first; the fifth, the LibreWXR crop, is covered by the existing sampling tests)
 - **Date:** 2026-09-11
@@ -2031,9 +2031,15 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - **`failed` is a separate fact, not a change to `ok`.** `ok` answers "is the data usable" and
     the engine and `restate()` rely on it. Making it false on a cached failure would have dropped
     good series from the vote for no reason. The two travel together and neither lies.
-  - **Counted as a patch release (1.2.2), not a minor.** Nothing a user configures or reads
-    changed shape; the advice gets more accurate. The CHANGELOG entry is written for the person
-    who will notice their morning alert moved, in plain language.
+  - **Shipped inside 1.2.1 rather than as a 1.2.2 of its own.** The work was written up as
+    1.2.2, and the release check then found that **1.2.1 had never been tagged**: it existed as a
+    commit and a `CHANGELOG.md` section and nothing else, so no install anywhere reports that
+    version and no release page carries it. Two patch releases cut on one day, the first of them
+    never published, is a worse record than one that contains both. The two sections were merged
+    under `1.2.1`, `manifest.json` reads 1.2.1, and the link definitions at the foot of
+    `CHANGELOG.md` already pointed at `v1.2.1`. A patch either way: nothing a user configures or
+    reads changed shape, the advice simply gets more accurate. The CHANGELOG entry is written for
+    the person who will notice their morning alert moved, in plain language.
   - **Cached series still vote while MET Norway is awake.** With the failover now tripping while
     Open-Meteo's last series are fresh, KNMI's cached forecast and MET Norway can contribute to
     the same cycle for up to three hours. The correlation rule in `docs/DATA_SOURCES.md` is about
