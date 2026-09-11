@@ -321,6 +321,7 @@
     "walk_slot_sun": "Sunday",
     "notification_confirmed": "Still on: set off at {recommended}, back home by {until}. Nothing has changed since the last message.",
     "notification_confirmed_shorter": "Still on: set off at {recommended} for a shorter walk of {recommended_duration} minutes, back home by {until}. Nothing has changed since the last message.",
+    "notification_confirmed_no_dry_window": "Still no dry {duration}-minute window around {scheduled} — take a raincoat. Nothing has changed since the last message.",
     "notification_stand_down": "Rain is no longer expected around {scheduled} — walk at the normal time after all.",
     "notification_action_walked": "Already went",
     "default_device_unset": "whichever device you set as \"Always notify this device\" in Alert settings",

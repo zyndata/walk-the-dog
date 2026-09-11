@@ -1920,3 +1920,72 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   branch was exercised directly before restoring the link.
 - **Not verified:** the Windows machine, which by design takes the unchanged code path. Re-running
   `python scripts/setup.py` there should be a no-op.
+
+## Bug fix 1.2.1 — the reassurance that named an hour the walk never had (2026-09-11, out of phase)
+
+- **Status:** done (code, tests, docs; ruff clean, 557 tests green offline — three of them new, and all three verified red against 1.2.0 first)
+- **Date:** 2026-09-11
+- **Why it exists:** a live report from the maintainer's own phone, not a phase. No phase was
+  started or advanced; recorded here as workflow rule 3 requires.
+
+- **The failure, exactly as it arrived:** *"Still on: set off at , back home by . Nothing has
+  changed since the last message."* — the pre-departure reassurance (`confirm_margin_min`), with
+  both of its times rendered as nothing at all.
+
+- **Root cause.** `notifier._confirmation_key()` chose `TEXT_CONFIRMED` — the "still on: set off
+  at {recommended}, back home by {until}" wording — for *every* direction in `ALERT_DIRECTIONS`
+  that was still actionable, `shorter` excepted. `ALERT_DIRECTIONS` contains `no_dry_window`, and
+  `no_dry_window` is the one direction `recommend()` returns with **no `recommended_start` at
+  all** (`engine/window.py`, pinned by `test_rain_everywhere_admits_no_dry_window`). Nothing
+  downstream could catch it: `_placeholders()` renders a missing time as `""` rather than
+  raising, so the template did not fail, it rendered its two gaps and the push went out.
+  `is_actionable()` was also doing its job — for a recommendation with no target it asks only
+  whether the walk has begun, which at `T − 15 min` it has not.
+
+- **Why the suite missed it.** The confirmation tests covered `earlier`, `shorter` and the
+  stand-down. The one `no_dry_window` message test asserts the *first* message, which was always
+  correct. The combination "no dry window **and** the second message switched on" was never
+  written down, and it is the only way to reach the line.
+
+- **What was built.**
+  - `notifier.py`: `TEXT_CONFIRMED_NO_DRY_WINDOW`, a branch for it in `_confirmation_key`, and a
+    `LOGBOOK_KEYS` entry mapping it to the direction's own short line.
+  - `strings.json`, `translations/en.json`, `translations/pl.json`:
+    `notification_confirmed_no_dry_window`, which names **only** `{scheduled}` and `{duration}`.
+  - `tests/test_notifier.py`: the scenario as reported (rain over the whole search range, alert
+    then reassurance), and a rendering invariant over every message that walk can produce, in
+    both languages. Both were run against `HEAD` in a worktree before the fix and fail there —
+    the Polish rendering failing as *"Plan aktualny: wyjdź o , z powrotem w domu o ."*, the same
+    hole the reporter's English push had.
+  - `docs/CONFIG.md`: the confirmation has three shapes, not two.
+  - `CHANGELOG.md` 1.2.1, `manifest.json` 1.2.1.
+
+- **Decisions.**
+  - **A third wording, not silence.** Suppressing the confirmation for `no_dry_window` would have
+    been the smaller change, but the raincoat is exactly the advice the user is about to act on,
+    and the option's whole promise is a word before the door. The precedent is
+    `confirmed_shorter`, which exists for the same reason: a confirmation must be able to say
+    back the advice it repeats.
+  - **The new text names no hour at all.** `{scheduled}` and `{duration}` are the two
+    placeholders *every* recommendation carries, so the sentence is correct by construction
+    rather than by its direction happening to have a time.
+  - **`_placeholders()` still renders a missing time as an empty string.** Making it raise would
+    turn a cosmetic bug into a missing notification, which for this integration is the worse
+    failure. The guard belongs in the pairing of text to direction — and is now a test.
+  - **The regression test asserts the class, not the instance.** Every message about a walk with
+    no hour of its own, in every shipped language, must contain no unfilled `{slot}`, no space in
+    front of a comma or full stop, and no doubled space. That is language-independent and would
+    have caught this one before it shipped.
+  - **The logbook line reuses `logbook_no_dry_window`** rather than gaining a wording of its own:
+    *No dry window* is already the right couple of words, and `logbook_confirmed`
+    (*"Still on — {recommended}"*) had the identical gap.
+
+- **The rest of the audit that produced this fix.** Every other direction was checked against the
+  text it can be rendered with: `earlier`, `later` and `shorter` always carry a
+  `recommended_start`; `none` reaches only the stand-down, which names `{scheduled}` alone;
+  `unknown` never speaks. `no_dry_window` was the only broken pairing.
+
+- **Open questions carried forward.**
+  - **The reporting instance runs Home Assistant in English**, so its Polish texts are shipped but
+    unseen there — worth remembering when a future report quotes a message in English.
+  - Everything carried forward from phase 11 and the earlier entries is unchanged.

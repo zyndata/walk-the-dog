@@ -321,6 +321,7 @@
     "walk_slot_sun": "w niedziele",
     "notification_confirmed": "Plan aktualny: wyjdź o {recommended}, z powrotem w domu o {until}. Od poprzedniej wiadomości nic się nie zmieniło.",
     "notification_confirmed_shorter": "Plan aktualny: wyjdź o {recommended} na krótszy spacer, {recommended_duration} minut, z powrotem w domu o {until}. Od poprzedniej wiadomości nic się nie zmieniło.",
+    "notification_confirmed_no_dry_window": "Nadal nie ma suchego {duration}-minutowego okna około {scheduled} — weź kurtkę przeciwdeszczową. Od poprzedniej wiadomości nic się nie zmieniło.",
     "notification_stand_down": "Deszcz około {scheduled} już nie jest spodziewany — można iść o zwykłej porze.",
     "notification_action_walked": "Już byliśmy",
     "default_device_unset": "urządzenie, które za chwilę ustawisz w polu „Zawsze powiadamiaj to urządzenie” w ustawieniach alertów",

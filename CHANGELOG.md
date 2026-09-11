@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-11
+
+### Fixed
+
+- **The second message before you leave no longer loses its times.** On a day when rain covers
+  every minute the integration can see, the advice is simply *take a raincoat* — that answer has
+  no suggested hour, because there is no dry window to point at. The reassurance sent shortly
+  before the walk used the wording built around a suggested hour anyway, and the two gaps where
+  the times belong came out empty: *Still on: set off at , back home by .*
+
+  It now repeats the advice it is actually confirming — still no dry window, still a raincoat —
+  and the matching line in the sensor's *Activity* list reads *No dry window* instead of an
+  empty *Still on —*. Only walks with *Second message shortly before you leave* switched on could
+  see this, and only on days with no dry window at all; the first message was always correct.
+
 ## [1.2.0] - 2026-09-07
 
 ### Added
@@ -593,7 +608,8 @@ way; all of it is written up in `docs/DATA_SOURCES.md` § CHMI:
 - RainViewer is no longer a candidate: its public API serves past radar frames only, and the
   live `radar.nowcast` array is empty.
 
-[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.1
 [1.2.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.0
 [1.1.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.1.0
 [1.0.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.0.0

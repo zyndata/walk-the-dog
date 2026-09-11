@@ -48,7 +48,7 @@ config entry. The **location is entry data, not an option**: it is set once in t
 | Later margin | `later_margin_min` | int minutes, 0–180, 10-min steps | 30 | How far forward to search. Needs no warning: a later window is always re-checked as it comes into radar range, so a wide margin costs only a few more requests |
 | Average walk duration | `walk_duration_min` | int minutes, 5–240, 5-min steps | **required, no default** | Values over 30 min require confirming the `long_walk` warning (nowcast reliability) |
 | Shortest walk still worth it | `min_walk_duration_min` | int minutes, 0–240, 10-min steps | **10** | When no dry window of the full length exists anywhere in the margins, offer the longest dry window that is at least this long. Moves in whole 10-minute steps because one step is one radar frame — the shortest gap any source publishes — and is refused if it exceeds `walk_duration_min`, which would ask for a window both shorter than the walk and longer than it. `0` switches shortening off entirely. See [Shortening the walk](#shortening-the-walk) |
-| Second message shortly before you leave | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, or the rain has gone and the walk is back to its normal time. Goes to the same devices as the first message, and is only ever sent when something was already said about that walk |
+| Second message shortly before you leave | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, the rain has gone and the walk is back to its normal time, or there is still no dry window and the raincoat still applies. Goes to the same devices as the first message, and is only ever sent when something was already said about that walk |
 | Always notify this device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. **Receives every walk's alert.** Per-walk devices are notified *in addition* to it, never instead of it, and the combined list is de-duplicated so a device named in both places gets one push. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means only the per-walk devices are notified. |
 | Per-walk alerts | `walk_targets` | map | *(unset)* | One entry per walk the user configured something for. See [Per-walk alerts](#per-walk-alerts). |
 | Auto-mute entity | `auto_mute_entity` | entity id | *(unset)* | Optional `person`/`device_tracker`; pushes suppressed for **every** walk while it is not `home`. A walk that sets its own `away_entity` follows that one instead. |
@@ -292,11 +292,14 @@ cannot close today's walk. Tapping it also sends `clear_notification` to the wal
 devices; only the phone that was tapped dismisses its own copy.
 
 With `confirm_margin_min` set, one further message goes out that many minutes before you set
-off, provided something was already said about the walk. It says either that the plan still
-stands, or that the rain has gone and the walk is back to its normal time. The second is the
-reason the option exists: a `later` recommendation relaxing to "walk as planned" is not an alert
-direction, so silence alone would leave you waiting for a window that stopped being necessary.
-It is sent once per walk, and an alert that happens to land at that moment counts as it.
+off, provided something was already said about the walk. It takes one of three shapes: the
+plan still stands, the rain has gone and the walk is back to its normal time, or there is still
+no dry window anywhere and the raincoat still applies. The second is the reason the option
+exists: a `later` recommendation relaxing to "walk as planned" is not an alert direction, so
+silence alone would leave you waiting for a window that stopped being necessary. The third has
+a wording of its own because `no_dry_window` is the one recommendation that names no time —
+a "set off at …" sentence has nothing to put in its gaps. It is sent once per walk, and an alert
+that happens to land at that moment counts as it.
 
 The message goes to `notify_service` together with the walk's own devices, each device named
 once however many places it appears in, minus the phones their own trackers report as away. Every

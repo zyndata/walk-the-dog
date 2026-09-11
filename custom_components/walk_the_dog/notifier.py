@@ -20,6 +20,11 @@ That message has to name the length as well as the time — "set off at 07:20" i
 not the whole of it if the walk is twenty minutes shorter than usual — and so does
 the confirmation that follows it.
 
+When nothing is dry at all, the advice is a raincoat and no time — and every text
+about that walk has to be sayable without one. A sentence built around an hour the
+recommendation does not have does not fail; it renders the gap where the hour would
+have been, which is how "set off at , back home by ." once reached a phone.
+
 Who is interrupted is decided per walk, not per integration: each configured walk
 carries its own list of companion-app devices, its own mute switch and its own
 away entity (docs/CONFIG.md § Per-walk alerts), because the morning walk and the
@@ -140,8 +145,13 @@ TEXT_PROVISIONAL: Final = "provisional"
 #: still stands, or the rain has gone and the walk is back to its normal time. A
 #: shortened plan gets its own wording — "still on" must not quietly drop the one
 #: thing that makes this advice unusual, which is that the walk is cut short.
+#:
+#: `no_dry_window` gets one for the opposite reason: it is the single piece of advice
+#: that names no hour, so the "still on: set off at …" sentence has nothing to put in
+#: either of its gaps and must not be the one used to repeat it.
 TEXT_CONFIRMED: Final = "confirmed"
 TEXT_CONFIRMED_SHORTER: Final = "confirmed_shorter"
+TEXT_CONFIRMED_NO_DRY_WINDOW: Final = "confirmed_no_dry_window"
 TEXT_STAND_DOWN: Final = "stand_down"
 
 #: Which short text stands for which message. Only the confirmations need naming —
@@ -151,6 +161,9 @@ TEXT_STAND_DOWN: Final = "stand_down"
 LOGBOOK_KEYS: Final[dict[str, str]] = {
     TEXT_CONFIRMED: TEXT_CONFIRMED,
     TEXT_CONFIRMED_SHORTER: TEXT_CONFIRMED,
+    # The raincoat, reconfirmed, is still "No dry window" in a list: the direction's
+    # own line already names no hour, which is the whole of what this message says.
+    TEXT_CONFIRMED_NO_DRY_WINDOW: DIRECTION_NO_DRY_WINDOW,
     TEXT_STAND_DOWN: TEXT_STAND_DOWN,
 }
 
@@ -421,12 +434,19 @@ class WalkNotifier:
         the walk is back to its normal time: `later` relaxing to `none` is not an
         alert direction, so without this the user would sit waiting for a 14:00
         window that stopped being necessary at 13:00.
+
+        Each shape has to be able to say its own advice back, which is why there are
+        three of them and not one: no direction may be confirmed with a sentence that
+        names something its recommendation does not have.
         """
         if recommendation.direction == DIRECTION_NONE:
             return TEXT_STAND_DOWN
         if recommendation.direction in ALERT_DIRECTIONS and is_actionable(recommendation, now):
             if recommendation.direction == DIRECTION_SHORTER:
                 return TEXT_CONFIRMED_SHORTER
+            if recommendation.direction == DIRECTION_NO_DRY_WINDOW:
+                # There was never an hour to confirm, so this repeats the raincoat.
+                return TEXT_CONFIRMED_NO_DRY_WINDOW
             return TEXT_CONFIRMED
         return None
 
@@ -669,6 +689,7 @@ __all__ = [
     "TAG_PREFIX",
     "TEXT_ACTION_WALKED",
     "TEXT_CONFIRMED",
+    "TEXT_CONFIRMED_NO_DRY_WINDOW",
     "TEXT_CONFIRMED_SHORTER",
     "TEXT_PREFIX",
     "TEXT_PROVISIONAL",

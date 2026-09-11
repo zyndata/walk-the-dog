@@ -8,7 +8,10 @@ that nothing was sent.
 
 from __future__ import annotations
 
+import json
+import re
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -26,6 +29,7 @@ from custom_components.walk_the_dog.const import (
     CONF_TARGET_MUTE,
     CONF_TARGET_SERVICES,
     CONF_WALK_TARGETS,
+    DOMAIN,
     EVENT_ALERT,
     NOTIFY_DOMAIN,
     SOURCE_ICON_EU,
@@ -33,11 +37,21 @@ from custom_components.walk_the_dog.const import (
     SOURCE_LIBREWXR,
 )
 from custom_components.walk_the_dog.coordinator import CYCLE, WalkCoordinator
-from custom_components.walk_the_dog.engine import DIRECTION_EARLIER, DIRECTION_SHORTER
+from custom_components.walk_the_dog.engine import (
+    DIRECTION_EARLIER,
+    DIRECTION_NO_DRY_WINDOW,
+    DIRECTION_SHORTER,
+    Recommendation,
+    WindowVerdict,
+)
 from custom_components.walk_the_dog.notifier import (
     CLICK_ENTITY_PREFIX,
     STICKY,
     TAG_PREFIX,
+    TEXT_CONFIRMED_NO_DRY_WINDOW,
+    TRANSLATION_CATEGORY,
+    WalkNotifier,
+    _compose,
     walked_action,
 )
 from custom_components.walk_the_dog.schedule import KEY_ALL, target_key
@@ -1069,6 +1083,107 @@ async def test_nothing_is_confirmed_that_was_never_announced(
         moment += CYCLE
 
     assert notifications == []
+
+
+# --- the walk with nowhere to move it --------------------------------------
+
+#: Rain across the whole search range: no dry window of any length anywhere in the
+#: margins, so the answer is a raincoat and — deliberately — no hour at all.
+ALL_WET = [3.0, 3.0, 3.0, 3.0, 3.0]
+
+#: Where the language files live, for the rendering test below.
+COMPONENT = Path(__file__).parents[1] / "custom_components" / "walk_the_dog"
+
+
+async def test_a_walk_with_nowhere_to_move_is_confirmed_without_an_hour(
+    hass: HomeAssistant,
+    confirming: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """The reported bug: this reassurance reached a phone as "set off at , back home by .".
+
+    `no_dry_window` is the one direction that names no time, so the message before
+    the door cannot be the one that repeats an hour — there is no hour to repeat.
+    It repeats the raincoat instead.
+    """
+    fetch.build = lambda now: hourly_sources(now, ALL_WET)
+
+    await run_cycle(hass, freezer, ARM_AT)
+    assert len(notifications) == 1
+    assert "Take a raincoat" in notifications[0].data["message"]
+
+    await run_cycle(hass, freezer, WALK_START - CYCLE)
+
+    assert len(notifications) == 2
+    message = notifications[1].data["message"]
+    assert "raincoat" in message
+    assert "set off at" not in message
+    assert alerts[-1].data["confirmation"] is True
+    # A list entry for a walk with no hour names none, exactly as the alert's did.
+    assert alerts[-1].data[ATTR_SUMMARY] == "No dry window"
+
+
+def _translated(code: str) -> dict[str, str]:
+    """One language's texts, keyed as `async_get_translations` hands them over."""
+    common = json.loads((COMPONENT / "translations" / f"{code}.json").read_text("utf-8"))["common"]
+    return {
+        f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.{key}": text for key, text in common.items()
+    }
+
+
+def _no_dry_window() -> Recommendation:
+    """The shape `recommend()` returns when rain covers the whole search range.
+
+    No `recommended_start`, and so no end, no shift and no length of its own —
+    pinned by `test_window.py::test_rain_everywhere_admits_no_dry_window`.
+    """
+    wet = WindowVerdict(
+        start=WALK_START,
+        end=WALK_END,
+        dry=False,
+        risk=1.0,
+        confidence=1.0,
+        peak_mm_h=3.0,
+        covered_slots=3,
+        total_slots=3,
+        degraded=False,
+        horizon_limited=False,
+    )
+    return Recommendation(
+        direction=DIRECTION_NO_DRY_WINDOW,
+        scheduled_start=WALK_START,
+        duration_s=int(timedelta(minutes=30).total_seconds()),
+        scheduled=wet,
+    )
+
+
+@pytest.mark.parametrize("code", ["en", "pl"])
+async def test_no_text_about_a_timeless_walk_leaves_a_gap(
+    hass: HomeAssistant, entry: MockConfigEntry, code: str
+) -> None:
+    """The class of bug behind the report, rather than the one instance of it.
+
+    `_lookup` formats a template with whatever `_placeholders` supplies, and a
+    recommendation with no time supplies an empty string — so the failure is never
+    an exception, it is a hole in the prose. Every message this walk can produce is
+    rendered in every language and checked for one: no unfilled `{slot}`, no space
+    left in front of a comma or a full stop, no doubled space.
+    """
+    notifier = WalkNotifier(hass, entry)
+    recommendation = _no_dry_window()
+    confirmation = notifier._confirmation_key(recommendation, ARM_AT)
+    texts = _translated(code)
+
+    assert confirmation == TEXT_CONFIRMED_NO_DRY_WINDOW
+
+    for key in (None, confirmation):
+        title, message = _compose(texts, recommendation, key)
+        assert title
+        assert "{" not in message, (code, key, message)
+        assert not re.search(r"\s[,.]|\s\s", message), (code, key, message)
 
 
 # --- shortening the walk ---------------------------------------------------
