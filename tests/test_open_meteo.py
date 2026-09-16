@@ -24,6 +24,7 @@ from custom_components.walk_the_dog.sources.base import (
     SampleGeometry,
 )
 from custom_components.walk_the_dog.sources.open_meteo import (
+    FORECAST_HOURS,
     MIN_INTERVAL_S,
     MODEL_IDS,
     STEP_S,
@@ -201,6 +202,44 @@ async def test_fetch_asks_for_five_coordinates_and_the_hourly_series(
     assert query["timeformat"] == "unixtime"
     # The interpolated 15-minutely series is never requested — it is lossy for Poland.
     assert "minutely_15" not in query
+
+
+async def test_fetch_asks_for_one_hour_more_than_the_horizon(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """The first stamp of a response is the hour just gone, so it is not lookahead.
+
+    Twelve stamps from 07:00 reach 18:00, but filed under the hours they sum they
+    run 06:00-17:00 and the horizon ends at 18:00: eleven hours ahead, not the
+    twelve docs/DATA_SOURCES.md promises. The request has to ask for the extra hour.
+    """
+    aioclient_mock.get(URL, json=load_fixture("open_meteo", "dry.json"))
+
+    await OpenMeteoAdapter(UA).fetch(async_get_clientsession(hass), geometry, now)
+
+    query = aioclient_mock.mock_calls[0][1].query
+    assert query["forecast_hours"] == str(FORECAST_HOURS + 1)
+    assert FORECAST_HOURS == 12
+
+
+def test_the_horizon_is_forecast_hours_past_the_current_hour() -> None:
+    """With the extra stamp the last slot ends `FORECAST_HOURS` after the current hour."""
+    current_hour = datetime(2026, 8, 25, 7, 0, tzinfo=UTC)
+    stamps = [current_hour + timedelta(hours=h) for h in range(FORECAST_HOURS + 1)]
+    (entry,) = parse_forecast(
+        {
+            "hourly": {
+                "time": [int(s.timestamp()) for s in stamps],
+                "precipitation_icon_eu": [0.0] * len(stamps),
+            }
+        },
+        current_hour + timedelta(minutes=5),
+    )
+
+    assert entry.horizon_end == current_hour + timedelta(hours=FORECAST_HOURS)
 
 
 async def test_open_meteo_is_fetched_every_thirty_minutes(

@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-09-16
+
+### Fixed
+
+- **The stand-in model source could still sleep through an outage.** MET Norway is polled only
+  after Open-Meteo has failed twice in a row, and put back to sleep after two good answers. The
+  integration asks Open-Meteo every third check and simply re-reads its last answer in between —
+  and those re-reads were being counted as answers. A re-read landing between two failures wiped
+  the first one, so if the timing lined up the stand-in never woke; and one good answer plus a
+  re-read of it was enough to put the stand-in back to sleep, when the rule says two. Only checks
+  that actually ask Open-Meteo count now.
+- **The two weather models now really reach 12 hours ahead.** Filing each hourly value under the
+  hour it describes (1.2.1) moved the whole forecast back by an hour, which quietly made the last
+  hour of the twelve disappear: the first value is the hour that has just passed. The request now
+  asks for one extra hour, so the models cover the full 12 hours after the current one. No walk
+  the integration can be asked about reaches that far today, so nothing visible was affected.
+
+### Changed
+
+- Internal tidy-up of how a cached forecast is re-presented on a failed or skipped check, and of
+  a few comments that told the history of a fix instead of stating the rule. No behaviour change.
+
 ## [1.2.1] - 2026-09-11
 
 ### Fixed
@@ -628,7 +650,8 @@ way; all of it is written up in `docs/DATA_SOURCES.md` § CHMI:
 - RainViewer is no longer a candidate: its public API serves past radar frames only, and the
   live `radar.nowcast` array is empty.
 
-[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.2
 [1.2.1]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.1
 [1.2.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.0
 [1.1.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.1.0

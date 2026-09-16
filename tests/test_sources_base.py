@@ -155,6 +155,18 @@ def test_restate_drops_a_series_that_aged_into_staleness() -> None:
     assert much_later.statuses[0].age_s == 3900
 
 
+def test_restate_keeps_what_the_result_says_about_its_request() -> None:
+    """Re-evaluating freshness must not quietly clear a flag about the request."""
+    status = SourceStatus(SOURCE_ICON_EU, STATE_OK, contributed=True, detail="why")
+    result = FetchResult(series=(_series(SOURCE_ICON_EU, NOW),), statuses=(status,), failed=True)
+
+    stated = restate(result, NOW + timedelta(minutes=10))
+
+    assert stated.failed
+    assert stated.statuses[0].detail == "why"
+    assert stated.statuses[0].age_s == 600
+
+
 def test_fetch_result_ok_requires_every_source_to_be_ok() -> None:
     """Open-Meteo speaks for two sources; one failure means the adapter failed."""
     ok = SourceStatus(SOURCE_ICON_EU, STATE_OK, contributed=True)

@@ -16,15 +16,15 @@ is the "sum of the **preceding** hour", so the value stamped `H` is the rain tha
 falls in `(H - 1 h, H]` — not in the hour that starts at `H`. The series this
 adapter returns is shifted accordingly, so a slot's start is the start of the hour
 the value describes, which is what `engine/grid.align` assumes of every source.
-Without the shift both models voted one hour late: the first value in a response
-is the current hour's stamp, i.e. rain that has already fallen, and it was being
-scored against the hour ahead.
+The first stamp of a response is the current hour's, i.e. rain already fallen, so
+`FORECAST_HOURS` of lookahead take one hour more than that in the request.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -58,6 +58,7 @@ MODEL_IDS: dict[str, str] = {
 
 STEP_S = 3600  # hourly series; the 15-minutely one is interpolated and lossy
 _STEP = timedelta(seconds=STEP_S)
+#: Hours of lookahead past the current one (docs/DATA_SOURCES.md: +12 h).
 FORECAST_HOURS = 12
 
 #: Fetched every 3rd 10-minute cycle: the freshest model re-runs hourly, so a
@@ -130,17 +131,10 @@ class OpenMeteoAdapter:
     def _failed(self, now: datetime, detail: str) -> FetchResult:
         if self._last is not None:
             stated = restate(self._last, now)
-            return FetchResult(
-                series=stated.series,
+            return replace(
+                stated,
                 statuses=tuple(
-                    SourceStatus(
-                        s.source_id,
-                        s.state,
-                        age_s=s.age_s,
-                        contributed=s.contributed,
-                        detail=f"reusing cached series: {detail}",
-                    )
-                    for s in stated.statuses
+                    replace(s, detail=f"reusing cached series: {detail}") for s in stated.statuses
                 ),
                 failed=True,
             )
@@ -162,7 +156,7 @@ class OpenMeteoAdapter:
             "longitude": ",".join(f"{lon}" for _, lon in points),
             "hourly": "precipitation",
             "models": ",".join(MODEL_IDS[sid] for sid in self.source_ids),
-            "forecast_hours": str(FORECAST_HOURS),
+            "forecast_hours": str(FORECAST_HOURS + 1),
             "timeformat": "unixtime",
             "timezone": "UTC",
         }

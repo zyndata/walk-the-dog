@@ -88,6 +88,7 @@ class SourceRegistry:
         for the engine — with the freshness weights that its age now implies.
         """
         results: dict[str, FetchResult] = {}
+        open_meteo_asked = self.open_meteo.should_fetch(now)
 
         # Three independent providers: fetch concurrently. CHMI is skipped
         # entirely — not even a cached status lookup costs a request — when the
@@ -103,7 +104,8 @@ class SourceRegistry:
         for adapter, result in zip(primary, gathered, strict=True):
             results[adapter.source_ids[0]] = result
 
-        self._update_failover(results[self.open_meteo.source_ids[0]])
+        if open_meteo_asked:
+            self._update_failover(results[self.open_meteo.source_ids[0]])
 
         # MET Norway is decided by this cycle's Open-Meteo outcome, so it runs after.
         results["metno"] = await self._run(self.met_norway, session, geometry, now)
@@ -130,12 +132,11 @@ class SourceRegistry:
     def _update_failover(self, open_meteo: FetchResult) -> None:
         """Wake or retire MET Norway based on Open-Meteo's recent record.
 
-        A failed request counts as a failure even when the adapter re-presents its
-        last series alongside it: the cached data is usable and its statuses say so,
-        but the rule here is about whether the *provider* answers. Without the
-        distinction an outage that began right after a successful fetch stayed
-        invisible until that cache went stale — three hours for KNMI — and MET
-        Norway, which exists for exactly that outage, was never woken for it.
+        Called only for cycles in which Open-Meteo was actually asked: the rule is
+        about whether the *provider* answers, so a cycle that re-presents cached
+        data — inside the 30-minute cadence or an armed backoff — is neither a
+        success nor a failure. For the same reason a failed request counts as a
+        failure even when fresh cached series ride alongside it with `ok` statuses.
         """
         if open_meteo.ok and not open_meteo.failed:
             self._open_meteo_successes += 1

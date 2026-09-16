@@ -351,3 +351,80 @@ async def test_metno_wakes_when_open_meteo_fails_behind_a_warm_cache(
     # The backoff has passed and there has been no success since: second failure.
     await registry.async_fetch(session, geometry, now + timedelta(minutes=40))
     assert registry.failover_active
+
+
+async def test_a_cycle_inside_the_backoff_does_not_forgive_the_failure(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """A cycle that makes no request is neither a success nor a failure.
+
+    The coordinator can run two cycles under a minute apart (a frame published
+    just after a grid cycle pulls the next wake forward). One landing inside
+    Open-Meteo's backoff re-presents the cache with `ok` statuses; counted as a
+    success it zeroed the failure count after every real failure, and MET Norway
+    never woke for as long as the phases stayed aligned.
+    """
+    _mock_librewxr(aioclient_mock, geometry)
+    aioclient_mock.get(open_meteo.URL, json=load_fixture("open_meteo", "dry.json"))
+    aioclient_mock.get(met_norway.URL, json=load_fixture("met_norway", "compact.json"))
+    registry = SourceRegistry(UA)
+    session = async_get_clientsession(hass)
+    await registry.async_fetch(session, geometry, now)
+
+    aioclient_mock.clear_requests()
+    _mock_librewxr(aioclient_mock, geometry)
+    aioclient_mock.get(open_meteo.URL, status=500)
+    aioclient_mock.get(met_norway.URL, json=load_fixture("met_norway", "compact.json"))
+
+    await registry.async_fetch(session, geometry, now + timedelta(minutes=30))
+    assert not registry.failover_active, "one failure is not enough"
+
+    # Forty seconds on: the backoff is armed, so this cycle asks Open-Meteo nothing.
+    assert not registry.open_meteo.should_fetch(now + timedelta(minutes=30, seconds=40))
+    await registry.async_fetch(session, geometry, now + timedelta(minutes=30, seconds=40))
+    assert not registry.failover_active
+
+    # The next real attempt fails too: that is the second failure in a row.
+    await registry.async_fetch(session, geometry, now + timedelta(minutes=40))
+    assert registry.failover_active
+
+
+async def test_a_cycle_inside_the_cadence_does_not_stand_metno_down(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """Two *answers* stand MET Norway down, not one answer re-presented twice.
+
+    Open-Meteo is asked every third cycle; the two cached cycles between answers
+    must not count, or the documented threshold is really one.
+    """
+    _mock_librewxr(aioclient_mock, geometry)
+    aioclient_mock.get(open_meteo.URL, status=500)
+    aioclient_mock.get(met_norway.URL, json=load_fixture("met_norway", "compact.json"))
+    registry = SourceRegistry(UA)
+    session = async_get_clientsession(hass)
+    for minute in (0, 10):
+        await registry.async_fetch(session, geometry, now + timedelta(minutes=minute))
+    assert registry.failover_active
+
+    aioclient_mock.clear_requests()
+    _mock_librewxr(aioclient_mock, geometry)
+    aioclient_mock.get(open_meteo.URL, json=load_fixture("open_meteo", "dry.json"))
+    aioclient_mock.get(met_norway.URL, json=load_fixture("met_norway", "compact.json"))
+
+    await registry.async_fetch(session, geometry, now + timedelta(minutes=60))
+    assert registry.failover_active, "one success is not enough to stand down"
+
+    # Ten and twenty minutes on the cadence re-presents the same answer: no request.
+    for minute in (70, 80):
+        assert not registry.open_meteo.should_fetch(now + timedelta(minutes=minute))
+        await registry.async_fetch(session, geometry, now + timedelta(minutes=minute))
+        assert registry.failover_active, "a cached cycle is not a second success"
+
+    await registry.async_fetch(session, geometry, now + timedelta(minutes=90))
+    assert not registry.failover_active

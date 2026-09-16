@@ -190,8 +190,9 @@ which is why the crop happens before the conversion rather than after.
 
 **Open-Meteo (`icon_eu` + `knmi`).** One `GET /v1/forecast` request with **5 coordinates**
 (centre + 4 points at bearings 0°/90°/180°/270° at distance r) ×
-`models=icon_eu,knmi_harmonie_arome_europe` × `hourly=precipitation`, `forecast_hours=12`,
-`timeformat=unixtime`. Measured at 508 bytes gzipped for 5 points × 3 models in phase 0. Per
+`models=icon_eu,knmi_harmonie_arome_europe` × `hourly=precipitation`, `forecast_hours=13`
+(the first stamp is the current hour's sum, already fallen, so twelve hours of lookahead need
+thirteen stamps), `timeformat=unixtime`. Measured at 508 bytes gzipped for 5 points × 3 models in phase 0. Per
 model and hour, the sampled intensity is the **max across the 5 points** (few samples of a
 smooth NWP field — no speckle risk; max is the conservative choice). mm per hourly step = mm/h
 directly; the interpolated `minutely_15` series is never requested (phase 0: carries no
@@ -211,7 +212,8 @@ a series slot starting at H is valid over [H, H+1) — a step function, no inter
 adapters put each provider's stamps on that footing, because the providers disagree about what
 a stamp means: MET Norway's `next_1_hours` at H already describes [H, H+1), while Open-Meteo
 stamps the **preceding** hour's sum at H, so its adapter files the value stamped H under H−1
-(fixed in 1.2.1 — until then both models voted one hour late). `librewxr`
+(fixed in 1.2.1 — until then both models voted one hour late; 1.2.2 asks for the extra stamp that
+keeps the horizon at 12 h after the shift). `librewxr`
 contributes only to slots within its +60 min horizon; beyond that it is `out_of_range` for the
 slot, not stale.
 

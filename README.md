@@ -121,7 +121,7 @@ is none, to the longest radar-backed window that still meets your minimum.
 
 ## Maturity
 
-`1.2.1` is feature-complete: everything described above is built, tested and measured. What it
+`1.2.2` is feature-complete: everything described above is built, tested and measured. What it
 is **not** is field-proven — the forecasts have been checked against recorded data, not against
 a season of actual weather, and nobody has yet counted how often the advice was right. If it
 tells you to wait and the rain never comes, that is worth an

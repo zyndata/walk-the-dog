@@ -12,7 +12,7 @@ Adapters do I/O; they never import `engine` (docs/ARCHITECTURE.md § Module layo
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Protocol
 
@@ -201,12 +201,10 @@ class FetchResult:
 
     series: tuple[SourceSeries, ...] = ()
     statuses: tuple[SourceStatus, ...] = ()
-    #: True when the request this cycle *made* did not succeed, whatever the
-    #: statuses say. An adapter that fails re-presents its last series while they
-    #: are fresh, and those statuses honestly read `ok` — the data is usable. But
-    #: the registry's failover rule is about the provider, not the data: two
-    #: failed fetches in a row must wake MET Norway even when a warm cache is still
-    #: answering for Open-Meteo, or the switch waits hours for that cache to go stale.
+    #: True when the request made this cycle did not succeed, whatever the statuses
+    #: say: a failed adapter re-presents its last series while they are fresh, and
+    #: those honestly read `ok`. The statuses describe the data; this describes the
+    #: provider, which is what the registry's failover rule is about.
     failed: bool = False
 
     @property
@@ -256,15 +254,14 @@ def restate(result: FetchResult, now: datetime) -> FetchResult:
             continue
         stale = series.is_stale(now)
         statuses.append(
-            SourceStatus(
-                status.source_id,
-                STATE_STALE if stale else STATE_OK,
+            replace(
+                status,
+                state=STATE_STALE if stale else STATE_OK,
                 age_s=series.age_s(now),
                 contributed=not stale,
-                detail=status.detail,
             )
         )
-    return FetchResult(series=result.series, statuses=tuple(statuses))
+    return replace(result, statuses=tuple(statuses))
 
 
 @dataclass

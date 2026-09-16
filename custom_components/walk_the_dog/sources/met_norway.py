@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -122,8 +123,7 @@ class MetNorwayAdapter:
 
     def _failed(self, now: datetime, detail: str) -> FetchResult:
         if self._last is not None:
-            stated = restate(self._last, now)
-            return FetchResult(series=stated.series, statuses=stated.statuses, failed=True)
+            return replace(restate(self._last, now), failed=True)
         return FetchResult(
             statuses=(SourceStatus(SOURCE_METNO, STATE_FAILED, detail=detail),), failed=True
         )

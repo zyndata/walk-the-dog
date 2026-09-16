@@ -2098,3 +2098,61 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 - **Open questions carried forward:** the seven design calls above, plus everything from
   phase 11 and the earlier entries, unchanged.
+
+## Code review 1.2.2 — the failover counted cycles that asked nothing (2026-09-16, out of phase)
+
+- **Status:** done (code, tests, docs; ruff clean; 567 tests green offline in the Linux
+  container from the Windows machine — five of them new, the two failover ones and the request
+  horizon verified red against the pre-fix code first)
+- **Date:** 2026-09-16
+- **Why it exists:** `/code-review` over the 1.2.1 release commits, then "fix found issues". Four
+  findings survived its own verification; all four are addressed here. No phase was started or
+  advanced; recorded as workflow rule 3 requires.
+
+- **What was found and fixed.**
+  1. **Failover counted no-request cycles as successes** (`sources/__init__.py`). `_run` returns
+     `adapter.cached(now)` whenever `should_fetch` is False — inside Open-Meteo's 30-minute cadence
+     or an armed backoff — and `cached()` goes through `restate()`, whose statuses read `ok` and
+     whose `failed` is False. `_update_failover` counted that as a provider success and zeroed the
+     failure counter. Two consequences: the coordinator can run two cycles under a minute apart
+     (`_next_wake` takes the earlier of the grid and an aligned or `arm_at` wake), and one landing
+     inside the 60 s backoff after a failure forgave it — with the LibreWXR frame phase sitting in
+     that window, after *every* failure, so MET Norway never woke. And the stand-down threshold was
+     effectively one: a real success plus the cached cycle ten minutes later retired MET Norway.
+     Fixed by asking `open_meteo.should_fetch(now)` once at the top of `async_fetch` and calling
+     `_update_failover` only when it was True. `should_fetch` is pure (backoff readiness and a
+     timestamp comparison), so the answer is the one `_run` acts on. Two new tests in
+     `tests/test_source_registry.py`, both red before the fix.
+  2. **The forward horizon was 11 h, not 12** (`sources/open_meteo.py`). Filing each stamp under the
+     preceding hour (1.2.1) left the first slot in the past and the last one ending 11 h ahead,
+     while `FORECAST_HOURS`, `docs/DATA_SOURCES.md` and `docs/CONFIG.md` all say 12. The request
+     now asks for `FORECAST_HOURS + 1` stamps. Not observable today — the longest search window
+     (180 + 30 + 180 min margins plus the walk) stays under 11 h — but the constant and the docs
+     were lying. Two new tests in `tests/test_open_meteo.py`; the request one red before the fix.
+  3. **`restate()` rebuilt `FetchResult` by hand and dropped `failed`** (`sources/base.py`,
+     `met_norway.py`, `open_meteo.py`). It now ends with `dataclasses.replace`, so any flag a result
+     carries survives re-evaluation, and both adapters' `_failed` paths are one `replace(...)` each
+     instead of copying series and statuses field by field. New test in `tests/test_sources_base.py`
+     pins that `restate` keeps `failed` and `detail`. CHMI's and LibreWXR's `_failed` paths were
+     left alone: they build a single fresh status rather than re-stating one, so `replace` buys
+     nothing there.
+  4. **Comments that told the story of a fix** instead of the rule (`open_meteo.py` module
+     docstring, `FetchResult.failed`, `_update_failover`), against CLAUDE.md's "comments only for
+     constraints the code cannot express". Trimmed to the constraint; the history stays in
+     `CHANGELOG.md` and the entry above.
+
+- **Decisions.**
+  - **Gate on `should_fetch`, keep `failed`.** The review suggested that counting only asked cycles
+    "subsumes" the `failed` flag. It does not: a failed request behind a warm cache still presents
+    `ok` statuses, so without `failed` that cycle would count as a success again — the 1.2.1 bug.
+    The two facts are orthogonal (was the provider asked; did it answer) and both are needed.
+  - **Recorded once at the top of the cycle, not returned from `_run`.** Having `_run` report
+    whether it fetched is the more general shape, but only Open-Meteo's answer is consumed, and a
+    pure predicate evaluated once reads more plainly than threading a tuple through `gather`.
+  - **Request 13 stamps rather than document 11 h.** The horizon in `docs/DATA_SOURCES.md` is a
+    design promise the search windows are sized against; one more hourly stamp in a ~420-byte
+    response is the cheaper side of that trade.
+  - **Patch release (1.2.2).** Nothing a user configures or reads changed shape.
+
+- **Open questions carried forward:** everything from the 1.2.1 review entry and the earlier
+  entries, unchanged.
