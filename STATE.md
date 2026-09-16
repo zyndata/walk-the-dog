@@ -2161,3 +2161,34 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 - **Open questions carried forward:** everything from the 1.2.1 review entry and the earlier
   entries, unchanged.
+
+## Tooling — a `/release` skill (2026-09-16, out of phase)
+
+- **Status:** done
+- **Date:** 2026-09-16
+- **What was built:** `.claude/skills/release/SKILL.md`, invoked as `/release [patch | minor |
+  major | X.Y.Z]`. It turns `docs/DEVELOPMENT.md` § Releasing into one checked run: read the repo
+  state, merge a work branch into `main`, choose the SemVer bump from `[Unreleased]`, bump the
+  manifest and date the CHANGELOG section, run the checks, write the `STATE.md` entry, commit and
+  push, wait for CI and Validate on that commit, tag with `scripts/release.py --tag`, verify the
+  published release, and record it. `.claude/settings.json` allows the read-only commands it
+  uses; pushing and tagging still prompt.
+- **Decisions:**
+  - **User-invoked only** (`disable-model-invocation: true`). A pushed tag publishes to every HACS
+    user within the hour; that must never start because a conversation mentioned releasing.
+  - **A skill, not a `.claude/commands/` file.** Skills are the current format and take
+    frontmatter such as the invocation guard. `/phase` still works as a command and was left alone.
+  - **CI must be green on the release commit before tagging.** The Release workflow publishes
+    without re-running tests, so waiting is the only thing that keeps an untested commit off users.
+  - **A failed Release run is re-run, never re-tagged.** The tag is public once pushed; a wrong
+    commit gets a new patch version.
+  - **A regex scan of the diff since the last tag** for tokens, Home Assistant URLs, private
+    addresses, emails and coordinate-like numbers, judged by hand. GitHub push protection stays
+    the backstop, as CLAUDE.md rule 6 says.
+  - **Windows runs the suite in the `wtd-test` image, copying the tree without `.venv`.** A plain
+    copy of the bind mount took over ten minutes today; without the virtualenv it takes seconds.
+  - **No `CHANGELOG.md` entry:** nothing an integration user can observe.
+- **Verified:** every read-only command in the skill ran against `v1.2.1..v1.2.2`. The secret scan
+  had no hits on that diff and caught each planted sample. `gh run list --commit` matches only
+  a full hash, and the skill now says so. The skill has not yet cut a release.
+- **Open questions carried forward:** unchanged from the 1.2.2 entry.

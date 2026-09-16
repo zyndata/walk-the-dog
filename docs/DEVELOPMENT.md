@@ -167,6 +167,12 @@ commit hash, which means nothing to the person reading it.
    publishes a GitHub release whose notes are that changelog section. HACS offers it within
    the hour.
 
+**With Claude Code**, `/release [patch | minor | major | X.Y.Z]` runs all of the above from
+`.claude/skills/release/SKILL.md`. It also merges a work branch into `main`, runs the full check
+list (lint, the whole suite, a scan of the diff for secrets and personal data, and green CI and
+Validate runs), records the release in `STATE.md`, waits for CI before it tags, and verifies the
+published release. Only the user can start it; Claude never begins a release on its own.
+
 Never publish a release as a *pre-release*: HACS hides those unless the user has opted into
 beta versions, so the update would silently not appear.
 

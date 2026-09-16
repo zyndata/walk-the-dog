@@ -12,7 +12,18 @@
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
-      "Bash(git ls-files*)"
+      "Bash(git ls-files*)",
+      "Bash(python scripts/release.py)",
+      "Bash(python scripts/release.py --notes)",
+      "Bash(python scripts/release.py --print-version)",
+      "Bash(python3 scripts/release.py)",
+      "Bash(python3 scripts/release.py --notes)",
+      "Bash(python3 scripts/release.py --print-version)",
+      "Bash(git fetch*)",
+      "Bash(git tag -l*)",
+      "Bash(gh auth status*)",
+      "Bash(gh run list*)",
+      "Bash(gh release view*)"
     ]
   }
 }
