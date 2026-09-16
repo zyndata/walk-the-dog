@@ -2154,5 +2154,10 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     response is the cheaper side of that trade.
   - **Patch release (1.2.2).** Nothing a user configures or reads changed shape.
 
+- **Released as [`v1.2.2`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.2)**
+  (2026-09-16). `python scripts/release.py --tag` cut it; **CI** and **Validate** (hassfest + HACS)
+  green on the commit and **Release** green on the tag. The release is published, not a draft and
+  not a pre-release, so HACS will offer it.
+
 - **Open questions carried forward:** everything from the 1.2.1 review entry and the earlier
   entries, unchanged.
