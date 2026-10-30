@@ -6,22 +6,77 @@ going out earlier or later so the walk stays dry. See docs/ARCHITECTURE.md.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, Final
 
 import voluptuous as vol
 from homeassistant.const import Platform
 from homeassistant.core import ServiceCall, callback
 from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.loader import async_get_loaded_integration
 
-from .const import DOMAIN, SERVICE_WALKED
+from .const import (
+    CONF_EARLIER_MARGIN_MIN,
+    CONF_WALK_DURATION_MIN,
+    DOMAIN,
+    RADAR_REACH_MIN,
+    SERVICE_WALKED,
+)
 from .coordinator import WalkCoordinator
+from .timing import fit_to_radar
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
+_LOGGER = logging.getLogger(__name__)
+
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
+
+#: The repair issue that tells the user their timing was changed for them on upgrade.
+ISSUE_TIMING_FITTED: Final = "timing_fitted"
+
+#: The two options `fit_to_radar` may change and the repair issue reports.
+_TIMING_KEYS: Final = (CONF_EARLIER_MARGIN_MIN, CONF_WALK_DURATION_MIN)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Bring an entry stored before 1.3.0 inside the radar's reach, once.
+
+    Since 1.3.0 the alert waits until a radar sees the whole walk, so a notice
+    period plus walk longer than the radar's reach would not get a less reliable
+    alert — it would get one later than it promised. The config flow now refuses
+    such settings; an entry saved before it did is fitted here (`timing.py`), and a
+    repair issue says what changed, because a notice period that quietly shrank is
+    exactly the kind of surprise a user reports as a bug.
+    """
+    if entry.version > 1:
+        return False
+    if entry.minor_version < 2:  # noqa: PLR2004 - the minor version this migrates to
+        fitted = fit_to_radar(entry.options)
+        before = {key: entry.options.get(key) for key in _TIMING_KEYS}
+        after = {key: fitted.get(key) for key in _TIMING_KEYS}
+        hass.config_entries.async_update_entry(entry, options=fitted, minor_version=2)
+        if before != after:
+            _LOGGER.warning("Walk timing fitted to the radar's reach: %s -> %s", before, after)
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                ISSUE_TIMING_FITTED,
+                is_fixable=False,
+                is_persistent=True,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_TIMING_FITTED,
+                translation_placeholders={
+                    "reach": str(RADAR_REACH_MIN),
+                    "earlier_before": str(before[CONF_EARLIER_MARGIN_MIN]),
+                    "earlier_after": str(after[CONF_EARLIER_MARGIN_MIN]),
+                    "duration_before": str(before[CONF_WALK_DURATION_MIN]),
+                    "duration_after": str(after[CONF_WALK_DURATION_MIN]),
+                },
+            )
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

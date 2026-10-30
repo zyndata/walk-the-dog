@@ -1,6 +1,6 @@
 """Purity is a structural property, so it is checked structurally.
 
-docs/ARCHITECTURE.md makes `engine/*` and `schedule.py` pure — no I/O, no Home
+docs/ARCHITECTURE.md makes `engine/*`, `schedule.py` and `timing.py` pure — no I/O, no Home
 Assistant imports, no clock reads, `now` always a parameter — because that is
 what makes every rain scenario testable as plain arithmetic and every decision
 reproducible from a recorded set of series. A stray `datetime.now()` would
@@ -16,7 +16,11 @@ from pathlib import Path
 import pytest
 
 COMPONENT = Path(__file__).parents[1] / "custom_components" / "walk_the_dog"
-MODULES = [*sorted(COMPONENT.joinpath("engine").glob("*.py")), COMPONENT / "schedule.py"]
+MODULES = [
+    *sorted(COMPONENT.joinpath("engine").glob("*.py")),
+    COMPONENT / "schedule.py",
+    COMPONENT / "timing.py",
+]
 
 #: Absolute imports a pure module may use: the standard library, and nothing else.
 ALLOWED_ROOTS = {
@@ -52,6 +56,7 @@ def test_every_pure_module_is_covered() -> None:
         "consensus.py",
         "grid.py",
         "schedule.py",
+        "timing.py",
         "window.py",
     }
 

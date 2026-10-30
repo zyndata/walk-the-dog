@@ -10,17 +10,26 @@ from typing import TYPE_CHECKING
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.helpers import issue_registry as ir
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.walk_the_dog.const import CONF_SCHEDULE_MODE, DOMAIN, SCHEDULE_MODE_DAILY
+from custom_components.walk_the_dog import ISSUE_TIMING_FITTED
+from custom_components.walk_the_dog.const import (
+    CONF_EARLIER_MARGIN_MIN,
+    CONF_SCHEDULE_MODE,
+    CONF_WALK_DURATION_MIN,
+    DOMAIN,
+    RADAR_REACH_MIN,
+    SCHEDULE_MODE_DAILY,
+)
 from custom_components.walk_the_dog.coordinator import WalkCoordinator
 
-from .conftest import hourly_sources, setup_entry
+from .conftest import ENTRY_DATA, ENTRY_OPTIONS, hourly_sources, setup_entry
 from .test_config_flow import PARAMS
 
 if TYPE_CHECKING:
     from freezegun.api import FrozenDateTimeFactory
     from homeassistant.core import HomeAssistant
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
 
     from .conftest import FakeFetch
 
@@ -101,3 +110,62 @@ async def test_setup_makes_no_request_when_no_walk_is_near(
     await setup_entry(hass, entry)
 
     assert fetch.calls == 0
+
+
+# --- the 1.3.0 migration: timing fitted to the radar's reach -------------------
+
+
+async def _legacy_entry(hass: HomeAssistant, **timing: int) -> MockConfigEntry:
+    """An entry as 1.2 stored it: minor version 1, timing exactly as given."""
+    await hass.config.async_set_time_zone("UTC")
+    legacy = MockConfigEntry(
+        domain=DOMAIN,
+        title="Walk the dog",
+        data=ENTRY_DATA,
+        options={**ENTRY_OPTIONS, **timing},
+        version=1,
+        minor_version=1,
+    )
+    legacy.add_to_hass(hass)
+    return legacy
+
+
+async def test_an_old_entry_is_fitted_to_the_radar_and_told_why(
+    hass: HomeAssistant, fetch: FakeFetch, freezer: FrozenDateTimeFactory
+) -> None:
+    """The reported settings — 60 minutes of notice for a 15-minute walk — become 30.
+
+    And a repair issue says so: a notice period that shrank on its own is exactly
+    what a user would otherwise report as a bug.
+    """
+    freezer.move_to(IDLE)
+    legacy = await _legacy_entry(hass, **{CONF_EARLIER_MARGIN_MIN: 60, CONF_WALK_DURATION_MIN: 15})
+
+    await setup_entry(hass, legacy)
+
+    assert legacy.minor_version == 2
+    assert legacy.options[CONF_EARLIER_MARGIN_MIN] == 30
+    assert legacy.options[CONF_WALK_DURATION_MIN] == 15
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_TIMING_FITTED)
+    assert issue is not None
+    assert issue.translation_placeholders == {
+        "reach": str(RADAR_REACH_MIN),
+        "earlier_before": "60",
+        "earlier_after": "30",
+        "duration_before": "15",
+        "duration_after": "15",
+    }
+
+
+async def test_an_old_entry_that_already_fits_is_only_renumbered(
+    hass: HomeAssistant, fetch: FakeFetch, freezer: FrozenDateTimeFactory
+) -> None:
+    """Nobody inside the rule is shown a repair issue for nothing."""
+    freezer.move_to(IDLE)
+    legacy = await _legacy_entry(hass, **{CONF_EARLIER_MARGIN_MIN: 30, CONF_WALK_DURATION_MIN: 15})
+
+    await setup_entry(hass, legacy)
+
+    assert legacy.minor_version == 2
+    assert legacy.options[CONF_EARLIER_MARGIN_MIN] == 30
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_TIMING_FITTED) is None

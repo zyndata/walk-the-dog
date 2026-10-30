@@ -208,6 +208,31 @@ def hourly_sources(
     return series, [make_status(sid, age_s=0, contributed=True) for sid in source_ids]
 
 
+def radar_sources(
+    now: datetime,
+    values: Sequence[float],
+    *,
+    start: datetime = datetime(2026, 8, 25, 3, 0, tzinfo=UTC),
+    radar_until: datetime | None = None,
+) -> tuple[list[SourceSeries], list[SourceStatus]]:
+    """The two hourly models plus a radar agreeing with them, all freshly issued.
+
+    Since 1.3.0 an alert is sent only once a radar reaches the whole walk, so any
+    test about a real alert needs one. It repeats each hourly value over the six
+    10-minute frames of that hour and spans the same hours as the models — far past
+    any real nowcast, which is what keeps it out of the way of tests that are about
+    something else. `radar_until` cuts the radar short, for a test about what lies
+    beyond its reach.
+    """
+    series, statuses = hourly_sources(now, values, start=start)
+    frames = [value for value in values for _ in range(6)]
+    if radar_until is not None:
+        frames = frames[: int((radar_until - start).total_seconds()) // 600]
+    series.append(make_series(SOURCE_LIBREWXR, frames, start=start, issued_at=now))
+    statuses.append(make_status(SOURCE_LIBREWXR, age_s=0, contributed=True))
+    return series, statuses
+
+
 @pytest.fixture
 def fetch() -> Generator[FakeFetch]:
     """Replace the source registry's network cycle for the whole test."""
@@ -226,6 +251,10 @@ async def entry(hass: HomeAssistant) -> MockConfigEntry:
         data=ENTRY_DATA,
         options=ENTRY_OPTIONS,
         version=1,
+        # Already current: these tests are about what the coordinator does with what
+        # is stored, and the 60-minute notice they were written around predates the
+        # radar-reach rule the 1.2 -> 1.3 migration enforces (tests/test_init.py).
+        minor_version=2,
     )
     config_entry.add_to_hass(hass)
     return config_entry

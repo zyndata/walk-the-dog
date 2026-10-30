@@ -2192,3 +2192,82 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   had no hits on that diff and caught each planted sample. `gh run list --commit` matches only
   a full hash, and the skill now says so. The skill has not yet cut a release.
 - **Open questions carried forward:** unchanged from the 1.2.2 entry.
+
+## Behaviour change — the radar decides the alert (2026-10-30, out of phase)
+
+- **Status:** done on `main`, not yet released (the `[Unreleased]` CHANGELOG section is ready for
+  `/release`, which will make it **1.3.0** — new option, new behaviour).
+- **Date:** 2026-10-30
+- **Why it exists:** a live false alarm reported by the maintainer. **Deviation from `PLAN.md`,
+  recorded here before proceeding, as workflow rule 3 requires** — no phase was started; all
+  phases are done.
+- **The report, read from the instance's recorder** (no location recorded here): an 18:00 walk,
+  15 minutes long, notice 60 min, later margin 50 min, threshold `light`, radius 4 km. At 17:00
+  local the alert said rain. The breakdown: KNMI wet at 0.7 mm/h (weight 0.9), ICON-EU dry (0.8),
+  CHMI dry over the part it reached, LibreWXR not reaching the walk at all. Over the last slots of
+  the walk only the two models voted, 0.9 against 0.8: **risk 0.529, confidence 0.047.** The
+  radars the user checked showed nothing because nothing was falling; the "rain" was one model's
+  drizzle an hour out. The radius played no part.
+- **What was built:**
+  - `engine/window.py`: `Recommendation.radar_backed` — a radar reaches every slot of the
+    *scheduled* walk (distinct from `provisional`, which is about the recommended window).
+  - `notifier.py`: the alert is gated on `radar_backed`, **latched per walk** (once seen, the walk's
+    slots slip into the past where no nowcast reaches, and the later re-checks must still count).
+    Before the gate holds, an optional **preliminary notice** (`preliminary_alert`, default on) goes
+    out once per walk from the first cycle — Android low-importance channel, iOS `passive` — and a
+    **`radar_clear`** withdrawal follows at once if the radar then sees the walk dry. Payload gains
+    `preliminary`; `confirmation` now means only the four confirmation shapes.
+  - `timing.py` (new, pure): `RADAR_REACH_MIN` = 50 → `max_earlier_margin`, `fits_radar`,
+    `fit_to_radar`.
+  - `config_flow.py`: the `long_walk` and `beyond_radar` confirmation steps are gone; the params form
+    refuses `earlier + duration > 50` (`beyond_radar` on the margin, `walk_too_long` on the
+    duration) with the widest allowed notice in the message. Walk duration max 240 → 50, earlier
+    margin max 180 → 40, default earlier margin 60 → 30. New `preliminary_alert` toggle.
+    `MINOR_VERSION` = 2.
+  - `__init__.py`: `async_migrate_entry` fits a 1.2 entry once and raises a persistent repair issue
+    (`timing_fitted`) naming the old and new values; an entry that fits is only renumbered.
+  - Sensor/event field `radar_backed`; strings (en + pl) for the toggle, both errors, the two new
+    messages, the Android channel, the logbook line, the attribute and the repair issue.
+  - Docs: `docs/CONFIG.md` (options table, § Timings and what the radar can see rewritten, new
+    § The preliminary notice, payload fields), `docs/ARCHITECTURE.md` (module layout, radar-backed
+    walk, the gate and the preliminary notice under § Coordinator scheduling), README feature list.
+  - Tests: `tests/test_timing.py` (new), migration tests in `test_init.py`, radar-gate and
+    preliminary tests in `test_notifier.py`, `radar_backed` tests in `test_window.py`, the config
+    flow tests rewritten from confirmations to errors, `timing.py` added to the purity check.
+    **602 tests green** offline in the `wtd-test` container; `ruff` clean.
+- **Decisions:**
+  - **The whole walk must be radar-covered**, not "most of it" (maintainer's choice) — the slot
+    the radar does not reach is exactly where the model-only tie-break happened.
+  - **A hard limit, not a warning** (maintainer's choice). A notice period the radar cannot back no
+    longer yields a weaker alert; under the gate it yields the real alert *late*, after the moment
+    the setting promised — a confirmation step would be confirming a broken promise.
+  - **`RADAR_REACH_MIN` = 50, not the 57 the arithmetic guarantees.** A run reaches 70 min past its
+    stamp; the newest run can be 13 min old when read (LibreWXR 10-min cadence + 3-min measured
+    lag) → 57; 7 min are kept back for a late frame. Cost: a 15-minute walk gets 30 min of notice
+    rather than 40. If that proves too tight in use, 57 is the ceiling to move towards.
+  - **The later margin is not limited.** "Later" is decided at or after `T`, and the watch window
+    stays open for it; the existing `provisional` wording already covers a later window only the
+    models see.
+  - **The preliminary notice is optional, default on** (maintainer's choice), sent once, never
+    after a real alert, and outside the material-change state so the first radar-backed alert is
+    always news.
+  - **Migration shrinks the notice, not the walk**; only a walk over 50 min is itself shortened
+    (and its shortest-acceptable walk follows it down).
+  - **Test entries are created at minor version 2.** The coordinator/notifier suites were written
+    around a 60-minute notice for a 30-minute walk, which the migration would now rewrite; the
+    coordinator honours whatever is stored, so those tests stay about scheduling. Alert tests use a
+    new `radar_sources` helper (models + an agreeing radar); the model-only cases keep
+    `hourly_sources`.
+- **Open questions carried forward:**
+  - **Walks over 50 minutes can no longer be configured at all.** A 60-minute dog walk is common;
+    if users ask for it, the options are "most of the walk" coverage or a separate, explicitly
+    model-only mode for long walks. Not decided.
+  - **The 0.9-vs-0.8 tie-break still exists** wherever only the two models vote (e.g. a `later`
+    window beyond the radar). It no longer decides an alert by itself, but a two-source split
+    deciding "wet" by a tenth of a weight is still worth a rule. `confidence` is still computed and
+    never used for a decision.
+  - **No radar at all** (LibreWXR down outside the CHMI box) now means no alert, only the
+    preliminary notice. Deliberate, but worth watching.
+  - **Not yet verified live.** Deploy to the maintainer's instance and watch one walk with rain and
+    one without; check the repair issue appears with the right numbers after the upgrade.
+  - Everything from earlier entries, unchanged.

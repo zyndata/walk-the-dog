@@ -57,33 +57,21 @@
           "walk_duration_min": "Średnia długość spaceru",
           "min_walk_duration_min": "Najkrótszy spacer, który ma sens",
           "confirm_margin_min": "Druga wiadomość tuż przed wyjściem",
+          "preliminary_alert": "Wstępne ostrzeżenie, zanim radar zobaczy spacer",
           "notify_service": "Zawsze powiadamiaj to urządzenie",
           "auto_mute_entity": "Pomiń telefony, gdy tej osoby nie ma w domu"
         },
         "data_description": {
           "radius_km": "Koło wokół miejsca spaceru, w którym sprawdzany jest deszcz.",
           "intensity_threshold": "Dana chwila liczy się jako deszczowa, gdy prognoza osiągnie to natężenie.",
-          "earlier_margin_min": "O ile wcześniej niż o zaplanowanej godzinie możesz wyjść z domu. To jest zarazem moment, w którym przychodzi powiadomienie, więc zostaw tu 60 minut lub mniej: tak daleko sięgają prognozy radarów opadów, a wiadomość wysłana wcześniej może opierać się już tylko na modelach godzinowych.",
+          "earlier_margin_min": "O ile wcześniej niż o zaplanowanej godzinie możesz wyjść z domu. To jest zarazem moment, w którym przychodzi alert, a alert jest wysyłany dopiero wtedy, gdy radar opadów widzi cały spacer. Radary widzą około 50 minut naprzód, więc ten margines razem z czasem spaceru musi zmieścić się w 50 minutach — przy 15-minutowym spacerze to najwyżej 30 minut.",
           "later_margin_min": "O ile później niż o zaplanowanej godzinie możesz wyjść z domu. Późniejsze wyjście jest zawsze sprawdzane ponownie, w miarę jak ta godzina się zbliża — radary zobaczą je na długo przed tym, zanim trzeba będzie wychodzić — więc szeroki margines kosztuje tu tylko kilka zapytań o prognozę więcej.",
-          "walk_duration_min": "Ile trwa spacer. Żeby jakaś godzina została zaproponowana, cały spacer musi pozostać suchy, więc spacer dłuższy niż 60 minut, na które prognozują radary, nigdy nie będzie w całości potwierdzony radarem w chwili, gdy dostajesz wiadomość.",
+          "walk_duration_min": "Ile trwa spacer. Zanim przyjdzie alert, radar opadów musi widzieć cały spacer, a radary widzą około 50 minut naprzód, dlatego najdłuższy spacer, jaki można ustawić, to 50 minut — a im dłuższy spacer, tym mniejsze wyprzedzenie alertu.",
           "min_walk_duration_min": "Gdy w całym zakresie nie ma suchego okna na cały spacer, zaproponuj najdłuższe suche okno trwające co najmniej tyle: krótki spacer bez deszczu jest lepszy niż pełny w deszczu. Wartość zmienia się co 10 minut, bo tyle trwa jedna klatka radaru — krótszej przerwy żadne źródło i tak nie widzi — a skrócony spacer jest proponowany tylko tam, gdzie sięga radar. Wartość 0 wyłącza skracanie: usłyszysz wtedy wyłącznie o pełnym spacerze albo o kurtce przeciwdeszczowej.",
           "confirm_margin_min": "Druga, krótka wiadomość tyle minut przed faktycznym wyjściem, mówiąca, że otrzymany plan jest nadal aktualny — albo że deszcz odpuścił i można jednak iść o zwykłej porze. Trafia na te same urządzenia co pierwsza. Wartość 0 wyłącza ją i jest ustawieniem domyślnym: brak wiadomości oznacza, że nic się nie zmieniło.",
+          "preliminary_alert": "Ciche, wczesne powiadomienie, gdy godzinowe modele pogody przewidują deszcz, a żaden radar nie sięga jeszcze Twojego spaceru. To tylko „może”: właściwy alert i tak czeka na radar, a jeśli radar zobaczy spacer suchy, dostaniesz wiadomość, że ostrzeżenie jest odwołane. Wyłącz, jeśli chcesz słyszeć tylko to, co potwierdził radar.",
           "notify_service": "Urządzenie z aplikacją Home Assistant, które dostaje alert o każdym spacerze. Nie wycisza go ani nieobecność, ani wyciszenie pojedynczego spaceru — tylko przełącznik Alerty. Telefony dodane do pojedynczego spaceru dostają powiadomienie razem z nim. Zostaw puste, aby powiadamiać wyłącznie telefony przypisane do spacerów.",
           "auto_mute_entity": "Zapasowa reguła obecności dla telefonów, które nie potrafią same powiedzieć, gdzie są. Telefon z aplikacją Home Assistant ma własny lokalizator i to on decyduje; dopiero telefon bez lokalizatora pyta o tę osobę i milknie, gdy jej nie ma w domu. Urządzenia zawsze powiadamianego to nie dotyczy."
-        }
-      },
-      "long_walk": {
-        "title": "To długi spacer",
-        "description": "Podano {duration} minut. Radary opadów prognozują {horizon} minut do przodu, a dalej zostają już tylko modele godzinowe, więc przy spacerach dłuższych niż {limit} minut podpowiedź częściej będzie przypuszczeniem. Potwierdź, aby zostawić tę długość, albo nie potwierdzaj, aby wrócić i ją zmienić.",
-        "data": {
-          "confirm": "Zostaw tę długość"
-        }
-      },
-      "beyond_radar": {
-        "title": "Alert przyjdzie, zanim radar to zobaczy",
-        "description": "Wiadomość ma przychodzić {earlier} minut przed spacerem. Radary opadów prognozują tylko {horizon} minut do przodu, więc w tamtej chwili nic jeszcze nie patrzyło na godzinę spaceru, a pierwsza wiadomość opiera się na godzinowych modelach pogody — wiarygodnych co do tego, czy będzie padać, nieprecyzyjnych co do minuty, w której zacznie.\n\nTo nie jest bezużyteczne i integracja obserwuje dalej: gdy spacer wejdzie w zasięg radaru, sprawdza wszystko ponownie i odzywa się znowu, jeśli odpowiedź się zmieni. Ale margines {horizon} minut lub mniejszy daje odpowiedź potwierdzoną radarem od razu. Potwierdź, aby zostawić {earlier} minut ({over} minut poza zasięgiem radaru), albo nie potwierdzaj, aby wrócić i zmniejszyć tę wartość.",
-        "data": {
-          "confirm": "Zostaw to wyprzedzenie"
         }
       }
     },
@@ -91,7 +79,9 @@
       "invalid_time": "Nie udało się odczytać godziny spaceru. Użyj zapisu 24-godzinnego, na przykład 07:30.",
       "no_walk_times": "Podaj przynajmniej jedną godzinę spaceru.",
       "invalid_notify_service": "Wybierz jedno z urządzeń z listy albo wpisz nazwę usługi notify zaczynającą się od mobile_app_.",
-      "min_walk_too_long": "Najkrótszy spacer nie może trwać dłużej niż sam spacer. Zmniejsz tę wartość albo ustaw 0, żeby nigdy nie skracać spaceru."
+      "min_walk_too_long": "Najkrótszy spacer nie może trwać dłużej niż sam spacer. Zmniejsz tę wartość albo ustaw 0, żeby nigdy nie skracać spaceru.",
+      "beyond_radar": "Radary opadów widzą około {reach} minut naprzód, a alert czeka, aż zobaczą cały spacer. Przy spacerze trwającym {duration} min wyprzedzenie może wynosić najwyżej {widest} min — zmniejsz ten margines albo skróć spacer.",
+      "walk_too_long": "Radary opadów widzą około {reach} minut naprzód i cały spacer musi się w tym zmieścić. Wpisz najwyżej {reach} minut."
     }
   },
   "options": {
@@ -144,33 +134,21 @@
           "walk_duration_min": "Średnia długość spaceru",
           "min_walk_duration_min": "Najkrótszy spacer, który ma sens",
           "confirm_margin_min": "Druga wiadomość tuż przed wyjściem",
+          "preliminary_alert": "Wstępne ostrzeżenie, zanim radar zobaczy spacer",
           "notify_service": "Zawsze powiadamiaj to urządzenie",
           "auto_mute_entity": "Pomiń telefony, gdy tej osoby nie ma w domu"
         },
         "data_description": {
           "radius_km": "Koło wokół miejsca spaceru, w którym sprawdzany jest deszcz.",
           "intensity_threshold": "Dana chwila liczy się jako deszczowa, gdy prognoza osiągnie to natężenie.",
-          "earlier_margin_min": "O ile wcześniej niż o zaplanowanej godzinie możesz wyjść z domu. To jest zarazem moment, w którym przychodzi powiadomienie, więc zostaw tu 60 minut lub mniej: tak daleko sięgają prognozy radarów opadów, a wiadomość wysłana wcześniej może opierać się już tylko na modelach godzinowych.",
+          "earlier_margin_min": "O ile wcześniej niż o zaplanowanej godzinie możesz wyjść z domu. To jest zarazem moment, w którym przychodzi alert, a alert jest wysyłany dopiero wtedy, gdy radar opadów widzi cały spacer. Radary widzą około 50 minut naprzód, więc ten margines razem z czasem spaceru musi zmieścić się w 50 minutach — przy 15-minutowym spacerze to najwyżej 30 minut.",
           "later_margin_min": "O ile później niż o zaplanowanej godzinie możesz wyjść z domu. Późniejsze wyjście jest zawsze sprawdzane ponownie, w miarę jak ta godzina się zbliża — radary zobaczą je na długo przed tym, zanim trzeba będzie wychodzić — więc szeroki margines kosztuje tu tylko kilka zapytań o prognozę więcej.",
-          "walk_duration_min": "Ile trwa spacer. Żeby jakaś godzina została zaproponowana, cały spacer musi pozostać suchy, więc spacer dłuższy niż 60 minut, na które prognozują radary, nigdy nie będzie w całości potwierdzony radarem w chwili, gdy dostajesz wiadomość.",
+          "walk_duration_min": "Ile trwa spacer. Zanim przyjdzie alert, radar opadów musi widzieć cały spacer, a radary widzą około 50 minut naprzód, dlatego najdłuższy spacer, jaki można ustawić, to 50 minut — a im dłuższy spacer, tym mniejsze wyprzedzenie alertu.",
           "min_walk_duration_min": "Gdy w całym zakresie nie ma suchego okna na cały spacer, zaproponuj najdłuższe suche okno trwające co najmniej tyle: krótki spacer bez deszczu jest lepszy niż pełny w deszczu. Wartość zmienia się co 10 minut, bo tyle trwa jedna klatka radaru — krótszej przerwy żadne źródło i tak nie widzi — a skrócony spacer jest proponowany tylko tam, gdzie sięga radar. Wartość 0 wyłącza skracanie: usłyszysz wtedy wyłącznie o pełnym spacerze albo o kurtce przeciwdeszczowej.",
           "confirm_margin_min": "Druga, krótka wiadomość tyle minut przed faktycznym wyjściem, mówiąca, że otrzymany plan jest nadal aktualny — albo że deszcz odpuścił i można jednak iść o zwykłej porze. Trafia na te same urządzenia co pierwsza. Wartość 0 wyłącza ją i jest ustawieniem domyślnym: brak wiadomości oznacza, że nic się nie zmieniło.",
+          "preliminary_alert": "Ciche, wczesne powiadomienie, gdy godzinowe modele pogody przewidują deszcz, a żaden radar nie sięga jeszcze Twojego spaceru. To tylko „może”: właściwy alert i tak czeka na radar, a jeśli radar zobaczy spacer suchy, dostaniesz wiadomość, że ostrzeżenie jest odwołane. Wyłącz, jeśli chcesz słyszeć tylko to, co potwierdził radar.",
           "notify_service": "Urządzenie z aplikacją Home Assistant, które dostaje alert o każdym spacerze. Nie wycisza go ani nieobecność, ani wyciszenie pojedynczego spaceru — tylko przełącznik Alerty. Telefony dodane do pojedynczego spaceru dostają powiadomienie razem z nim. Zostaw puste, aby powiadamiać wyłącznie telefony przypisane do spacerów.",
           "auto_mute_entity": "Zapasowa reguła obecności dla telefonów, które nie potrafią same powiedzieć, gdzie są. Telefon z aplikacją Home Assistant ma własny lokalizator i to on decyduje; dopiero telefon bez lokalizatora pyta o tę osobę i milknie, gdy jej nie ma w domu. Urządzenia zawsze powiadamianego to nie dotyczy."
-        }
-      },
-      "long_walk": {
-        "title": "To długi spacer",
-        "description": "Podano {duration} minut. Radary opadów prognozują {horizon} minut do przodu, a dalej zostają już tylko modele godzinowe, więc przy spacerach dłuższych niż {limit} minut podpowiedź częściej będzie przypuszczeniem. Potwierdź, aby zostawić tę długość, albo nie potwierdzaj, aby wrócić i ją zmienić.",
-        "data": {
-          "confirm": "Zostaw tę długość"
-        }
-      },
-      "beyond_radar": {
-        "title": "Alert przyjdzie, zanim radar to zobaczy",
-        "description": "Wiadomość ma przychodzić {earlier} minut przed spacerem. Radary opadów prognozują tylko {horizon} minut do przodu, więc w tamtej chwili nic jeszcze nie patrzyło na godzinę spaceru, a pierwsza wiadomość opiera się na godzinowych modelach pogody — wiarygodnych co do tego, czy będzie padać, nieprecyzyjnych co do minuty, w której zacznie.\n\nTo nie jest bezużyteczne i integracja obserwuje dalej: gdy spacer wejdzie w zasięg radaru, sprawdza wszystko ponownie i odzywa się znowu, jeśli odpowiedź się zmieni. Ale margines {horizon} minut lub mniejszy daje odpowiedź potwierdzoną radarem od razu. Potwierdź, aby zostawić {earlier} minut ({over} minut poza zasięgiem radaru), albo nie potwierdzaj, aby wrócić i zmniejszyć tę wartość.",
-        "data": {
-          "confirm": "Zostaw to wyprzedzenie"
         }
       }
     },
@@ -178,7 +156,9 @@
       "invalid_time": "Nie udało się odczytać godziny spaceru. Użyj zapisu 24-godzinnego, na przykład 07:30.",
       "no_walk_times": "Podaj przynajmniej jedną godzinę spaceru.",
       "invalid_notify_service": "Wybierz jedno z urządzeń z listy albo wpisz nazwę usługi notify zaczynającą się od mobile_app_.",
-      "min_walk_too_long": "Najkrótszy spacer nie może trwać dłużej niż sam spacer. Zmniejsz tę wartość albo ustaw 0, żeby nigdy nie skracać spaceru."
+      "min_walk_too_long": "Najkrótszy spacer nie może trwać dłużej niż sam spacer. Zmniejsz tę wartość albo ustaw 0, żeby nigdy nie skracać spaceru.",
+      "beyond_radar": "Radary opadów widzą około {reach} minut naprzód, a alert czeka, aż zobaczą cały spacer. Przy spacerze trwającym {duration} min wyprzedzenie może wynosić najwyżej {widest} min — zmniejsz ten margines albo skróć spacer.",
+      "walk_too_long": "Radary opadów widzą około {reach} minut naprzód i cały spacer musi się w tym zmieścić. Wpisz najwyżej {reach} minut."
     }
   },
   "selector": {
@@ -271,6 +251,9 @@
           "provisional": {
             "name": "Czeka na potwierdzenie radarem"
           },
+          "radar_backed": {
+            "name": "Radar widzi cały spacer"
+          },
           "requests_last_hour": {
             "name": "Zapytania w tej godzinie"
           },
@@ -308,6 +291,8 @@
     "notification_later": "Deszcz spodziewany około {scheduled}. Poczekaj do {recommended} — {shift} min później — a cały {duration}-minutowy spacer powinien być suchy; z powrotem w domu o {until}.",
     "notification_shorter": "Deszcz spodziewany około {scheduled} i nie ma w pobliżu suchego {duration}-minutowego okna. Zmieści się krótszy spacer: wyjdź o {recommended} i wróć do {until} — {recommended_duration} minut bez deszczu.",
     "notification_provisional": "Radar nie sięga jeszcze tak daleko, więc to szacunek z modelu — obserwuję dalej i dam znać, jeśli coś się zmieni.",
+    "notification_preliminary": "Około {scheduled} możliwy deszcz, ale na razie widzą go tylko godzinowe modele pogody — żaden radar nie sięga jeszcze Twojego spaceru. Na razie nic nie trzeba robić: potwierdzę albo odwołam, gdy radar go zobaczy.",
+    "notification_preliminary_channel": "Idź już z psem: wczesne ostrzeżenia",
     "notification_no_dry_window": "Deszcz spodziewany około {scheduled} i nie ma w pobliżu suchego {duration}-minutowego okna. Weź kurtkę przeciwdeszczową.",
     "walk_slot_all": "codziennie",
     "walk_slot_weekday": "od poniedziałku do piątku",
@@ -323,6 +308,7 @@
     "notification_confirmed_shorter": "Plan aktualny: wyjdź o {recommended} na krótszy spacer, {recommended_duration} minut, z powrotem w domu o {until}. Od poprzedniej wiadomości nic się nie zmieniło.",
     "notification_confirmed_no_dry_window": "Nadal nie ma suchego {duration}-minutowego okna około {scheduled} — weź kurtkę przeciwdeszczową. Od poprzedniej wiadomości nic się nie zmieniło.",
     "notification_stand_down": "Deszcz około {scheduled} już nie jest spodziewany — można iść o zwykłej porze.",
+    "notification_radar_clear": "Radar widzi już spacer o {scheduled} i nie przewiduje deszczu — można iść o zwykłej porze.",
     "notification_action_walked": "Już byliśmy",
     "default_device_unset": "urządzenie, które za chwilę ustawisz w polu „Zawsze powiadamiaj to urządzenie” w ustawieniach alertów",
     "logbook_earlier": "Wcześniej — {recommended}",
@@ -330,7 +316,8 @@
     "logbook_shorter": "Krócej — {recommended}, {recommended_duration} min",
     "logbook_no_dry_window": "Brak suchego okna",
     "logbook_stand_down": "Spacer o zwykłej porze",
-    "logbook_confirmed": "Plan aktualny — {recommended}"
+    "logbook_confirmed": "Plan aktualny — {recommended}",
+    "logbook_preliminary": "Możliwy deszcz — {scheduled}"
   },
   "services": {
     "walked": {
@@ -342,6 +329,12 @@
   "exceptions": {
     "no_loaded_entry": {
       "message": "Integracja „Idź już z psem” nie jest skonfigurowana, więc nie ma spaceru do zamknięcia."
+    }
+  },
+  "issues": {
+    "timing_fitted": {
+      "title": "Czas spaceru dopasowany do zasięgu radaru",
+      "description": "Alerty są teraz wysyłane dopiero wtedy, gdy radar opadów widzi cały spacer, a radary widzą około {reach} minut naprzód. Twoje ustawienia się w tym nie mieściły, więc zostały zmienione: wyprzedzenie {earlier_before} → {earlier_after} min, czas spaceru {duration_before} → {duration_after} min. Możesz je przejrzeć w opcjach integracji."
     }
   }
 }

@@ -37,7 +37,7 @@ from custom_components.walk_the_dog.const import (
 from custom_components.walk_the_dog.engine import DIRECTION_EARLIER
 from custom_components.walk_the_dog.logbook import async_describe_events
 
-from .conftest import ARM_AT, WALK_START, hourly_sources, run_cycle, setup_entry
+from .conftest import ARM_AT, WALK_START, radar_sources, run_cycle, setup_entry
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,7 +80,7 @@ async def coordinator(
 ) -> WalkCoordinator:
     """A set-up entry on an idle morning, rain due during the scheduled walk."""
     freezer.move_to(IDLE)
-    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
     return await setup_entry(hass, entry)
 
 
@@ -96,7 +96,7 @@ async def confirming(
         entry, options={**entry.options, CONF_CONFIRM_MARGIN_MIN: 15}
     )
     freezer.move_to(IDLE)
-    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
     return await setup_entry(hass, entry)
 
 
@@ -158,7 +158,7 @@ async def test_a_revised_recommendation_earns_a_line_of_its_own(
 ) -> None:
     """The hour moving is the whole subject of this log, so a move is worth a line."""
     await run_cycle(hass, freezer, ARM_AT)
-    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+    fetch.build = lambda now: radar_sources(now, NO_RAIN)
 
     await run_cycle(hass, freezer, ARM_AT + timedelta(minutes=20))
 
@@ -181,7 +181,8 @@ async def test_the_reassurance_is_kept_off_the_sensors_screen(
     keeps it out of the sensor's own list while leaving it in the whole-home one.
     """
     await run_cycle(hass, freezer, ARM_AT)
-    await run_cycle(hass, freezer, WALK_START - timedelta(minutes=15))
+    # Fifteen minutes before setting off at the suggested 04:30.
+    await run_cycle(hass, freezer, ARM_AT + timedelta(minutes=15))
 
     assert len(alerts) == 2, "the alert, then the reassurance before setting off"
     confirmation = alerts[1].data
@@ -204,7 +205,7 @@ async def test_the_rain_going_away_earns_a_line(
 ) -> None:
     """The stand-down is a confirmation and is filed all the same: the hour moved back."""
     await run_cycle(hass, freezer, ARM_AT)
-    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+    fetch.build = lambda now: radar_sources(now, NO_RAIN)
 
     await run_cycle(hass, freezer, WALK_START - timedelta(minutes=15))
 

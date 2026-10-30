@@ -47,6 +47,12 @@ back — and says plainly that the radar cannot see that far yet, so the time ma
   *Walk recommendation* sensor, and its *Activity* list now reads *Later — 18:15* rather than
   just *later*. The hour is on the screen the notification takes you to, so you can look up what
   you were told without opening the attributes.
+- **The radar decides, not a single model** — an alert is sent only once a rain radar can see
+  your whole walk, so two hourly models disagreeing about drizzle cannot wake your phone. Until
+  then you may get one quiet heads-up ("rain is possible, I will confirm"), which is called off
+  if the radar sees the walk dry. The notice period and the walk together have to fit in the
+  radar's 50-minute reach — 30 minutes of notice for a 15-minute walk — and the settings form
+  says so if they do not.
 - **It keeps watching, and says when it is not sure yet** — the radars see one hour ahead and the
   hourly models see the day, so "wait until 14:00" decided at 12:00 is marked as an estimate and
   re-checked as 14:00 comes into radar range. You are told again only if the answer changes. In

@@ -39,6 +39,7 @@ CONF_NOTIFY_SERVICE: Final = "notify_service"
 CONF_AUTO_MUTE_ENTITY: Final = "auto_mute_entity"
 CONF_WALK_TARGETS: Final = "walk_targets"
 CONF_CONFIRM_MARGIN_MIN: Final = "confirm_margin_min"
+CONF_PRELIMINARY_ALERT: Final = "preliminary_alert"
 
 # Keys inside one walk's entry of `walk_targets` (docs/CONFIG.md § Per-walk alerts)
 CONF_TARGET_SERVICES: Final = "notify_services"
@@ -56,10 +57,17 @@ MIN_RADIUS_KM: Final = 4.0
 MAX_RADIUS_KM: Final = 15.0
 
 # Search margins and timing (docs/CONFIG.md)
-DEFAULT_EARLIER_MARGIN_MIN: Final = 60
+#: 30 rather than the 60 it was until 1.3.0: the alert is sent this long before the
+#: walk, and only a notice period that leaves the whole walk inside the radar's reach
+#: can be decided by the radar (`RADAR_REACH_MIN`). 30 fits any walk up to 20 minutes.
+DEFAULT_EARLIER_MARGIN_MIN: Final = 30
 DEFAULT_LATER_MARGIN_MIN: Final = 30
-WALK_DURATION_WARN_MIN: Final = 30
 LEAD_TIME_MIN: Final = 30
+
+#: Whether a model-only heads-up may go out before the radar reaches the walk. On by
+#: default: it is the only early word a user gets now that the real alert waits for
+#: the radar, and it never decides anything (docs/CONFIG.md § The preliminary notice).
+DEFAULT_PRELIMINARY_ALERT: Final = True
 
 #: How long before setting off the "it still stands" message is sent. 0 disables it,
 #: which is the default: silence already means "nothing changed", and this option
@@ -74,7 +82,6 @@ MIN_MARGIN_MIN: Final = 0
 MAX_MARGIN_MIN: Final = 180
 MARGIN_STEP_MIN: Final = 10
 MIN_WALK_DURATION_MIN: Final = 5
-MAX_WALK_DURATION_MIN: Final = 240
 WALK_DURATION_STEP_MIN: Final = 5
 RADIUS_STEP_KM: Final = 0.5
 
@@ -183,9 +190,19 @@ def publish_settle_s(source_id: str) -> int:
 #: How far ahead a radar nowcast reaches, in minutes. Both radar sources publish
 #: +10...+60 min and nothing beyond, so anything further out rests on hourly models
 #: alone: right about *whether* it will rain, vague about *when*
-#: (docs/DATA_SOURCES.md § Effective resolution). The config flow measures the
-#: user's margins against this.
+#: (docs/DATA_SOURCES.md § Effective resolution).
 NOWCAST_HORIZON_MIN: Final = 60
+
+#: How far ahead of *now* the radar is guaranteed to see, in minutes — what a notice
+#: period plus a walk has to fit inside. The last frame (+60) holds for its own
+#: 10-minute slot, so a run reaches 70 minutes past its stamp; but the newest run can
+#: be up to 13 minutes old when it is read (LibreWXR's 10-minute cadence plus its
+#: measured 3-minute publication lag), which leaves 57. Seven more are kept back for a
+#: late frame, so a setting that fits is one the radar really does reach on time.
+RADAR_REACH_MIN: Final = 50
+
+#: The longest walk the radar can see whole at all — with no notice period left.
+MAX_WALK_DURATION_MIN: Final = RADAR_REACH_MIN
 
 #: Fired whenever a notification would fire, whether or not one is actually sent.
 #: Unconditional since 1.2.0: the logbook line the user reads on the sensor's own

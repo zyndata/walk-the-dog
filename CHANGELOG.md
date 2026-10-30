@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **An alert now waits until a rain radar can see your whole walk.** Until now the alert was
+  decided at the moment it was due, even when the radars could only see the first minutes of the
+  walk and the rest was left to the two hourly weather models. When those two disagreed, the
+  slightly heavier-weighted one won — which is how an "it will rain at 18:00" once went out over
+  forecast drizzle that neither radar could see. Now nothing is decided about a walk until a radar
+  covers every minute of it.
+- **The notice period and the walk have to fit inside the radar's reach.** The radars see about
+  50 minutes ahead, so the "search this far earlier" margin plus the walk duration may add up to
+  at most 50 minutes: 30 minutes of notice for a 15–20-minute walk, 20 for a 25–30-minute walk.
+  The settings form now refuses anything wider and says what the widest notice for your walk is,
+  instead of the warning you could click through before. The longest walk you can enter is
+  50 minutes, and the default notice is now 30 minutes instead of 60.
+- **Your settings are adjusted once on upgrade if they do not fit.** The notice period gives way
+  and the walk keeps its length — 60 minutes of notice for a 15-minute walk becomes 30. A message
+  under *Settings → Repairs* says exactly what was changed. Settings that already fit are left
+  alone.
+
+### Added
+
+- **A quiet heads-up before the radar can see the walk** (on by default, can be switched off in
+  the settings). When the weather models expect rain but no radar reaches your walk yet, you get
+  one quiet message saying rain is possible and that it will be confirmed. If the radar then sees
+  the walk dry, you are told it is off; if it sees rain, the usual alert follows and replaces it.
+- Two new fields in the sensor and the `walk_the_dog_alert` event: `radar_backed` (a radar sees
+  the whole walk) and `preliminary` (this message is the heads-up, not an alert).
+
 ## [1.2.2] - 2026-09-16
 
 ### Fixed

@@ -15,6 +15,17 @@ those extra cycles from talking about the past.
 
 Nothing is ever sent about a walk that looks dry: silence means "go as planned".
 
+Nothing is decided about a walk the radar cannot see yet either (since 1.3.0). The
+hourly models reach hours ahead and the radars one, and an alert decided by the
+models alone once went out on a vote of 0.9 to 0.8 between two of them — a
+confidence of 0.05 — about drizzle neither radar could see. So the alert waits until
+a radar reaches every minute of the scheduled walk (`Recommendation.radar_backed`);
+the config flow keeps the notice period short enough for that to have happened by
+`T - earlier_margin`. What the models think before then may be passed on as a
+*preliminary* notice — once, quietly, worded as a maybe, and only if the user left
+that option on. If the radar then sees the walk dry, the user is told the maybe is
+off; if it sees rain, the ordinary alert follows and replaces it on the phone.
+
 When nothing of the full length is dry, the advice may be to walk a shorter one.
 That message has to name the length as well as the time — "set off at 07:20" is
 not the whole of it if the walk is twenty minutes shorter than usual — and so does
@@ -141,6 +152,19 @@ LOGBOOK_PREFIX: Final = "logbook_"
 #: knows the suggestion is an early answer that is still being checked.
 TEXT_PROVISIONAL: Final = "provisional"
 
+#: The model-only heads-up sent before any radar reaches the walk, and the message
+#: that withdraws it once the radar has seen the walk and found it dry.
+TEXT_PRELIMINARY: Final = "preliminary"
+TEXT_RADAR_CLEAR: Final = "radar_clear"
+
+#: The Android notification channel the preliminary notice is posted on. A channel
+#: of its own is the only way the companion app lets a message be quieter than the
+#: rest: `importance` takes effect when the channel is created, and only then.
+TEXT_PRELIMINARY_CHANNEL: Final = "preliminary_channel"
+PRELIMINARY_IMPORTANCE: Final = "low"
+#: iOS's spelling of the same idea: delivered to the list, no sound, no wake.
+PRELIMINARY_INTERRUPTION: Final = "passive"
+
 #: The shapes the optional confirmation takes shortly before setting off: the plan
 #: still stands, or the rain has gone and the walk is back to its normal time. A
 #: shortened plan gets its own wording — "still on" must not quietly drop the one
@@ -165,7 +189,17 @@ LOGBOOK_KEYS: Final[dict[str, str]] = {
     # own line already names no hour, which is the whole of what this message says.
     TEXT_CONFIRMED_NO_DRY_WINDOW: DIRECTION_NO_DRY_WINDOW,
     TEXT_STAND_DOWN: TEXT_STAND_DOWN,
+    TEXT_PRELIMINARY: TEXT_PRELIMINARY,
+    # Withdrawing a maybe reads, in a list, exactly like any other all-clear.
+    TEXT_RADAR_CLEAR: TEXT_STAND_DOWN,
 }
+
+#: The messages that repeat or relax advice already given — what the payload's
+#: `confirmation` flag means. The preliminary notice and its withdrawal are not
+#: among them: neither follows an alert.
+CONFIRMATION_KEYS: Final = frozenset(
+    {TEXT_CONFIRMED, TEXT_CONFIRMED_SHORTER, TEXT_CONFIRMED_NO_DRY_WINDOW, TEXT_STAND_DOWN}
+)
 
 #: Which messages leave their line on the recommendation sensor's own screen: the
 #: advice, and the stand-down that withdraws it. Both are news. The reassurance that
@@ -174,7 +208,7 @@ LOGBOOK_KEYS: Final[dict[str, str]] = {
 #: for the whole-home logbook, where a record of every message sent is the point:
 #: Home Assistant renders every instance of an event type it has been taught, so an
 #: alert cannot be silently dropped — only filed somewhere else.
-LOGGED_UNDER_ENTITY: Final = frozenset({TEXT_STAND_DOWN})
+LOGGED_UNDER_ENTITY: Final = frozenset({TEXT_STAND_DOWN, TEXT_PRELIMINARY, TEXT_RADAR_CLEAR})
 
 #: Label on the one action button the push carries.
 TEXT_ACTION_WALKED: Final = "action_walked"
@@ -243,6 +277,7 @@ class WalkNotifier:
         entry: ConfigEntry,
         *,
         confirm_margin: timedelta | None = None,
+        preliminary: bool = False,
     ) -> None:
         """Read the notification options off the entry; a change reloads it anyway.
 
@@ -250,6 +285,10 @@ class WalkNotifier:
         its id as well: that is what resolves the recommendation sensor a tapped
         message opens. `confirm_margin` stays a parameter — the coordinator derives
         it from the same options and has to agree with this about when it is due.
+
+        `preliminary` allows the model-only heads-up before the radar reaches the
+        walk. Off unless asked for, so a caller that predates it keeps its old
+        behaviour; the coordinator passes the user's option, which defaults to on.
         """
         self.hass = hass
         self._entry_id = entry.entry_id
@@ -257,9 +296,13 @@ class WalkNotifier:
         self._default_service = options.get(CONF_NOTIFY_SERVICE)
         self._mute_entity = options.get(CONF_AUTO_MUTE_ENTITY)
         self._confirm_margin = confirm_margin
+        self._preliminary_allowed = preliminary
         self._walk_start: datetime | None = None
         self._notified: Any = None
         self._confirmed = False
+        self._radar_seen = False
+        self._preliminary_sent = False
+        self._cleared = False
 
     @property
     def confirm_margin(self) -> timedelta | None:
@@ -271,6 +314,9 @@ class WalkNotifier:
         self._walk_start = None
         self._notified = None
         self._confirmed = False
+        self._radar_seen = False
+        self._preliminary_sent = False
+        self._cleared = False
 
     def has_spoken(self, walk_start: datetime | None) -> bool:
         """Whether anything was said about this particular walk.
@@ -281,7 +327,9 @@ class WalkNotifier:
         saying nothing.
         """
         return (
-            walk_start is not None and walk_start == self._walk_start and self._notified is not None
+            walk_start is not None
+            and walk_start == self._walk_start
+            and (self._notified is not None or self._preliminary_sent)
         )
 
     def away_entity_for(self, target: WalkTarget) -> str | None:
@@ -370,7 +418,11 @@ class WalkNotifier:
     ) -> None:
         """Consider this cycle's result and dispatch if it is news.
 
-        `arm_at` is `T - earlier_margin`. Before it, nothing is sent even when the
+        Nothing at all is decided until a radar has seen the whole walk; until then
+        the most that goes out is the models' maybe (`_async_radar_gate`), and that
+        one is not held back to `arm_at`.
+
+        `arm_at` is `T - earlier_margin`. Before it, no alert is sent even when the
         forecast already looks bad: a recommendation to leave an hour early is not
         actionable two hours in advance, and it would only be superseded. After the
         advice expires — its suggested start has passed, or the walk has begun and
@@ -389,10 +441,13 @@ class WalkNotifier:
             self._walk_start = data.walk_start
 
         recommendation = data.recommendation
-        if recommendation is None or now < arm_at:
+        if recommendation is None:
             return
         if not any(source.contributed for source in recommendation.sources):
             # Zero contributing sources: never guess, never notify (phase 0 rule).
+            return
+
+        if await self._async_radar_gate(data, recommendation, now, target) or now < arm_at:
             return
 
         due = confirm_at is not None and now >= confirm_at
@@ -413,6 +468,63 @@ class WalkNotifier:
             return
         self._confirmed = True
         await self._async_dispatch(data, recommendation, target, key=key)
+
+    async def _async_radar_gate(
+        self,
+        data: WalkData,
+        recommendation: Recommendation,
+        now: datetime,
+        target: WalkTarget,
+    ) -> bool:
+        """Handle everything said before the radar decides. True means "stop here".
+
+        Until a radar has seen the whole walk, the most that may be said is the
+        models' maybe. The first cycle after the radar sees it dry withdraws that
+        maybe; only after both does the ordinary alert logic get a say.
+
+        The gate is latched: once a radar has seen the whole walk, the verdict on it
+        was the radar's. The walk's own slots then slip into the past, where no
+        nowcast reaches, and a gate re-asked every cycle would silence the very
+        re-checks of a `later` suggestion the window is kept open for.
+        """
+        self._radar_seen = self._radar_seen or recommendation.radar_backed
+        if not self._radar_seen:
+            if self._preliminary_due(recommendation, now):
+                self._preliminary_sent = True
+                await self._async_dispatch(data, recommendation, target, key=TEXT_PRELIMINARY)
+            return True
+        if self._clear_due(recommendation, now):
+            # Not held back until `arm_at`: the user was told "maybe", and the
+            # moment the radar says "no" is the moment that stops being true.
+            self._cleared = True
+            await self._async_dispatch(data, recommendation, target, key=TEXT_RADAR_CLEAR)
+            return True
+        return False
+
+    def _preliminary_due(self, recommendation: Recommendation, now: datetime) -> bool:
+        """Whether the models' maybe is worth one quiet message.
+
+        Once per walk, never after a real alert, and only about advice there is
+        still time to act on. Deliberately not held back until `arm_at`: early is
+        the whole point of it, and it decides nothing the radar will not revisit.
+        """
+        return (
+            self._preliminary_allowed
+            and not self._preliminary_sent
+            and self._notified is None
+            and recommendation.direction in ALERT_DIRECTIONS
+            and is_actionable(recommendation, now)
+        )
+
+    def _clear_due(self, recommendation: Recommendation, now: datetime) -> bool:
+        """Whether the radar has just called off a maybe the user was given."""
+        return (
+            self._preliminary_sent
+            and not self._cleared
+            and self._notified is None
+            and recommendation.direction == DIRECTION_NONE
+            and is_actionable(recommendation, now)
+        )
 
     def _is_news(self, recommendation: Recommendation, now: datetime) -> bool:
         """Whether this recommendation is worth interrupting the user with."""
@@ -469,7 +581,10 @@ class WalkNotifier:
         # `muted` says nobody at all was reached, not that one phone was skipped:
         # an automation cares whether the advice got out, not to how many phones.
         payload["muted"] = not recipients
-        payload["confirmation"] = key is not None
+        payload["confirmation"] = key in CONFIRMATION_KEYS
+        # A model-only maybe, sent before any radar reached the walk. An automation
+        # that acts on alerts will usually want to skip these.
+        payload["preliminary"] = key == TEXT_PRELIMINARY
         texts = await self._async_translations()
         entity_id = self._recommendation_entity_id()
         payload[ATTR_ENTITY_ID] = entity_id if _filed_under_entity(key) else None
@@ -502,6 +617,10 @@ class WalkNotifier:
                 }
             ],
         }
+        if key == TEXT_PRELIMINARY:
+            data["channel"] = _lookup(texts, TEXT_PRELIMINARY_CHANNEL, {})
+            data["importance"] = PRELIMINARY_IMPORTANCE
+            data["push"] = {"interruption-level": PRELIMINARY_INTERRUPTION}
         if entity_id is not None:
             click = f"{CLICK_ENTITY_PREFIX}{entity_id}"
             # The two companion apps spell the same idea differently; sending both
@@ -681,6 +800,7 @@ def walk_start_from_action(action: str) -> datetime | None:
 __all__ = [
     "ALERT_DIRECTIONS",
     "CLICK_ENTITY_PREFIX",
+    "CONFIRMATION_KEYS",
     "DEFAULT_TARGET",
     "LOGBOOK_KEYS",
     "LOGBOOK_PREFIX",
@@ -692,7 +812,10 @@ __all__ = [
     "TEXT_CONFIRMED_NO_DRY_WINDOW",
     "TEXT_CONFIRMED_SHORTER",
     "TEXT_PREFIX",
+    "TEXT_PRELIMINARY",
+    "TEXT_PRELIMINARY_CHANNEL",
     "TEXT_PROVISIONAL",
+    "TEXT_RADAR_CLEAR",
     "TEXT_STAND_DOWN",
     "TRANSLATION_CATEGORY",
     "WalkNotifier",

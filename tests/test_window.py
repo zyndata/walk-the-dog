@@ -769,3 +769,54 @@ def test_a_changed_walk_length_is_a_material_change() -> None:
 
     assert not is_material_change(previous, same)
     assert is_material_change(previous, shorter)
+
+
+# --- whether the radar has seen the walk itself ------------------------------
+
+
+def test_a_walk_the_radar_reaches_whole_is_radar_backed() -> None:
+    """Every slot of the scheduled walk has a radar vote: the alert may be decided."""
+    assert _recommend(_agreed(SCHEDULED_INDEX), now=NOW).radar_backed
+
+
+def test_a_walk_the_radar_reaches_only_in_part_is_not() -> None:
+    """The case behind 1.3.0: the radar covers the start, the models alone the end.
+
+    The radar reaches 07:10, the walk runs 07:00-07:30, and over its last slot one
+    model says rain and the other does not — 0.9 against 0.8, a "wet" by a tenth of
+    a weight. Whatever that vote says, it is the models' vote, and it decides nothing.
+    """
+    consensus = _consensus(
+        {
+            SOURCE_LIBREWXR: _pattern(length=SCHEDULED_INDEX + 1),
+            SOURCE_KNMI: _pattern(SCHEDULED_INDEX + 2),
+            SOURCE_ICON_EU: _pattern(),
+        }
+    )
+
+    recommendation = _recommend(consensus, now=NOW)
+
+    assert not recommendation.scheduled.dry
+    assert not recommendation.radar_backed
+
+
+def test_radar_backed_rain_can_still_point_to_a_model_only_window() -> None:
+    """Two different questions: the walk is the radar's, the suggestion the models'.
+
+    Rain until 07:30 everywhere the radar reaches — the whole walk — and the dry
+    07:30 is beyond it. The rain is decided; the hour after it is provisional.
+    """
+    models = _pattern(*range(SCHEDULED_INDEX + 3))
+    consensus = _consensus(
+        {
+            SOURCE_LIBREWXR: _pattern(*range(SCHEDULED_INDEX + 3), length=SCHEDULED_INDEX + 3),
+            SOURCE_KNMI: list(models),
+            SOURCE_ICON_EU: list(models),
+        }
+    )
+
+    recommendation = _recommend(consensus, now=NOW)
+
+    assert recommendation.direction == DIRECTION_LATER
+    assert recommendation.radar_backed
+    assert recommendation.provisional

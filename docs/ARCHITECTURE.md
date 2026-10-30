@@ -31,6 +31,7 @@ custom_components/walk_the_dog/
 ├── config_flow.py     # wizard + options flow: location, schedule, per-walk alerts, params
 ├── coordinator.py     # WalkCoordinator(DataUpdateCoordinator): polling windows, orchestration
 ├── schedule.py        # walk-schedule model (3 modes) → Walk identity + next-walk computation; PURE
+├── timing.py          # radar-reach rule: widest notice per walk, fitting old entries; PURE
 ├── cache.py           # bounded frame/sample cache + persistence via HA Store
 ├── notifier.py        # notification dispatch, material-change detection, per-walk target + mute
 ├── entity.py          # shared entity base: the one service device every entity sits on,
@@ -55,7 +56,7 @@ custom_components/walk_the_dog/
 
 Layering rules (enforced by review, testable by import inspection):
 
-- `engine/*` and `schedule.py` are **pure**: no I/O, no `homeassistant` imports, no clock reads —
+- `engine/*`, `schedule.py` and `timing.py` are **pure**: no I/O, no `homeassistant` imports, no clock reads —
   `now` is always a parameter. This is what phase 4 unit-tests exhaustively.
 - `sources/*` do I/O via one shared `aiohttp.ClientSession` (HA's) and never import `engine`.
 - Only `coordinator.py` wires sources → engine → outputs. Entities read coordinator data only.
@@ -284,7 +285,8 @@ slots only, capped at 0.5.
 ## Walk-window evaluation & recommendation search
 
 Definitions: `T` = next scheduled walk start (UTC), `D` = `average_walk_duration`,
-`E` = `earlier_margin` (default 1 h), `L` = `later_margin` (default 30 min). A candidate window
+`E` = `earlier_margin` (default 30 min, and `E + D ≤ RADAR_REACH_MIN` = 50 since 1.3.0),
+`L` = `later_margin` (default 30 min). A candidate window
 starting at `s` covers the slots in `[s, s + D)`.
 
 - **Window risk** = max slot risk over the window; **window confidence** = min slot confidence
@@ -322,6 +324,11 @@ starting at `s` covers the slots in `[s, s + D)`.
   *whether* it will rain, imprecise about *when*. A recommendation whose window is not
   nowcast-covered is `provisional` — an early answer the coordinator keeps re-checking, and the
   notification says so.
+- **Radar-backed walk** (1.3.0). `Recommendation.radar_backed` asks the same question of the
+  *scheduled* window — does a radar reach every slot of the walk itself? It is a different
+  question from `provisional`, which is about the window being *recommended*: a radar-backed rain
+  at 18:00 can perfectly well point to a dry 18:40 only the models see. `radar_backed` is what the
+  notifier gates the alert on (§ Coordinator scheduling, *Notification dispatch*).
 - **Output** (`Recommendation` dataclass): `direction` (`none` = walk as planned / `earlier` /
   `later` / `shorter` / `no_dry_window` / `unknown`), `recommended_start`,
   `recommended_duration_s` (set by `shorter` alone), scheduled-window risk + confidence +
@@ -428,8 +435,27 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
   publication. CHMI keeps the stricter form of the rule (no closer together than
   `interval − settle`) because it publishes twice as fast as the grid, and reading every run
   would double its cost for data the sprint already exists to collect.
+- **The radar decides the alert** (1.3.0, after a live false alarm). On 2026-10-30 an alert for
+  an 18:00 walk went out at 17:00 on a vote of KNMI 0.9 (0.7 mm/h) against ICON-EU 0.8 (dry) —
+  risk 0.53, confidence 0.05 — while both radars saw nothing, because at `T − E` with `E` = 60
+  they reached only the first minutes of the walk. Since then **no alert is decided until a radar
+  reaches every slot of the scheduled walk** (`radar_backed`). The gate is *latched* per walk: once
+  it has held, it stays passed, because the walk's own slots slip into the past as the window runs
+  on and no nowcast covers the past — re-asking every cycle would mute exactly the re-checks of a
+  `later` suggestion the window is kept open for. For the gate to hold by `T − E` at all, the
+  config flow enforces `E + D ≤ RADAR_REACH_MIN` (50 min: 70 minutes of reach per run, minus a
+  worst-case 13-minute-old run, minus 7 minutes for a late frame — `timing.py`), and entries from
+  before 1.3.0 are fitted once by `async_migrate_entry` with a repair issue saying what changed.
+- **The preliminary notice** (`preliminary_alert`, default on): before the gate holds, the models'
+  verdict may go out **once per walk** as a quiet maybe — Android low-importance channel, iOS
+  `passive` — from the first cycle of the window, not held back to `T − E`. If the radar then sees
+  the walk dry, a short withdrawal (`radar_clear`) follows at once; if it sees rain, the ordinary
+  alert follows at `T − E` and replaces the maybe through the shared tag. Neither counts as an
+  alert for material-change purposes: `_notified` stays empty, so the first radar-backed alert is
+  always news.
 - **Notification dispatch** (`notifier.py`): evaluated on the cycle that lands on `T − E`, fires
-  with the freshest coordinator data **only if** the scheduled window is not dry; afterwards
+  with the freshest coordinator data **only if** the scheduled window is radar-backed and not dry;
+  afterwards
   every cycle until `walk end` re-checks material change **and actionability** — a window still
   worth watching is not the same as advice still worth sending. Every alert about one walk
   carries the same companion-app `tag`, so a revision replaces its predecessor on the phone

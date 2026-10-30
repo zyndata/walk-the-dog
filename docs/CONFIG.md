@@ -17,8 +17,7 @@ with *"Already configured"*.
 | 2a | `schedule_mode` | **Schedule type** — *same times daily* / *weekday + weekend* / *per-day*. |
 | 2b | `schedule_times` | **Walk times** — one editable list of times per slot of the chosen mode. |
 | 2c | `walk_target` | **Who is told about this walk** — repeated once per configured walk: the extra devices it notifies, its own mute switch and its own away entity. The step names the days and time it is asking about, so it is always clear which walk is being configured. See [Per-walk alerts](#per-walk-alerts). |
-| 3 | `params` | **Parameters** — the table below. |
-| — | `long_walk` | Shown **only** when the average walk duration exceeds 30 min: a warning that must be confirmed. Declining returns to step 3 with the entered values still in the form. |
+| 3 | `params` | **Parameters** — the table below. A walk and notice period the radar cannot see whole is refused on this form, with the widest notice the walk allows named in the message — see [Timings and what the radar can see](#timings-and-what-the-radar-can-see). |
 
 Step 2 is two forms rather than one: Home Assistant renders a form from a fixed schema, so the
 mode has to be submitted before the form can adapt to it. The wizard's step 2b therefore shows
@@ -44,11 +43,12 @@ config entry. The **location is entry data, not an option**: it is set once in t
 |---|---|---|---|---|
 | Alert radius around home | `radius_km` | float, 4–15, 0.5 steps | **5.0 km** | Derived from measured source resolutions — the minimum guarantees the sampled disc spans ≥ 1 full ICON-EU cell; see [ARCHITECTURE.md](ARCHITECTURE.md) § Alert radius decision |
 | Intensity threshold | `intensity_threshold` | `light` \| `moderate` \| `heavy` | **`light`** (≥ 0.1 mm/h) | Scale in [DATA_SOURCES.md](DATA_SOURCES.md); a slot counts as rainy when the consensus intensity reaches the chosen class |
-| Earlier margin | `earlier_margin_min` | int minutes, 0–180, 10-min steps | 60 | How far back to search for a dry window — **and when the notification arrives**. Values over 60 min require confirming the `beyond_radar` warning: the radars forecast 60 minutes ahead, so a message sent earlier than that can only rest on hourly models |
+| Earlier margin | `earlier_margin_min` | int minutes, 0–40, 10-min steps | 30 | How far back to search for a dry window — **and when the alert arrives**. Together with the walk it has to fit inside the radar's reach (`earlier_margin_min + walk_duration_min ≤ 50`); anything wider is refused with the `beyond_radar` error |
 | Later margin | `later_margin_min` | int minutes, 0–180, 10-min steps | 30 | How far forward to search. Needs no warning: a later window is always re-checked as it comes into radar range, so a wide margin costs only a few more requests |
-| Average walk duration | `walk_duration_min` | int minutes, 5–240, 5-min steps | **required, no default** | Values over 30 min require confirming the `long_walk` warning (nowcast reliability) |
-| Shortest walk still worth it | `min_walk_duration_min` | int minutes, 0–240, 10-min steps | **10** | When no dry window of the full length exists anywhere in the margins, offer the longest dry window that is at least this long. Moves in whole 10-minute steps because one step is one radar frame — the shortest gap any source publishes — and is refused if it exceeds `walk_duration_min`, which would ask for a window both shorter than the walk and longer than it. `0` switches shortening off entirely. See [Shortening the walk](#shortening-the-walk) |
+| Average walk duration | `walk_duration_min` | int minutes, 5–50, 5-min steps | **required, no default** | At most 50 minutes: the radar has to see the whole walk before an alert goes out. The longer the walk, the less notice is left (`walk_too_long` if it does not fit at all) |
+| Shortest walk still worth it | `min_walk_duration_min` | int minutes, 0–50, 10-min steps | **10** | When no dry window of the full length exists anywhere in the margins, offer the longest dry window that is at least this long. Moves in whole 10-minute steps because one step is one radar frame — the shortest gap any source publishes — and is refused if it exceeds `walk_duration_min`, which would ask for a window both shorter than the walk and longer than it. `0` switches shortening off entirely. See [Shortening the walk](#shortening-the-walk) |
 | Second message shortly before you leave | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, the rain has gone and the walk is back to its normal time, or there is still no dry window and the raincoat still applies. Goes to the same devices as the first message, and is only ever sent when something was already said about that walk |
+| Heads-up before the radar can see the walk | `preliminary_alert` | bool | **on** | One quiet message when the hourly models expect rain but no radar reaches the walk yet. It never decides anything: the alert still waits for the radar, and if the radar then sees the walk dry the user is told the maybe is off. See [The preliminary notice](#the-preliminary-notice) |
 | Always notify this device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. **Receives every walk's alert.** Per-walk devices are notified *in addition* to it, never instead of it, and the combined list is de-duplicated so a device named in both places gets one push. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means only the per-walk devices are notified. |
 | Per-walk alerts | `walk_targets` | map | *(unset)* | One entry per walk the user configured something for. See [Per-walk alerts](#per-walk-alerts). |
 | Auto-mute entity | `auto_mute_entity` | entity id | *(unset)* | Optional `person`/`device_tracker`; pushes suppressed for **every** walk while it is not `home`. A walk that sets its own `away_entity` follows that one instead. |
@@ -62,22 +62,65 @@ starts so the decision moment has fresh data (decision in
 
 ### Timings and what the radar can see
 
-Both warning steps measure the same thing: the radar nowcasts reach **60 minutes** ahead
-(`NOWCAST_HORIZON_MIN`) and nothing further, while the hourly models reach 12 hours. Past that
-line the answer is still sound about *whether* it will rain, but vague about *when* — and *when*
-is the whole question. So:
+Since 1.3.0 **an alert is sent only once a radar can see every minute of the walk.** The hourly
+models reach 12 hours ahead but are vague about *when*; the radar nowcasts are precise and reach
+60 minutes past their own run, nothing further. An alert decided by the models alone once went
+out on a vote of 0.9 to 0.8 between two of them — confidence 0.05 — about drizzle neither radar
+could see, and that is what this rule exists to stop.
 
-- `earlier_margin` ≤ 60 min gets a radar-backed answer the moment the notification is sent.
-  Larger is allowed, and the `beyond_radar` step explains what it costs before storing it.
-- `walk_duration` > 60 min can never be fully radar-backed at the moment you are told to go,
-  because the far end of the walk is past the radar's reach whatever the margin is. The
-  `long_walk` step warns from 30 min upwards.
-- `later_margin` has no such limit. A window an hour ahead is one the radar will have seen long
-  before you have to leave, which is exactly why the integration keeps watching instead of
-  deciding once — see [ARCHITECTURE.md](ARCHITECTURE.md) § Coordinator scheduling.
+So the alert, sent at `T − earlier_margin`, needs the radar to reach `T + walk_duration` at that
+moment. The newest radar run can be up to 13 minutes old when it is read (LibreWXR's cadence plus
+its measured publication lag), which leaves 57 minutes of guaranteed reach; seven more are kept
+back for a late frame. Hence one rule, `RADAR_REACH_MIN` = 50:
 
-A recommendation the radar has not yet reached is marked `provisional` in the payload, and the
-push says so in words.
+> `earlier_margin_min + walk_duration_min ≤ 50`, with the margin rounded down to 10 minutes.
+
+| Walk | Widest notice |
+|---|---|
+| 5–10 min | 40 min |
+| 15–20 min | 30 min |
+| 25–30 min | 20 min |
+| 35–40 min | 10 min |
+| 45–50 min | 0 min |
+
+The form refuses anything wider (`beyond_radar`, on the margin; `walk_too_long`, on the duration
+when the walk alone is longer than 50 minutes). It is an error rather than a warning because a
+notice period the radar cannot back does not produce a less reliable alert — it produces the
+real alert *late*, after the moment it promised.
+
+`later_margin` has no such limit. Going later is decided at the walk's own time or after it, and
+the integration keeps watching until then — the radar will have seen a later window long before
+you have to leave (see [ARCHITECTURE.md](ARCHITECTURE.md) § Coordinator scheduling). A later
+window the radar has not reached yet is marked `provisional` in the payload, and the push says
+so in words.
+
+**Upgrading from 1.2.** An entry whose timing does not fit is fitted once, on the first start of
+1.3.0: the notice period gives way and the walk keeps its length (60 minutes of notice for a
+15-minute walk becomes 30); only a walk longer than 50 minutes is itself shortened. A repair issue
+under *Settings → Repairs* says exactly what changed. An entry that already fits is left alone.
+
+### The preliminary notice
+
+Before the radar reaches the walk, the models may still see rain coming. With
+`preliminary_alert` on — the default — the integration passes that on **once per walk**, worded
+as a maybe:
+
+> Rain is possible around 18:00, but so far only the hourly weather models see it — no radar
+> reaches your walk yet. Nothing to do for now: I will confirm or call it off once the radar can
+> see it.
+
+It is sent as early as the polling window opens (`T − earlier_margin − 30 min`), and quietly: on
+Android on a channel of its own with low importance, on iOS with the *passive* interruption
+level. What follows depends on the radar:
+
+- **the radar sees rain** — the ordinary alert is sent at `T − earlier_margin`, as always, and
+  replaces the maybe on the phone (same tag);
+- **the radar sees the walk dry** — a short "the radar can see your walk now and expects no rain"
+  is sent at once, also replacing it.
+
+Switched off, nothing at all is said until a radar has seen the walk. The `walk_the_dog_alert`
+event fires for the preliminary notice too, with `preliminary: true`; an automation that acts on
+alerts will usually want to skip those.
 
 ### Shortening the walk
 
@@ -259,7 +302,9 @@ not-applicable sources included.
 
 ## Notification behavior
 
-Fires at `T − earlier_margin` — the last moment at which "go earlier" is still actionable. The
+Fires at `T − earlier_margin` — the last moment at which "go earlier" is still actionable — and
+only once a radar can see the whole walk (since 1.3.0; before it, at most the
+[preliminary notice](#the-preliminary-notice) goes out). The
 update cycle grid is anchored to the polling-window start, and `lead_time` is a whole number of
 10-minute slots, so a cycle lands exactly on that moment whatever minute the walk is scheduled
 at.
@@ -343,9 +388,11 @@ is saved; nothing reads it.
   "degraded": false,
   "horizon_limited": false,
   "provisional": false,
+  "radar_backed": true,
   "data_age_s": 0,
   "muted": false,
   "confirmation": false,
+  "preliminary": false,
   "entity_id": "sensor.walk_the_dog_walk_recommendation",
   "summary": "Earlier — 04:30",
   "sources": [
@@ -378,9 +425,11 @@ is saved; nothing reads it.
 | `degraded` | bool | Some slot rested on a single source |
 | `horizon_limited` | bool | The walk reaches past what the sources forecast |
 | `provisional` | bool | No radar reaches the recommended window, so the timing rests on hourly models. An early answer the coordinator keeps re-checking, not a final one |
+| `radar_backed` | bool | A radar reaches every slot of the *scheduled* walk. Since 1.3.0 an alert is only ever decided while this holds (or after it has held once for this walk); everything before it is at most the preliminary notice |
 | `data_age_s` | int \| `null` | Age of the freshest source that voted |
 | `muted` | bool | Nobody was reached at all. One phone being skipped does not set it; an entry with an always-notified device effectively never does |
 | `confirmation` | bool | This is the pre-departure reassurance rather than a new recommendation |
+| `preliminary` | bool | This is the model-only [preliminary notice](#the-preliminary-notice), sent before any radar reached the walk — a maybe, not an alert |
 | `entity_id` | entity id \| `null` | The recommendation sensor this alert is filed under in the logbook. `null` when the alert leaves no line on that sensor's screen — the "still on" reassurance, which changes nothing — and also on the very first cycle of a fresh install, before the sensor is registered |
 | `summary` | string | The same advice as one short line, in the user's language: `Earlier — 04:30`, `Shorter — 05:10, 10 min`, `No dry window`. Rendered here because the logbook platform's callback is synchronous and cannot load translations per event ([ARCHITECTURE.md](ARCHITECTURE.md) § Outputs) |
 | `sources` | list | One entry per source: its own verdict over the scheduled window, its status, its weight and its peak |
@@ -447,10 +496,11 @@ never change afterwards, and can be renamed in the entity registry.
   "schedule": { "weekday": ["07:00", "18:30"], "weekend": ["09:00"] },
   "radius_km": 5.0,
   "intensity_threshold": "light",
-  "earlier_margin_min": 60,
+  "earlier_margin_min": 30,
   "later_margin_min": 30,
-  "walk_duration_min": 30,
+  "walk_duration_min": 20,
   "min_walk_duration_min": 10,
+  "preliminary_alert": true,
   "notify_service": "mobile_app_phone",
   "auto_mute_entity": "person.owner",
   "walk_targets": {

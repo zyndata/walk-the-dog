@@ -48,6 +48,7 @@ from .const import (
     CONF_LOCATION,
     CONF_MIN_WALK_DURATION_MIN,
     CONF_NOTIFY_SERVICE,
+    CONF_PRELIMINARY_ALERT,
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
@@ -62,6 +63,7 @@ from .const import (
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
     DEFAULT_MIN_WALK_DURATION_MIN,
+    DEFAULT_PRELIMINARY_ALERT,
     DEFAULT_RADIUS_KM,
     DOMAIN,
     INTEGRATION_NAME,
@@ -76,13 +78,12 @@ from .const import (
     MIN_WALK_DURATION_MIN,
     NOTIFY_DOMAIN,
     NOTIFY_SERVICE_PREFIX,
-    NOWCAST_HORIZON_MIN,
+    RADAR_REACH_MIN,
     RADIUS_STEP_KM,
     SCHEDULE_MODE_DAILY,
     SHORT_WALK_STEP_MIN,
     TITLE_CATEGORY,
     WALK_DURATION_STEP_MIN,
-    WALK_DURATION_WARN_MIN,
 )
 from .schedule import (
     SCHEDULE_KEYS,
@@ -92,6 +93,7 @@ from .schedule import (
     normalize_schedule,
     target_key,
 )
+from .timing import SHORTENING_OFF, fits_radar, max_earlier_margin
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -100,18 +102,24 @@ if TYPE_CHECKING:
 
     from .schedule import WalkSlot
 
-CONF_CONFIRM: Final = "confirm"
-
 ERROR_INVALID_NOTIFY_SERVICE: Final = "invalid_notify_service"
 
-#: A shortest-acceptable walk longer than the walk itself. Refused rather than
-#: confirmed like `long_walk` and `beyond_radar`: those two guard choices that are
-#: legitimate but unreliable, and this one guards a choice that is empty — it asks
-#: for a window both shorter than the walk and longer than it.
+#: A shortest-acceptable walk longer than the walk itself: it asks for a window both
+#: shorter than the walk and longer than it.
 ERROR_MIN_WALK_TOO_LONG: Final = "min_walk_too_long"
 
-#: The value of `min_walk_duration_min` that switches shortening off entirely.
-SHORTENING_OFF: Final = 0
+#: A notice period that, added to the walk, reaches past what the radar can see.
+#: Until 1.3.0 this was a confirmation step the user could click through; it is an
+#: error now because the alert waits for the radar, so a notice period the radar
+#: cannot back is not a less reliable alert but a late one (`timing.py`).
+ERROR_BEYOND_RADAR: Final = "beyond_radar"
+
+#: A walk longer than the radar can see whole even with no notice at all. The
+#: selector's own maximum already prevents it; this is the message if it is typed.
+ERROR_WALK_TOO_LONG: Final = "walk_too_long"
+
+#: The widest notice period offered at all — the one the shortest walk allows.
+MAX_EARLIER_MARGIN_MIN: Final = max_earlier_margin(MIN_WALK_DURATION_MIN) or 0
 
 #: The notification step names the days a walk belongs to in its description, and
 #: that text belongs to no form field. `common` is the only top-level strings.json
@@ -197,6 +205,9 @@ def _collect_params(user_input: dict[str, Any], *, keep_notify: bool = True) -> 
         CONF_CONFIRM_MARGIN_MIN: int(
             user_input.get(CONF_CONFIRM_MARGIN_MIN, DEFAULT_CONFIRM_MARGIN_MIN)
         ),
+        CONF_PRELIMINARY_ALERT: bool(
+            user_input.get(CONF_PRELIMINARY_ALERT, DEFAULT_PRELIMINARY_ALERT)
+        ),
     }
     if auto_mute := user_input.get(CONF_AUTO_MUTE_ENTITY):
         params[CONF_AUTO_MUTE_ENTITY] = auto_mute
@@ -216,6 +227,31 @@ def _shortening_exceeds_walk(params: Mapping[str, Any]) -> bool:
     """
     minimum = int(params[CONF_MIN_WALK_DURATION_MIN])
     return minimum != SHORTENING_OFF and minimum > int(params[CONF_WALK_DURATION_MIN])
+
+
+def _timing_errors(params: Mapping[str, Any]) -> dict[str, str]:
+    """The walk and its notice period, measured against what the radar can see.
+
+    Reported on the field the user has to change: the duration when the walk alone
+    is too long, otherwise the notice period — the length of a walk is a fact about
+    the dog, and the notice is the preference that can give way.
+    """
+    duration = int(params[CONF_WALK_DURATION_MIN])
+    if max_earlier_margin(duration) is None:
+        return {CONF_WALK_DURATION_MIN: ERROR_WALK_TOO_LONG}
+    if not fits_radar(int(params[CONF_EARLIER_MARGIN_MIN]), duration):
+        return {CONF_EARLIER_MARGIN_MIN: ERROR_BEYOND_RADAR}
+    return {}
+
+
+def _timing_placeholders(params: Mapping[str, Any]) -> dict[str, str]:
+    """What the two timing errors name: the reach, the walk, and the widest notice."""
+    duration = int(params.get(CONF_WALK_DURATION_MIN) or MIN_WALK_DURATION_MIN)
+    return {
+        "reach": str(RADAR_REACH_MIN),
+        "duration": str(duration),
+        "widest": str(max_earlier_margin(duration) or 0),
+    }
 
 
 def _collect_target(user_input: Mapping[str, Any]) -> dict[str, Any]:
@@ -457,7 +493,8 @@ class _WalkFlowSteps:
         """Step 3's schema, in the order docs/CONFIG.md lists the options."""
         current: Mapping[str, Any] = self._params or self._current
         notify_services = self._notify_services()
-        margin = _minutes_selector(MIN_MARGIN_MIN, MAX_MARGIN_MIN, MARGIN_STEP_MIN)
+        later = _minutes_selector(MIN_MARGIN_MIN, MAX_MARGIN_MIN, MARGIN_STEP_MIN)
+        earlier = _minutes_selector(MIN_MARGIN_MIN, MAX_EARLIER_MARGIN_MIN, MARGIN_STEP_MIN)
         return vol.Schema(
             {
                 _marker(CONF_RADIUS_KM, current, DEFAULT_RADIUS_KM): NumberSelector(
@@ -478,8 +515,8 @@ class _WalkFlowSteps:
                         translation_key=CONF_INTENSITY_THRESHOLD,
                     )
                 ),
-                _marker(CONF_EARLIER_MARGIN_MIN, current, DEFAULT_EARLIER_MARGIN_MIN): margin,
-                _marker(CONF_LATER_MARGIN_MIN, current, DEFAULT_LATER_MARGIN_MIN): margin,
+                _marker(CONF_EARLIER_MARGIN_MIN, current, DEFAULT_EARLIER_MARGIN_MIN): earlier,
+                _marker(CONF_LATER_MARGIN_MIN, current, DEFAULT_LATER_MARGIN_MIN): later,
                 # Deliberately no default — the user must state how long a walk takes.
                 _marker(CONF_WALK_DURATION_MIN, current): _minutes_selector(
                     MIN_WALK_DURATION_MIN, MAX_WALK_DURATION_MIN, WALK_DURATION_STEP_MIN
@@ -493,6 +530,9 @@ class _WalkFlowSteps:
                 _marker(
                     CONF_CONFIRM_MARGIN_MIN, current, DEFAULT_CONFIRM_MARGIN_MIN
                 ): _minutes_selector(MIN_MARGIN_MIN, MAX_CONFIRM_MARGIN_MIN, CONFIRM_STEP_MIN),
+                _marker(
+                    CONF_PRELIMINARY_ALERT, current, DEFAULT_PRELIMINARY_ALERT
+                ): BooleanSelector(),
                 _marker(CONF_NOTIFY_SERVICE, current, required=False): SelectSelector(
                     SelectSelectorConfig(
                         options=notify_services,
@@ -518,78 +558,15 @@ class _WalkFlowSteps:
                 errors[CONF_NOTIFY_SERVICE] = ERROR_INVALID_NOTIFY_SERVICE
             if _shortening_exceeds_walk(self._params):
                 errors[CONF_MIN_WALK_DURATION_MIN] = ERROR_MIN_WALK_TOO_LONG
+            errors.update(_timing_errors(self._params))
             if not errors:
-                return await self._async_check_long_walk()
-
-        return self.async_show_form(
-            step_id="params", data_schema=self._params_schema(), errors=errors
-        )
-
-    async def _async_check_long_walk(self) -> ConfigFlowResult:
-        """First of the two timing warnings: a walk longer than the forecast is good for."""
-        if self._params[CONF_WALK_DURATION_MIN] > WALK_DURATION_WARN_MIN:
-            return await self.async_step_long_walk()
-        return await self._async_check_radar_reach()
-
-    async def _async_check_radar_reach(self) -> ConfigFlowResult:
-        """Second: an alert timed for a moment no radar can see the walk from.
-
-        The radars reach `NOWCAST_HORIZON_MIN` ahead and no further, and the alert
-        is sent `earlier_margin` before the walk. Set the margin wider than that
-        horizon and the message is decided by hourly models alone — which know
-        whether it will rain far better than they know when.
-        """
-        if self._params[CONF_EARLIER_MARGIN_MIN] > NOWCAST_HORIZON_MIN:
-            return await self.async_step_beyond_radar()
-        return await self._async_finish()
-
-    async def async_step_long_walk(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Warn that a walk longer than the nowcast comfort zone is less reliable.
-
-        Not an error — the user may confirm. Declining returns to step 3 with the
-        entered values still in the form, so the duration can simply be lowered.
-        """
-        if user_input is not None:
-            if user_input[CONF_CONFIRM]:
-                return await self._async_check_radar_reach()
-            return await self.async_step_params()
-
-        return self.async_show_form(
-            step_id="long_walk",
-            data_schema=vol.Schema({vol.Required(CONF_CONFIRM, default=False): BooleanSelector()}),
-            description_placeholders={
-                "duration": str(self._params.get(CONF_WALK_DURATION_MIN, "")),
-                "limit": str(WALK_DURATION_WARN_MIN),
-                "horizon": str(NOWCAST_HORIZON_MIN),
-            },
-        )
-
-    async def async_step_beyond_radar(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Warn that the alert lands before any radar can see the walk.
-
-        Like `long_walk` this is a confirmation, not an error: a wide margin is a
-        legitimate choice for someone who needs a lot of notice, as long as they
-        know the first message will be a model-only estimate that the integration
-        will keep re-checking as the walk comes into radar range.
-        """
-        if user_input is not None:
-            if user_input[CONF_CONFIRM]:
                 return await self._async_finish()
-            return await self.async_step_params()
 
-        earlier = int(self._params.get(CONF_EARLIER_MARGIN_MIN, 0))
         return self.async_show_form(
-            step_id="beyond_radar",
-            data_schema=vol.Schema({vol.Required(CONF_CONFIRM, default=False): BooleanSelector()}),
-            description_placeholders={
-                "earlier": str(earlier),
-                "horizon": str(NOWCAST_HORIZON_MIN),
-                "over": str(earlier - NOWCAST_HORIZON_MIN),
-            },
+            step_id="params",
+            data_schema=self._params_schema(),
+            errors=errors,
+            description_placeholders=_timing_placeholders(self._params or self._current),
         )
 
 
@@ -597,6 +574,9 @@ class WalkTheDogConfigFlow(_WalkFlowSteps, ConfigFlow, domain=DOMAIN):
     """Handle the Walk the dog setup wizard."""
 
     VERSION = 1
+    #: 2 since 1.3.0: the walk and its notice period fit inside the radar's reach.
+    #: Entries stored before that are fitted once by `async_migrate_entry`.
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Start with no collected input."""

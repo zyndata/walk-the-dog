@@ -42,6 +42,7 @@ from .const import (
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
     CONF_MIN_WALK_DURATION_MIN,
+    CONF_PRELIMINARY_ALERT,
     CONF_RADIUS_KM,
     CONF_SCHEDULE,
     CONF_SCHEDULE_MODE,
@@ -55,6 +56,7 @@ from .const import (
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
     DEFAULT_MIN_WALK_DURATION_MIN,
+    DEFAULT_PRELIMINARY_ALERT,
     DEFAULT_RADIUS_KM,
     DOMAIN,
     EVENT_MOBILE_APP_ACTION,
@@ -157,6 +159,7 @@ class WalkData:
             "degraded": False,
             "horizon_limited": False,
             "provisional": False,
+            "radar_backed": False,
             "sources": [],
             "data_age_s": None,
         }
@@ -187,6 +190,9 @@ class WalkData:
                 # No radar reaches the window being recommended: an early answer the
                 # coordinator is still checking, not a final one.
                 "provisional": recommendation.provisional,
+                # A radar reaches every minute of the scheduled walk — the condition
+                # for an alert to be sent at all (docs/CONFIG.md § Event payload).
+                "radar_backed": recommendation.radar_backed,
                 "sources": [_source_payload(source) for source in recommendation.sources],
                 "data_age_s": _freshness_s(recommendation.sources),
             }
@@ -270,7 +276,12 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         self._cache = SampleCache(self._geometry.key)
         self._cache.attach_store(hass)
         self._registry = SourceRegistry(build_user_agent(version), cache=self._cache)
-        self.notifier = WalkNotifier(hass, entry, confirm_margin=self._confirm_margin)
+        self.notifier = WalkNotifier(
+            hass,
+            entry,
+            confirm_margin=self._confirm_margin,
+            preliminary=bool(options.get(CONF_PRELIMINARY_ALERT, DEFAULT_PRELIMINARY_ALERT)),
+        )
 
         # Starts off: the switch restores the real state and turns it on, so a
         # restart with alerting disabled makes no request at all.

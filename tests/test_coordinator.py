@@ -456,6 +456,7 @@ async def chmi_entry(hass: HomeAssistant) -> MockConfigEntry:
         },
         options=ENTRY_OPTIONS,
         version=1,
+        minor_version=2,
     )
     entry.add_to_hass(hass)
     return entry

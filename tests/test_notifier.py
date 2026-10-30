@@ -23,8 +23,10 @@ from custom_components.walk_the_dog.const import (
     CLEAR_NOTIFICATION,
     CONF_AUTO_MUTE_ENTITY,
     CONF_CONFIRM_MARGIN_MIN,
+    CONF_LATER_MARGIN_MIN,
     CONF_MIN_WALK_DURATION_MIN,
     CONF_NOTIFY_SERVICE,
+    CONF_PRELIMINARY_ALERT,
     CONF_TARGET_AWAY_ENTITY,
     CONF_TARGET_MUTE,
     CONF_TARGET_SERVICES,
@@ -65,6 +67,7 @@ from .conftest import (
     hourly_sources,
     make_series,
     make_status,
+    radar_sources,
     run_cycle,
     setup_entry,
 )
@@ -108,6 +111,12 @@ HEAVY_AT_FIVE = [0.0, 0.0, 9.0, 9.0, 0.0]
 #: No rain at all — nothing to say.
 NO_RAIN = [0.0, 0.0, 0.0, 0.0, 0.0]
 
+#: Rain from 04:00 to 06:00 — only a walk at six or later stays dry.
+RAIN_UNTIL_SIX = [0.0, 3.0, 3.0, 0.0, 0.0]
+
+#: Where `RAIN_AT_FIVE` moves the 05:00 walk: the latest 30 dry minutes before it.
+SUGGESTED_START = datetime(2026, 8, 25, 4, 30, tzinfo=UTC)
+
 
 def _alerts_only(calls: list[ServiceCall]) -> list[ServiceCall]:
     """The pushes that said something, without the take-downs that removed them."""
@@ -145,7 +154,7 @@ async def coordinator(
         },
     )
     freezer.move_to(IDLE)
-    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
     return await setup_entry(hass, entry)
 
 
@@ -217,9 +226,13 @@ async def test_an_unchanged_recommendation_is_not_repeated(
     freezer: FrozenDateTimeFactory,
     notifications: list[ServiceCall],
 ) -> None:
-    """Every later cycle re-checks material change and stays quiet."""
+    """Every later cycle up to the suggested start re-checks material change and stays quiet.
+
+    It stops there because past 04:30 the answer really does change: the radar
+    sees twenty dry minutes left before the rain, and a shorter walk is new advice.
+    """
     moment = ARM_AT
-    while moment < WALK_START:
+    while moment <= SUGGESTED_START:
         await run_cycle(hass, freezer, moment)
         moment += CYCLE
 
@@ -237,7 +250,7 @@ async def test_a_material_change_notifies_again(
     await run_cycle(hass, freezer, ARM_AT)
     assert len(notifications) == 1
 
-    fetch.build = lambda now: hourly_sources(now, HEAVY_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, HEAVY_AT_FIVE)
     await run_cycle(hass, freezer, ARM_AT + CYCLE)
 
     assert len(notifications) == 2
@@ -252,7 +265,7 @@ async def test_a_dry_walk_is_never_announced(
     alerts: list,
 ) -> None:
     """Silence means "go as planned" — the integration does not congratulate you."""
-    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+    fetch.build = lambda now: radar_sources(now, NO_RAIN)
 
     await run_cycle(hass, freezer, ARM_AT)
 
@@ -340,7 +353,7 @@ async def test_the_next_walk_starts_a_fresh_conversation(
     assert len(notifications) == 1
 
     tomorrow = timedelta(days=1)
-    fetch.build = lambda now: hourly_sources(
+    fetch.build = lambda now: radar_sources(
         now, RAIN_AT_FIVE, start=datetime(2026, 8, 26, 3, 0, tzinfo=UTC)
     )
     await run_cycle(hass, freezer, WINDOW_START + tomorrow)
@@ -365,7 +378,7 @@ async def test_an_unregistered_notify_service_is_reported_not_raised(
         options={**entry.options, CONF_NOTIFY_SERVICE: "mobile_app_missing"},
     )
     freezer.move_to(IDLE)
-    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
     await setup_entry(hass, entry)
 
     await run_cycle(hass, freezer, ARM_AT)
@@ -388,7 +401,7 @@ async def test_no_notify_service_still_fires_the_event(
     line on the sensor's own screen is rendered from it.
     """
     freezer.move_to(IDLE)
-    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
     await setup_entry(hass, entry)
 
     await run_cycle(hass, freezer, ARM_AT)
@@ -433,7 +446,7 @@ async def setup_with_target(
         options[CONF_AUTO_MUTE_ENTITY] = auto_mute
     hass.config_entries.async_update_entry(entry, options=options)
     freezer.move_to(IDLE)
-    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
     return await setup_entry(hass, entry)
 
 
@@ -764,7 +777,7 @@ async def test_another_walks_settings_do_not_leak_into_this_one(
         },
     )
     freezer.move_to(IDLE)
-    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
     await setup_entry(hass, entry)
 
     await run_cycle(hass, freezer, ARM_AT)
@@ -778,7 +791,8 @@ async def test_another_walks_settings_do_not_leak_into_this_one(
 
 async def test_nothing_is_said_once_the_advice_has_run_out_of_time(
     hass: HomeAssistant,
-    coordinator: WalkCoordinator,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
     freezer: FrozenDateTimeFactory,
     notifications: list[ServiceCall],
 ) -> None:
@@ -788,7 +802,21 @@ async def test_nothing_is_said_once_the_advice_has_run_out_of_time(
     the walk. From 04:40 on, the search can no longer offer 04:30 and the answer
     flips to `no_dry_window` — a different direction, and so a material change by
     every other rule. Nothing about the weather changed, so nothing is sent.
+
+    Shortening is off here: with it on, the radar would see the twenty dry minutes
+    left before the rain and offer them, which is new advice rather than the clock.
     """
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
+            CONF_MIN_WALK_DURATION_MIN: 0,
+        },
+    )
+    freezer.move_to(IDLE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
+    await setup_entry(hass, entry)
     moment = ARM_AT
     while moment < WALK_END:
         await run_cycle(hass, freezer, moment)
@@ -819,7 +847,7 @@ async def test_alerts_about_one_walk_share_a_notification_tag(
 ) -> None:
     """A revised recommendation replaces the one it supersedes on the phone."""
     await run_cycle(hass, freezer, ARM_AT)
-    fetch.build = lambda now: hourly_sources(now, HEAVY_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, HEAVY_AT_FIVE)
     await run_cycle(hass, freezer, ARM_AT + CYCLE)
 
     assert len(notifications) == 2
@@ -848,13 +876,29 @@ def _with_radar(now: datetime) -> Any:
 
 async def test_a_model_only_answer_says_it_is_still_being_checked(
     hass: HomeAssistant,
-    coordinator: WalkCoordinator,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
     freezer: FrozenDateTimeFactory,
     notifications: list[ServiceCall],
 ) -> None:
-    """Only the hourly models are answering here, so the timing is an estimate."""
+    """The radar confirms the rain, but only the models see the dry hour after it.
+
+    Rain from 04:00 to 06:00 everywhere, a radar that reaches 05:30 — the whole walk
+    — and a later margin wide enough to reach 06:00. The rain is the radar's
+    verdict; the suggested 06:00 is the models' alone, and the message says so.
+    """
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, CONF_NOTIFY_SERVICE: NOTIFY_SERVICE, CONF_LATER_MARGIN_MIN: 60},
+    )
+    freezer.move_to(IDLE)
+    fetch.build = lambda now: radar_sources(now, RAIN_UNTIL_SIX, radar_until=WALK_END)
+    await setup_entry(hass, entry)
+
     await run_cycle(hass, freezer, ARM_AT)
 
+    assert len(notifications) == 1
+    assert "06:00" in notifications[0].data["message"]
     assert "still watching" in notifications[0].data["message"]
 
 
@@ -963,7 +1007,7 @@ async def test_a_walk_nobody_was_told_about_is_not_taken_down(
     notifications: list[ServiceCall],
 ) -> None:
     """Clearing a tag that was never used is a service call spent saying nothing."""
-    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+    fetch.build = lambda now: radar_sources(now, NO_RAIN)
 
     await run_cycle(hass, freezer, ARM_AT)
     await run_cycle(hass, freezer, WALK_END)
@@ -994,7 +1038,7 @@ async def confirming(
         },
     )
     freezer.move_to(IDLE)
-    fetch.build = lambda now: hourly_sources(now, RAIN_AT_FIVE)
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
     return await setup_entry(hass, entry)
 
 
@@ -1036,9 +1080,9 @@ async def test_the_confirmation_is_sent_once(
     freezer: FrozenDateTimeFactory,
     notifications: list[ServiceCall],
 ) -> None:
-    """It is reassurance, not a countdown."""
+    """It is reassurance, not a countdown — every cycle up to setting off at 04:30."""
     moment = ARM_AT
-    while moment <= WALK_START:
+    while moment <= SUGGESTED_START:
         await run_cycle(hass, freezer, moment)
         moment += CYCLE
 
@@ -1059,7 +1103,7 @@ async def test_the_rain_going_away_stands_the_alert_down(
     necessary.
     """
     await run_cycle(hass, freezer, ARM_AT)
-    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+    fetch.build = lambda now: radar_sources(now, NO_RAIN)
 
     await run_cycle(hass, freezer, ARM_AT + 2 * CYCLE)
 
@@ -1075,7 +1119,7 @@ async def test_nothing_is_confirmed_that_was_never_announced(
     notifications: list[ServiceCall],
 ) -> None:
     """A walk that was fine all along is not worth a message about being fine."""
-    fetch.build = lambda now: hourly_sources(now, NO_RAIN)
+    fetch.build = lambda now: radar_sources(now, NO_RAIN)
 
     moment = ARM_AT
     while moment <= WALK_START:
@@ -1109,7 +1153,7 @@ async def test_a_walk_with_nowhere_to_move_is_confirmed_without_an_hour(
     the door cannot be the one that repeats an hour — there is no hour to repeat.
     It repeats the raincoat instead.
     """
-    fetch.build = lambda now: hourly_sources(now, ALL_WET)
+    fetch.build = lambda now: radar_sources(now, ALL_WET)
 
     await run_cycle(hass, freezer, ARM_AT)
     assert len(notifications) == 1
@@ -1284,3 +1328,140 @@ async def test_the_shortened_walk_is_confirmed_in_its_own_words(
     assert len(notifications) == 2
     assert "10 minutes" in notifications[1].data["message"]
     assert "05:20" in notifications[1].data["message"]
+
+
+# --- 1.3.0: the radar decides, the models may only say "maybe" ---------------
+
+
+def _models_only(now: datetime) -> Any:
+    """Rain at five, seen by the two hourly models and by no radar at all."""
+    return hourly_sources(now, RAIN_AT_FIVE)
+
+
+async def test_the_models_alone_never_send_the_alert(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """The reported case: rain only the models saw. With the maybe switched off, silence."""
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            **entry.options,
+            CONF_NOTIFY_SERVICE: NOTIFY_SERVICE,
+            CONF_PRELIMINARY_ALERT: False,
+        },
+    )
+    freezer.move_to(IDLE)
+    fetch.build = _models_only
+    await setup_entry(hass, entry)
+
+    moment = WINDOW_START
+    while moment < WALK_START:
+        await run_cycle(hass, freezer, moment)
+        moment += CYCLE
+
+    assert notifications == []
+    assert alerts == []
+
+
+async def test_the_models_maybe_is_sent_once_early_and_quietly(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """On by default: one quiet heads-up at the first cycle, worded as a maybe."""
+    fetch.build = _models_only
+
+    moment = WINDOW_START
+    while moment < WALK_START:
+        await run_cycle(hass, freezer, moment)
+        moment += CYCLE
+
+    assert len(notifications) == 1
+    push = notifications[0].data
+    assert "only the hourly weather models" in push["message"]
+    assert push["data"]["importance"] == "low"
+    assert push["data"]["push"] == {"interruption-level": "passive"}
+    assert push["data"]["channel"] == "Walk the dog: early notices"
+    assert push["data"]["tag"] == f"{TAG_PREFIX}20260825T0500"
+
+    assert len(alerts) == 1
+    assert alerts[0].data["preliminary"] is True
+    assert alerts[0].data["confirmation"] is False
+    assert alerts[0].data["radar_backed"] is False
+    assert alerts[0].data[ATTR_SUMMARY] == "Rain possible — 05:00"
+
+
+async def test_the_radar_seeing_the_walk_dry_calls_the_maybe_off(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """The user was told "maybe"; the moment the radar says no, they are told that too."""
+    fetch.build = _models_only
+    await run_cycle(hass, freezer, WINDOW_START)
+
+    fetch.build = lambda now: radar_sources(now, NO_RAIN)
+    moment = WINDOW_START + CYCLE
+    while moment < WALK_START:
+        await run_cycle(hass, freezer, moment)
+        moment += CYCLE
+
+    assert len(notifications) == 2
+    assert "expects no rain" in notifications[1].data["message"]
+    assert notifications[1].data["data"]["tag"] == notifications[0].data["data"]["tag"]
+
+
+async def test_the_radar_confirming_the_rain_sends_the_real_alert(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """The maybe is replaced on the phone by the ordinary alert, at the promised moment."""
+    fetch.build = _models_only
+    await run_cycle(hass, freezer, WINDOW_START)
+
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
+    await run_cycle(hass, freezer, ARM_AT - CYCLE)
+    assert len(notifications) == 1, "the radar's rain still waits for the promised moment"
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 2
+    alert = notifications[1].data
+    assert "04:30" in alert["message"]
+    assert alert["data"]["tag"] == notifications[0].data["data"]["tag"]
+    assert "channel" not in alert["data"]
+
+
+async def test_the_radars_verdict_outlives_the_walk_leaving_its_reach(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """The gate is latched: once the radar has seen the walk, re-checks still count.
+
+    The walk's own slots fall into the past as the window runs on, where no nowcast
+    reaches; asking the gate afresh every cycle would mute exactly the follow-ups
+    the watch window exists for.
+    """
+    fetch.build = lambda now: radar_sources(now, RAIN_AT_FIVE)
+    await run_cycle(hass, freezer, ARM_AT)
+
+    fetch.build = lambda now: hourly_sources(now, HEAVY_AT_FIVE)
+    await run_cycle(hass, freezer, ARM_AT + CYCLE)
+
+    assert len(notifications) == 2

@@ -207,6 +207,22 @@ class Recommendation:
         return self.recommended_start + self.recommended_duration
 
     @property
+    def radar_backed(self) -> bool:
+        """True when a radar reaches every slot of the *scheduled* walk.
+
+        This is what may decide an alert (docs/ARCHITECTURE.md § Notification
+        dispatch). Until it holds, the verdict on the walk rests on hourly models
+        alone, and two of them disagreeing by a tenth of a weight is a coin toss
+        with a wet side, not a forecast — so it can earn the user a heads-up at
+        most, never the alert itself.
+
+        Not the same question as `provisional`, which asks about the window being
+        *recommended*: a radar-backed rain at 18:00 may well point to a dry 18:40
+        that only the models can see yet.
+        """
+        return self.scheduled.nowcast_covered
+
+    @property
     def provisional(self) -> bool:
         """True when no radar reaches the window being recommended.
 
