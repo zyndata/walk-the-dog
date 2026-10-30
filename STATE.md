@@ -2271,3 +2271,25 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - **Not yet verified live.** Deploy to the maintainer's instance and watch one walk with rain and
     one without; check the repair issue appears with the right numbers after the upgrade.
   - Everything from earlier entries, unchanged.
+
+## Release 1.3.0 — the radar decides the alert (2026-10-30, out of phase)
+
+- **Status:** released (see the last line)
+- **Date:** 2026-10-30
+- **What the release contains:** the behaviour change recorded in the entry above, commit
+  `436fcf2` — an alert is decided only once a radar sees the whole walk; notice + walk must fit the
+  radar's 50-minute reach, refused in the settings form; 1.2 settings fitted once on upgrade with a
+  repair issue; an optional quiet preliminary notice (default on) and its withdrawal; new
+  `radar_backed` / `preliminary` fields. Also the `/release` skill (`05d8ec3`), which has no user
+  effect. First release cut with `/release`.
+- **Checks run:** `scripts/release.py` — manifest and CHANGELOG agree on 1.3.0; `scripts/lint.py`
+  clean; **602 tests green** offline in the `wtd-test` container; secret scan over `v1.2.2..HEAD`
+  — the only hits are the skill's own description of the scan, no tokens, URLs, emails or
+  coordinates; `.env` and `.claude/settings.local.json` untracked; CI and Validate green on
+  `436fcf2`.
+- **Decisions:**
+  - **Minor (1.3.0).** A new option and new user-visible behaviour. Not major: no option, entity or
+    event was removed or renamed, and nobody has to reconfigure — the narrowed ranges are applied
+    by the migration, which says what it changed.
+- **Open questions carried forward:** those of the entry above, unchanged — chiefly walks over
+  50 minutes, the two-model tie-break, and live verification on the maintainer's instance.
