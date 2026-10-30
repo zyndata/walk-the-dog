@@ -2293,3 +2293,6 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     by the migration, which says what it changed.
 - **Open questions carried forward:** those of the entry above, unchanged — chiefly walks over
   50 minutes, the two-model tie-break, and live verification on the maintainer's instance.
+- **Released as [`v1.3.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.3.0)**
+  (2026-10-30), with CI, Validate and Release green, published, not a draft and not a
+  pre-release.
