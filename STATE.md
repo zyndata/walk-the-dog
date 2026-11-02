@@ -2349,8 +2349,7 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Change — each phone is told in its own user's language (2026-11-02, out of phase)
 
-- **Status:** done on `main`, not yet released (`[Unreleased]` has an `Added` entry, so
-  **1.4.0**).
+- **Status:** done, released in 1.4.0 (see the next entry).
 - **Date:** 2026-11-02
 - **Why it exists:** the maintainer has two phones signed in as two Home Assistant users, one
   with an English profile and one with a Polish one; both received English pushes, because every
@@ -2384,3 +2383,20 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - The profile store is a Home Assistant internal (`frontend.storage.async_user_store`); verify it
     after major HA upgrades — a break is silent (debug log, server language).
   - Live verification on the maintainer's two phones once released.
+
+## Release 1.4.0 — each phone in its own user's language (2026-11-02, out of phase)
+
+- **Status:** released (see the last line)
+- **Date:** 2026-11-02
+- **What the release contains:** the change recorded in the entry above, commit `09c1728` — each
+  phone's push is written in the language its Home Assistant user picked on their profile, with
+  the server language as the fallback; the history line stays in the server language.
+- **Checks run:** `scripts/release.py` — manifest and CHANGELOG agree on 1.4.0; `scripts/lint.py`
+  clean; **607 tests green** offline in `wtd-test`; secret scan over `v1.3.1..HEAD` — no hits;
+  `.env` and `.claude/settings.local.json` untracked; CI and Validate green on `09c1728`.
+- **Decisions:** **minor (1.4.0)** — an `### Added` entry: a new user-visible behaviour; no
+  option, entity or event changed.
+- **Open questions carried forward:** as in the entry above — a profile left on "follow the
+  browser" saves no language, the profile store is an HA internal, live verification on the two
+  phones; and from 1.3.1, the lost phase 3 mitigation for a transparent LibreWXR outage and walks
+  over 50 min.
