@@ -2343,3 +2343,6 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Decisions:** **patch (1.3.1)** — `### Fixed` only; no option, entity or event changed.
 - **Open questions carried forward:** as in the entry above — the lost phase 3 mitigation for a
   transparent LibreWXR outage, walks over 50 min, and live verification of 1.3.1.
+- **Released as [`v1.3.1`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.3.1)**
+  (2026-11-02), with CI, Validate and Release green, published, not a draft and not a
+  pre-release.
