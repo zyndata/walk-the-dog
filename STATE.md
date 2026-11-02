@@ -2400,3 +2400,6 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   browser" saves no language, the profile store is an HA internal, live verification on the two
   phones; and from 1.3.1, the lost phase 3 mitigation for a transparent LibreWXR outage and walks
   over 50 min.
+- **Released as [`v1.4.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.4.0)**
+  (2026-11-02), with CI, Validate and Release green, published, not a draft and not a
+  pre-release.
