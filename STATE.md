@@ -2329,3 +2329,17 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     That mitigation is gone. Poland is inside OPERA coverage, so it should not matter there, but a
     radar outage that renders as transparent rather than failing would now read as "dry".
   - The rest as in the 1.3.0 entries: walks over 50 min, live verification (now of 1.3.1).
+
+## Release 1.3.1 — the radar decides every slot it reaches (2026-11-02, out of phase)
+
+- **Status:** released (see the last line)
+- **Date:** 2026-11-02
+- **What the release contains:** the fix recorded in the entry above, commit `aff5f19` — inside
+  the radar's reach only the radars vote, so two models at the drizzle threshold can no longer
+  outvote two dry radars; the models still decide what no radar reaches.
+- **Checks run:** `scripts/release.py` — manifest and CHANGELOG agree on 1.3.1; `scripts/lint.py`
+  clean; **604 tests green** offline in `wtd-test`; secret scan over `v1.3.0..HEAD` — no hits;
+  `.env` and `.claude/settings.local.json` untracked; CI and Validate green on `aff5f19`.
+- **Decisions:** **patch (1.3.1)** — `### Fixed` only; no option, entity or event changed.
+- **Open questions carried forward:** as in the entry above — the lost phase 3 mitigation for a
+  transparent LibreWXR outage, walks over 50 min, and live verification of 1.3.1.

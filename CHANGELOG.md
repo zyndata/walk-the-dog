@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-02
+
 ### Fixed
 
 - **The weather models can no longer outvote the radar.** Since 1.3.0 an alert waits until a radar
@@ -688,7 +690,8 @@ way; all of it is written up in `docs/DATA_SOURCES.md` § CHMI:
 - RainViewer is no longer a candidate: its public API serves past radar frames only, and the
   live `radar.nowcast` array is empty.
 
-[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.3.1
 [1.3.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.3.0
 [1.2.2]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.2
 [1.2.1]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.2.1
