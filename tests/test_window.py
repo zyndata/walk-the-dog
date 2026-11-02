@@ -142,19 +142,14 @@ def test_window_risk_is_its_worst_slot() -> None:
 
 def test_window_confidence_is_its_weakest_slot() -> None:
     """One slot the sources argue over makes the verdict uncertain, dry or not."""
-    consensus = _consensus(
-        {
-            SOURCE_LIBREWXR: _pattern(7),
-            SOURCE_KNMI: _pattern(),
-            SOURCE_ICON_EU: _pattern(),
-        }
-    )
+    consensus = _consensus({SOURCE_KNMI: _pattern(), SOURCE_ICON_EU: _pattern(7)})
     verdict = evaluate_window(consensus, T, DURATION)
 
-    disputed = 1.0 / (1.0 + 0.9 + 0.8)
+    disputed = 0.8 / (0.9 + 0.8)
     assert verdict.dry
     assert verdict.risk == pytest.approx(disputed)
-    assert verdict.confidence == pytest.approx(abs(2 * disputed - 1))
+    # Two voters: the source-count cap of 0.8 applies on top of the disagreement.
+    assert verdict.confidence == pytest.approx(abs(2 * disputed - 1) * 0.8)
 
 
 def test_peak_intensity_is_the_heaviest_slot_in_the_window() -> None:
@@ -579,7 +574,9 @@ def test_a_recommendation_no_radar_reaches_is_provisional() -> None:
     models = _pattern(*range(SCHEDULED_INDEX + 3))
     consensus = _consensus(
         {
-            SOURCE_LIBREWXR: _pattern(length=6),
+            # Agreeing with the models where it reaches: inside its reach the radar
+            # alone decides, so a dry radar here would open a dry 06:00 instead.
+            SOURCE_LIBREWXR: _pattern(*range(6), length=6),
             SOURCE_KNMI: list(models),
             SOURCE_ICON_EU: list(models),
         }

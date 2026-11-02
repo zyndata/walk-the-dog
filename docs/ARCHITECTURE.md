@@ -253,12 +253,24 @@ what actually degrades when the provider stops responding. Recorded in `STATE.md
 **Per-slot risk and confidence.** With the user's intensity threshold θ ∈ {light, moderate,
 heavy} mapped to its mm/h lower bound (0.1 / 2.5 / 7.6):
 
-- `vote_i(t) = 1 if intensity_i(t) ≥ θ else 0`, over sources contributing at slot t
-- `risk(t) = Σ w_i·vote_i(t) / Σ w_i` ∈ [0, 1] — weighted fraction of sources predicting rain
+- **voters at slot t** = the radar sources (`librewxr`, `chmi`) that reach t, if any do;
+  otherwise every source that reaches t (since 1.3.1 — see below)
+- `vote_i(t) = 1 if intensity_i(t) ≥ θ else 0`, over the voters at slot t
+- `risk(t) = Σ w_i·vote_i(t) / Σ w_i` ∈ [0, 1] over the voters — weighted fraction predicting rain
 - `agreement(t) = |2·risk(t) − 1|` — 1 when unanimous either way, 0 at a 50/50 split
 - `confidence(t) = agreement(t) × cap(n_t)` where `n_t` = number of contributing sources and
   `cap` is the phase 0 degradation table: 3 → 1.0, 2 → 0.8, 1 → 0.5, 0 → slot has no data
 - a slot is **wet** when `risk(t) ≥ 0.5` (strict majority by weight)
+
+**Inside the radar's reach only the radars vote** (1.3.1, after a live false alarm). On
+2026-11-02 both models forecast 0.1 mm/h — the smallest value Open-Meteo publishes, and exactly the
+`light` threshold — while both radars saw nothing over the whole walk; by weight the models won,
+1.70 to 1.665 (`chmi` range-scaled to 0.665), and an alert went out with confidence 0.01. Raising
+the radar weights would only move the tie, so the rule is structural: a slot a radar reaches is
+the radars' to decide. The models still appear in the per-source breakdown and still decide every
+slot no radar reaches — a `later` window beyond the hour, the preliminary notice. `contributors`
+keeps listing every source that reached the slot (coverage, `n_t`, `degraded`); `voters` names the
+ones whose vote counted, and the displayed intensity is their weighted mean.
 
 Correlated sources never both contribute (phase 0 rule): the adapter registry enables at most
 one member of each correlated pair — concretely, `metno` is polled only while Open-Meteo is

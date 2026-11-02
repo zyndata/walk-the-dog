@@ -859,19 +859,12 @@ async def test_alerts_about_one_walk_share_a_notification_tag(
 
 
 def _with_radar(now: datetime) -> Any:
-    """The two hourly models, plus a radar frame covering the whole search window."""
-    series, statuses = hourly_sources(now, RAIN_AT_FIVE)
-    series.append(
-        make_series(
-            SOURCE_LIBREWXR,
-            [0.0] * 12,
-            start=WINDOW_START,
-            step_s=600,
-            issued_at=now,
-        )
-    )
-    statuses.append(make_status(SOURCE_LIBREWXR, age_s=0, contributed=True))
-    return series, statuses
+    """The two hourly models, plus a radar agreeing with them over the whole search window.
+
+    It has to agree: inside its reach the radar alone decides, so a dry radar here
+    would simply make the walk dry.
+    """
+    return radar_sources(now, RAIN_AT_FIVE)
 
 
 async def test_a_model_only_answer_says_it_is_still_being_checked(

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The weather models can no longer outvote the radar.** Since 1.3.0 an alert waits until a radar
+  can see the whole walk, but the radar still only had a vote: two weather models forecasting the
+  faintest possible drizzle together outweighed two radars seeing nothing, and an alert went out
+  for a walk that stayed dry. Wherever a radar can see, the radar now decides. The models still
+  speak for the time the radar cannot see yet — a later walk time, or the early heads-up.
+
 ## [1.3.0] - 2026-10-30
 
 ### Changed

@@ -14,6 +14,7 @@ import pytest
 from custom_components.walk_the_dog.const import (
     INTENSITY_THRESHOLD_LIGHT,
     INTENSITY_THRESHOLD_MODERATE,
+    SOURCE_CHMI,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
@@ -52,8 +53,8 @@ def _consensus(series, statuses=None, *, threshold=INTENSITY_THRESHOLD_LIGHT, no
     return build_consensus(series, statuses, slots=slots, threshold=threshold, now=now)
 
 
-def _radar(values, **kwargs):
-    return make_series(SOURCE_LIBREWXR, values, start=T, **kwargs)
+def _radar(values, *, source_id=SOURCE_LIBREWXR, **kwargs):
+    return make_series(source_id, values, start=T, **kwargs)
 
 
 def _hourly(source_id, value, **kwargs):
@@ -120,27 +121,61 @@ def test_all_wet_is_risk_one_at_full_confidence() -> None:
 
 
 def test_disagreement_is_a_weighted_fraction_not_a_head_count() -> None:
-    """Radar alone predicting rain loses to both models: 1.0 of 2.7 is under half."""
+    """Where no radar reaches, the models vote by weight: KNMI's 0.9 of 1.7 is a majority."""
+    consensus = _consensus([_hourly(SOURCE_KNMI, 1.5), _hourly(SOURCE_ICON_EU, 0.0)])
+
+    score = consensus.at(T)
+    expected = W_KNMI / (W_KNMI + W_ICON)
+    assert score.risk == pytest.approx(expected)
+    assert score.wet
+    assert score.confidence == pytest.approx(abs(2 * expected - 1) * 0.8)
+
+
+def test_the_models_cannot_outvote_the_radar() -> None:
+    """The 2026-11-02 false alarm: both models at 0.1 mm/h, both radars dry.
+
+    By weight the models won, 1.70 to the radars' 1.665. Inside the radar's reach
+    only the radars vote now, so the slot is dry — and the models are still listed
+    as having reached it, which is what the per-source breakdown shows the user.
+    """
+    consensus = _consensus(
+        [
+            _radar([0.0, 0.0, 0.0]),
+            _radar([0.0, 0.0, 0.0], source_id=SOURCE_CHMI),
+            _hourly(SOURCE_KNMI, 0.1),
+            _hourly(SOURCE_ICON_EU, 0.1),
+        ]
+    )
+
+    score = consensus.at(T)
+    assert score.risk == 0.0
+    assert not score.wet
+    assert set(score.voters) == {SOURCE_LIBREWXR, SOURCE_CHMI}
+    assert set(score.contributors) == {
+        SOURCE_LIBREWXR,
+        SOURCE_CHMI,
+        SOURCE_KNMI,
+        SOURCE_ICON_EU,
+    }
+
+
+def test_the_radar_alone_can_call_rain_against_both_models() -> None:
+    """The other direction of the same rule: a radar seeing rain is not outvoted either."""
     consensus = _consensus(
         [_radar([1.5, 1.5, 1.5]), _hourly(SOURCE_KNMI, 0.0), _hourly(SOURCE_ICON_EU, 0.0)]
     )
 
-    score = consensus.at(T)
-    expected = W_LIBREWXR / (W_LIBREWXR + W_KNMI + W_ICON)
-    assert score.risk == pytest.approx(expected)
-    assert not score.wet
-    assert score.confidence == pytest.approx(abs(2 * expected - 1))
+    assert consensus.at(T).wet
 
 
-def test_the_two_models_outvote_the_radar() -> None:
-    """1.7 of 2.7 is a majority, so the walk counts as wet even if radar says dry."""
-    consensus = _consensus(
-        [_radar([0.0, 0.0, 0.0]), _hourly(SOURCE_KNMI, 1.1), _hourly(SOURCE_ICON_EU, 0.9)]
-    )
+def test_the_models_vote_where_the_radar_stops() -> None:
+    """Past the radar's last frame the models are all there is, and they decide."""
+    consensus = _consensus([_radar([0.0]), _hourly(SOURCE_KNMI, 1.1), _hourly(SOURCE_ICON_EU, 0.9)])
 
-    score = consensus.at(T)
-    assert score.risk == pytest.approx((W_KNMI + W_ICON) / (W_LIBREWXR + W_KNMI + W_ICON))
-    assert score.wet
+    assert not consensus.at(T).wet
+    beyond = consensus.at(T + 2 * SLOT)
+    assert beyond.wet
+    assert set(beyond.voters) == {SOURCE_KNMI, SOURCE_ICON_EU}
 
 
 def test_threshold_decides_what_counts_as_a_wet_vote() -> None:
@@ -152,13 +187,11 @@ def test_threshold_decides_what_counts_as_a_wet_vote() -> None:
 
 
 def test_expected_intensity_is_the_weighted_mean() -> None:
-    """Displayed intensity averages what the sources say; it never drives the vote."""
-    consensus = _consensus(
-        [_radar([6.0, 6.0, 6.0]), _hourly(SOURCE_KNMI, 1.0), _hourly(SOURCE_ICON_EU, 1.0)]
-    )
+    """Displayed intensity averages what the voting sources say — the same ones as the vote."""
+    consensus = _consensus([_hourly(SOURCE_KNMI, 6.0), _hourly(SOURCE_ICON_EU, 1.0)])
 
     score = consensus.at(T)
-    expected = (W_LIBREWXR * 6.0 + W_KNMI + W_ICON) / (W_LIBREWXR + W_KNMI + W_ICON)
+    expected = (W_KNMI * 6.0 + W_ICON * 1.0) / (W_KNMI + W_ICON)
     assert score.intensity_mm_h == pytest.approx(expected)
     assert score.intensity == INTENSITY_THRESHOLD_MODERATE
 
@@ -216,13 +249,14 @@ def test_an_ageing_source_still_votes_but_weighs_less() -> None:
     consensus = _consensus(
         [
             _radar([2.0, 2.0, 2.0], issued_at=T - timedelta(minutes=20)),
-            _hourly(SOURCE_KNMI, 0.0),
+            _radar([0.0, 0.0, 0.0], source_id=SOURCE_CHMI),
         ]
     )
 
     aged = W_LIBREWXR * 0.75
+    chmi = consensus.weights[SOURCE_CHMI]
     assert consensus.weights[SOURCE_LIBREWXR] == pytest.approx(aged)
-    assert consensus.at(T).risk == pytest.approx(aged / (aged + W_KNMI))
+    assert consensus.at(T).risk == pytest.approx(aged / (aged + chmi))
 
 
 # --- statuses -------------------------------------------------------------

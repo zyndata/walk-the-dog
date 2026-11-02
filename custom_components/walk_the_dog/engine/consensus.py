@@ -13,6 +13,15 @@ rain: two disagreeing sources give 0.5 whatever they each think the chance is.
 Confidence is what carries the disagreement, and the source-count cap is what
 carries "we only heard from one of them".
 
+**Inside the radar's reach, only the radars vote** (since 1.3.1). A slot any
+nowcast source reaches is decided by the nowcast sources alone; the hourly models
+vote only where no radar reaches. Weights could not do this: the two models
+together (0.9 + 0.8) outweigh both radars (1.0 + a range-scaled CHMI) at some
+locations, and on 2026-11-02 two models forecasting 0.1 mm/h — the smallest value
+they publish — outvoted two radars seeing nothing, 1.70 to 1.665. Radar
+extrapolation beats an hourly model inside the hour; that is why the radars are
+weighted highest at all, and this makes it a rule rather than a margin.
+
 No I/O, no homeassistant imports, no clock reads: `now` is always a parameter.
 """
 
@@ -21,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..const import INTENSITY_MM_H, intensity_class
+from ..const import INTENSITY_MM_H, NOWCAST_SOURCES, intensity_class
 from ..sources.base import (
     STALE_FACTOR,
     STATE_OK,
@@ -76,6 +85,9 @@ class SlotScore:
     confidence: float
     intensity_mm_h: float
     contributors: tuple[str, ...]
+    #: The sources whose vote decided the slot: the radars wherever one reaches it,
+    #: otherwise everyone in `contributors`. Empty means "same as contributors".
+    voters: tuple[str, ...] = ()
 
     @property
     def n_sources(self) -> int:
@@ -170,18 +182,18 @@ def _score_slot(
     weights: Mapping[str, float],
     threshold_mm_h: float,
 ) -> SlotScore:
-    """Weighted vote over the sources that reach this slot."""
+    """Weighted vote over the sources that reach this slot — the radars, if any do."""
     contributors = tuple(source_id for source_id in sorted(aligned) if slot in aligned[source_id])
     if not contributors:
         return SlotScore(slot, risk=0.0, confidence=0.0, intensity_mm_h=0.0, contributors=())
 
-    total = sum(weights[source_id] for source_id in contributors)
+    voters = tuple(source_id for source_id in contributors if source_id in NOWCAST_SOURCES)
+    voters = voters or contributors
+    total = sum(weights[source_id] for source_id in voters)
     wet = sum(
-        weights[source_id]
-        for source_id in contributors
-        if aligned[source_id][slot] >= threshold_mm_h
+        weights[source_id] for source_id in voters if aligned[source_id][slot] >= threshold_mm_h
     )
-    mean = sum(weights[source_id] * aligned[source_id][slot] for source_id in contributors) / total
+    mean = sum(weights[source_id] * aligned[source_id][slot] for source_id in voters) / total
     risk = wet / total
     cap = SOURCE_COUNT_CAP.get(len(contributors), FULL_CAP)
     return SlotScore(
@@ -190,6 +202,7 @@ def _score_slot(
         confidence=abs(2.0 * risk - 1.0) * cap,
         intensity_mm_h=mean,
         contributors=contributors,
+        voters=voters,
     )
 
 

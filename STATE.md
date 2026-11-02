@@ -2296,3 +2296,36 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Released as [`v1.3.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.3.0)**
   (2026-10-30), with CI, Validate and Release green, published, not a draft and not a
   pre-release.
+
+## Bug fix — the models outvoted the radar (2026-11-02, out of phase)
+
+- **Status:** done on `main`, not yet released (`[Unreleased]` is ready for `/release`; a `Fixed`
+  entry only, so **1.3.1**).
+- **Date:** 2026-11-02
+- **Why it exists:** the first live walk on 1.3.0 still got a false alarm. **Deviation from
+  `PLAN.md`, recorded here before proceeding.**
+- **The report, read from the recorder:** an 18:00 walk (local), 15 min, notice 30 min. Both radars
+  covered the whole walk and saw 0.0 mm/h; KNMI and ICON-EU each forecast 0.1 mm/h, which is the
+  `light` threshold, so both voted wet. Weights: models 0.9 + 0.8 = 1.70, radars 1.0 + 0.665 (CHMI
+  range-scaled) = 1.665 → risk 0.505, confidence 0.01. `radar_backed` was true, so 1.3.0's gate
+  let it through: it guaranteed the radar *saw* the walk, not that the radar *decided* it. The user
+  got the preliminary notice (17:00), "earlier — 17:40" (17:30) and "shorter — 17:50" (17:40).
+- **What was built:** `engine/consensus.py` — a slot any nowcast source reaches is voted on by the
+  nowcast sources alone; the models vote only where no radar reaches. `SlotScore.voters` records who
+  decided; `contributors` is unchanged (coverage, `n_t`, `degraded`, `nowcast_covered`); displayed
+  intensity is the voters' weighted mean. Tests: four consensus tests rewritten to the new rule plus
+  three new ones (the 2026-11-02 numbers among them), two window tests and one notifier helper given
+  a radar that agrees with the models. **604 tests green**, `ruff` clean.
+  `docs/ARCHITECTURE.md` § Consensus scoring documents the rule.
+- **Decisions:**
+  - **A rule, not a weight change** (maintainer's choice of the two options offered). Any weights
+    leave some location where models + range-scaled CHMI tie the radars again.
+  - **The threshold edge (a model's 0.1 mm/h counting as `light`) is left alone.** Offered as a
+    second fix and not chosen; with this rule a model's value no longer decides anything the radar
+    sees.
+- **Open questions carried forward:**
+  - **Phase 3 relied on the opposite.** LibreWXR's grey 0 means both "no echo" and "no radar
+    coverage"; the accepted mitigation was that both models would outvote a wrongly-dry LibreWXR.
+    That mitigation is gone. Poland is inside OPERA coverage, so it should not matter there, but a
+    radar outage that renders as transparent rather than failing would now read as "dry".
+  - The rest as in the 1.3.0 entries: walks over 50 min, live verification (now of 1.3.1).
