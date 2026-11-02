@@ -77,6 +77,12 @@ event type it has been taught, so one without a line of its own would leave a bl
 What the entity id decides is *where* the line goes: it is null for the reassurance that
 an unchanged plan still stands, which keeps that off the sensor's screen without losing
 it from the whole-home logbook.
+
+The push itself is written for the person holding the phone, not for the house (since
+1.4.0). Two phones signed in as two users with two profile languages each get their own:
+the companion app's registration names the user, and the language that user picked on
+their profile page is what the push is rendered in. The `summary` stays in the server
+language — it is one line in a history the whole home shares.
 """
 
 from __future__ import annotations
@@ -96,6 +102,7 @@ from homeassistant.const import (
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
+from homeassistant.util import slugify
 
 from .const import (
     ACTION_WALKED,
@@ -219,6 +226,18 @@ STAMP_FORMAT: Final = "%Y%m%dT%H%M"
 #: Where the companion app registers the phone a `mobile_app_*` notify service
 #: belongs to. The two share a slug, which is the whole of the link between them.
 TRACKER_DOMAIN: Final = "device_tracker"
+
+#: The companion app's own config entries, and the two fields of one that link a notify
+#: service to a person: the service is `slugify("mobile_app_" + device_name)`, and
+#: `user_id` is whoever signed the app in.
+MOBILE_APP_DOMAIN: Final = "mobile_app"
+MOBILE_APP_DEVICE_NAME: Final = "device_name"
+MOBILE_APP_USER_ID: Final = "user_id"
+
+#: Where the frontend keeps the language a user picked on their profile page:
+#: `{"language": {"language": "pl", "number_format": ...}}` in that user's store. Not a
+#: public API, which is why every way of failing to read it ends at the server language.
+PROFILE_LANGUAGE_KEY: Final = "language"
 
 #: A tracker in one of these states is not saying "away", it is saying nothing.
 UNREADABLE_STATES: Final = frozenset({STATE_UNKNOWN, STATE_UNAVAILABLE})
@@ -585,27 +604,45 @@ class WalkNotifier:
         # A model-only maybe, sent before any radar reached the walk. An automation
         # that acts on alerts will usually want to skip these.
         payload["preliminary"] = key == TEXT_PRELIMINARY
-        texts = await self._async_translations()
+        texts = await self._async_translations(self.hass.config.language)
         entity_id = self._recommendation_entity_id()
         payload[ATTR_ENTITY_ID] = entity_id if _filed_under_entity(key) else None
         payload[ATTR_SUMMARY] = _summarize(texts, recommendation, key)
         self.hass.bus.async_fire(EVENT_ALERT, payload)
         if recipients:
-            await self._async_send(texts, recommendation, recipients, key=key, entity_id=entity_id)
+            await self._async_send(recommendation, recipients, key=key, entity_id=entity_id)
 
     async def _async_send(
         self,
-        texts: dict[str, str],
         recommendation: Recommendation,
         services: tuple[str, ...],
         *,
         key: str | None,
         entity_id: str | None,
     ) -> None:
-        """Call every companion-app notify service this walk is addressed to."""
-        registered = [service for service in services if self._registered(service)]
-        if not registered:
-            return
+        """Call every companion-app notify service this walk is addressed to.
+
+        Each phone is written to in its own user's language, so the phones are
+        grouped by it and every group gets one rendering.
+        """
+        by_language: dict[str, list[str]] = {}
+        for service in services:
+            if self._registered(service):
+                language = await self._async_language_for(service)
+                by_language.setdefault(language, []).append(service)
+        for language, registered in by_language.items():
+            texts = await self._async_translations(language)
+            await self._async_send_in(texts, recommendation, registered, key, entity_id)
+
+    async def _async_send_in(
+        self,
+        texts: dict[str, str],
+        recommendation: Recommendation,
+        registered: list[str],
+        key: str | None,
+        entity_id: str | None,
+    ) -> None:
+        """Send one rendering of the advice to the phones that read it in `texts`."""
         title, message = _compose(texts, recommendation, key)
         data: dict[str, Any] = {
             "tag": walk_tag(self._walk_start),
@@ -680,11 +717,45 @@ class WalkNotifier:
             Platform.SENSOR, DOMAIN, f"{self._entry_id}_{ENTITY_KEY_RECOMMENDATION}"
         )
 
-    async def _async_translations(self) -> dict[str, str]:
-        """Every string this module can say, in the user's language."""
-        return await async_get_translations(
-            self.hass, self.hass.config.language, TRANSLATION_CATEGORY, {DOMAIN}
-        )
+    async def _async_translations(self, language: str) -> dict[str, str]:
+        """Every string this module can say, in `language` — English where it has none."""
+        return await async_get_translations(self.hass, language, TRANSLATION_CATEGORY, {DOMAIN})
+
+    async def _async_language_for(self, service: str) -> str:
+        """The profile language of whoever this phone is signed in as, else the server's.
+
+        Read at every send rather than remembered: a user who switches their profile
+        to Polish expects the very next push in Polish, and the frontend keeps the
+        store in memory once loaded, so asking again costs a dictionary lookup.
+        """
+        fallback = self.hass.config.language
+        user_id = self._user_for(service)
+        if user_id is None:
+            return fallback
+        try:
+            # Imported here, not at the top: the frontend is always loaded by the time
+            # anything is sent, and a change to its internals must cost the user their
+            # profile language, not the integration.
+            from homeassistant.components.frontend.storage import (  # noqa: PLC0415
+                async_user_store,
+            )
+
+            store = await async_user_store(self.hass, user_id)
+            profile = store.data.get(PROFILE_LANGUAGE_KEY)
+            language = profile.get(PROFILE_LANGUAGE_KEY) if isinstance(profile, dict) else None
+        except Exception:
+            # Whatever went wrong, the push still goes out — in the server's language.
+            _LOGGER.debug("Could not read the profile language of user %s", user_id, exc_info=True)
+            return fallback
+        return language if isinstance(language, str) and language else fallback
+
+    def _user_for(self, service: str) -> str | None:
+        """The Home Assistant user a companion-app notify service belongs to, if known."""
+        for entry in self.hass.config_entries.async_entries(MOBILE_APP_DOMAIN):
+            device_name = entry.data.get(MOBILE_APP_DEVICE_NAME)
+            if device_name and slugify(f"{MOBILE_APP_DOMAIN}_{device_name}") == service:
+                return entry.data.get(MOBILE_APP_USER_ID)
+        return None
 
 
 def _lookup(

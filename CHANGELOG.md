@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Each phone gets its notification in its own user's language.** Until now every push was
+  written in the language of the Home Assistant server, so a phone signed in as a user with a
+  Polish profile still received English messages. Now the push follows the language that user
+  picked on their Home Assistant profile; two people with two languages each read their own. A
+  user who never picked one still gets the server language, and so does the history line.
+
 ## [1.3.1] - 2026-11-02
 
 ### Fixed

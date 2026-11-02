@@ -13,10 +13,16 @@ import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
+from homeassistant.components.frontend.storage import async_user_store
 from homeassistant.const import STATE_HOME, STATE_NOT_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
-from pytest_homeassistant_custom_component.common import async_capture_events, async_mock_service
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_capture_events,
+    async_mock_service,
+)
 
 from custom_components.walk_the_dog.const import (
     ATTR_SUMMARY,
@@ -48,6 +54,10 @@ from custom_components.walk_the_dog.engine import (
 )
 from custom_components.walk_the_dog.notifier import (
     CLICK_ENTITY_PREFIX,
+    MOBILE_APP_DEVICE_NAME,
+    MOBILE_APP_DOMAIN,
+    MOBILE_APP_USER_ID,
+    PROFILE_LANGUAGE_KEY,
     STICKY,
     TAG_PREFIX,
     TEXT_CONFIRMED_NO_DRY_WINDOW,
@@ -75,7 +85,6 @@ from .conftest import (
 if TYPE_CHECKING:
     from freezegun.api import FrozenDateTimeFactory
     from homeassistant.core import HomeAssistant, ServiceCall
-    from pytest_homeassistant_custom_component.common import MockConfigEntry
 
     from .conftest import FakeFetch
 
@@ -218,6 +227,101 @@ async def test_the_alert_speaks_the_users_language(
     assert sent["message"].startswith("Deszcz spodziewany około 05:00.")
     assert "Wyjdź o 04:30" in sent["message"]
     assert sent["data"]["actions"][0]["title"] == "Już byliśmy"
+
+
+async def _sign_in(hass: HomeAssistant, device_name: str, language: str | None) -> MockConfigEntry:
+    """Register a companion app as a user of its own, with `language` on their profile.
+
+    `None` is a user who never picked one — the profile page saves nothing until they do.
+    """
+    user = await hass.auth.async_create_user(device_name)
+    app = MockConfigEntry(
+        domain=MOBILE_APP_DOMAIN,
+        data={MOBILE_APP_DEVICE_NAME: device_name, MOBILE_APP_USER_ID: user.id},
+    )
+    app.add_to_hass(hass)
+    if language is not None:
+        store = await async_user_store(hass, user.id)
+        await store.async_set_item(
+            PROFILE_LANGUAGE_KEY, {"language": language, "number_format": "language"}
+        )
+    return app
+
+
+async def test_each_phone_is_told_in_its_own_users_language(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    morning: list[ServiceCall],
+    evening: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """Two people, two profile languages, one English server — each reads their own.
+
+    `Morning` is the device name the app registered; Home Assistant slugifies it into
+    the service name, which is the only thing linking the push to the user. The phone
+    without a companion-app registration has no user to ask and keeps the server's.
+    The history line is the home's, not one person's, so it stays in English too.
+    """
+    await _sign_in(hass, "Morning", "pl")
+    await _sign_in(hass, "evening", "en")
+    await setup_with_target(
+        hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE, EVENING_PHONE]}
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(morning) == len(evening) == len(notifications) == 1
+    assert morning[0].data["title"] == "Idź już z psem"
+    assert "Wyjdź o 04:30" in morning[0].data["message"]
+    assert morning[0].data["data"]["actions"][0]["title"] == "Już byliśmy"
+    assert evening[0].data["title"] == "Walk the dog"
+    assert notifications[0].data["title"] == "Walk the dog"
+    # Same walk, same tag: only the words differ between the two renderings.
+    assert morning[0].data["data"]["tag"] == evening[0].data["data"]["tag"]
+    assert alerts[0].data[ATTR_SUMMARY] == "Earlier — 04:30"
+
+
+async def test_a_user_without_a_profile_language_gets_the_servers(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+) -> None:
+    """Nothing saved on the profile is not English — it is whatever the home speaks."""
+    await hass.config.async_update(language="pl")
+    await _sign_in(hass, "morning", None)
+    await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE]})
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(morning) == 1
+    assert morning[0].data["title"] == "Idź już z psem"
+
+
+async def test_an_unreadable_profile_falls_back_to_the_servers_language(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+) -> None:
+    """The profile is Home Assistant's internal data; a change there must not stop a push."""
+    await hass.config.async_update(language="pl")
+    await _sign_in(hass, "morning", "en")
+    await setup_with_target(hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE]})
+
+    with patch(
+        "homeassistant.components.frontend.storage.async_user_store",
+        side_effect=RuntimeError("store moved"),
+    ):
+        await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(morning) == 1
+    assert morning[0].data["title"] == "Idź już z psem"
 
 
 async def test_an_unchanged_recommendation_is_not_repeated(

@@ -463,6 +463,15 @@ Translated:
   top-level key Home Assistant allows for prose belonging to no form and no entity — and are
   read at dispatch time in the user's language.
 
+**Whose language a push is in.** Each phone is written to in the language of the Home Assistant
+user the companion app is signed in as — the one they picked under *Profile → Language*. Two
+phones signed in as two users with English and Polish profiles get an English and a Polish push
+about the same walk. The server language (*Settings → System → General*) is used for a phone
+whose user never picked a language on their profile (one that just follows the browser saves
+nothing), for a phone the companion app did not register, and if the profile cannot be read.
+The `summary` in the event payload, and with it the logbook line, is always in the server
+language: it is one history shared by the whole home.
+
 Deliberately **not** translated, because it is an identifier rather than prose:
 
 - the domain `walk_the_dog`, the event name `walk_the_dog_alert`, the service name

@@ -2346,3 +2346,41 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Released as [`v1.3.1`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.3.1)**
   (2026-11-02), with CI, Validate and Release green, published, not a draft and not a
   pre-release.
+
+## Change — each phone is told in its own user's language (2026-11-02, out of phase)
+
+- **Status:** done on `main`, not yet released (`[Unreleased]` has an `Added` entry, so
+  **1.4.0**).
+- **Date:** 2026-11-02
+- **Why it exists:** the maintainer has two phones signed in as two Home Assistant users, one
+  with an English profile and one with a Polish one; both received English pushes, because every
+  push was rendered in the server language (`hass.config.language`). **Deviation from `PLAN.md`,
+  recorded here before proceeding.**
+- **Plan (maintainer's choice of the options offered: automatic, from the profile — no new
+  option):** for each `mobile_app_*` service, find the companion app's config entry (the service
+  is `slugify("mobile_app_" + device_name)`), take its `user_id`, read that user's frontend
+  language (`frontend.user_data_<user_id>` → `language.language`, the key the profile page saves)
+  and render that phone's push in it. Anything missing or failing falls back to the server
+  language. The event `summary` / logbook line stays in the server language: it is one line for
+  the whole home, not for one person.
+- **What was built:** `notifier.py` — `_async_send` groups the registered phones by
+  `_async_language_for(service)` and renders once per language; `_user_for` maps the service to
+  the companion app's entry; the frontend store is imported lazily inside a catch-all, so any change
+  to Home Assistant's internals costs the profile language, never the push. Three tests: two
+  users with PL/EN profiles on an English server, a user with no saved language, an unreadable
+  store. **607 tests green**, `ruff` clean, `hassfest` clean (no manifest change needed).
+  `docs/CONFIG.md` § Language documents whose language a push is in.
+- **Decisions:**
+  - **Profile language, read at every send** (maintainer's choice) — no new option; a profile
+    change shows on the next push, and the frontend keeps the store in memory once loaded.
+  - **Event `summary` / logbook line stays in the server language** — it is one shared history,
+    and two languages in it is what `logbook.py` was written to avoid.
+  - **The clear-notification call is not translated** — it carries no text.
+- **Open questions carried forward:**
+  - A user whose profile is left on the default ("follow the browser/phone") has nothing saved
+    on the server, so they get the server language even if the phone itself is Polish. Not
+    solvable without a language the companion app reports; the user can pick the language on the
+    profile page explicitly.
+  - The profile store is a Home Assistant internal (`frontend.storage.async_user_store`); verify it
+    after major HA upgrades — a break is silent (debug log, server language).
+  - Live verification on the maintainer's two phones once released.
