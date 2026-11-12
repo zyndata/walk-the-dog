@@ -287,13 +287,14 @@
   },
   "common": {
     "notification_title": "Walk the dog",
-    "notification_earlier": "Rain is expected around {scheduled}. Set off at {recommended} instead — {shift} minutes earlier — and the whole {duration}-minute walk should stay dry, back home by {until}.",
-    "notification_later": "Rain is expected around {scheduled}. Wait until {recommended} — {shift} minutes later — and the whole {duration}-minute walk should stay dry, back home by {until}.",
-    "notification_shorter": "Rain is expected around {scheduled} and there is no dry {duration}-minute window nearby. A shorter walk fits: set off at {recommended} and be back by {until} — {recommended_duration} dry minutes.",
+    "notification_earlier": "Rain is expected during your {scheduled} walk. Set off at {recommended} instead — {shift} minutes earlier — and the whole {duration}-minute walk should stay dry, back home by {until}.",
+    "notification_later": "Rain is expected during your {scheduled} walk. Wait until {recommended} — {shift} minutes later — and the whole {duration}-minute walk should stay dry, back home by {until}.",
+    "notification_shorter": "Rain is expected during your {scheduled} walk and there is no dry {duration}-minute window nearby. A shorter walk fits: set off at {recommended} and be back by {until} — {recommended_duration} dry minutes.",
     "notification_provisional": "The radar does not reach that far ahead yet, so this is a model estimate — I am still watching and will tell you if it changes.",
     "notification_preliminary": "Rain is possible around {scheduled}, but so far only the hourly weather models see it — no radar reaches your walk yet. Nothing to do for now: I will confirm or call it off once the radar can see it.",
     "notification_preliminary_channel": "Walk the dog: early notices",
-    "notification_no_dry_window": "Rain is expected around {scheduled} and there is no dry {duration}-minute window nearby. Take a raincoat.",
+    "notification_disputed": "One radar sees rain during your {scheduled} walk, the other sees none. Nothing certain, so walk as planned — a jacket would not hurt. I will tell you if both radars start to see it.",
+    "notification_no_dry_window": "Rain is expected during your {scheduled} walk and there is no dry {duration}-minute window nearby. Take a raincoat.",
     "walk_slot_all": "every day",
     "walk_slot_weekday": "Monday to Friday",
     "walk_slot_weekend": "Saturday and Sunday",
@@ -317,7 +318,8 @@
     "logbook_no_dry_window": "No dry window",
     "logbook_stand_down": "Walk as planned",
     "logbook_confirmed": "Still on — {recommended}",
-    "logbook_preliminary": "Rain possible — {scheduled}"
+    "logbook_preliminary": "Rain possible — {scheduled}",
+    "logbook_disputed": "Radars disagree — {scheduled}"
   },
   "services": {
     "walked": {

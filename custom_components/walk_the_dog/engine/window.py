@@ -107,6 +107,9 @@ class WindowVerdict:
     #: True when a radar nowcast reaches every slot of the window. False means the
     #: verdict rests on hourly models, which know *whether* far better than *when*.
     nowcast_covered: bool = False
+    #: True when the radars disagree about at least one slot. Such a slot is not
+    #: wet, so a disputed window can still be `dry` — dry by agreement it is not.
+    disputed: bool = False
 
     @property
     def has_data(self) -> bool:
@@ -223,6 +226,16 @@ class Recommendation:
         return self.scheduled.nowcast_covered
 
     @property
+    def disputed(self) -> bool:
+        """True when the walk looks dry only because the radars disagree about it.
+
+        One radar sees rain on the scheduled walk and another reaching the same
+        minutes does not. Not enough to move the walk or alert about it, too much to
+        call it dry and say nothing: the notifier turns it into one quiet notice.
+        """
+        return self.direction == DIRECTION_NONE and self.scheduled.disputed
+
+    @property
     def provisional(self) -> bool:
         """True when no radar reaches the window being recommended.
 
@@ -294,6 +307,7 @@ def evaluate_window(consensus: Consensus, start: datetime, duration: timedelta) 
         degraded=any(score.n_sources == 1 for score in covered),
         horizon_limited=horizon_limited,
         nowcast_covered=nowcast_covered,
+        disputed=any(score.disputed for score in covered),
     )
 
 

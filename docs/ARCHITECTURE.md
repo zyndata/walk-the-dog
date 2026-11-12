@@ -135,6 +135,16 @@ Python UA is rejected with 403, measured in phase 0).
    instead of seven, and it is the reason the request budget closes at all; the price is that a
    slot is scored from the first run that predicted it rather than from the latest. See
    `STATE.md`, phase 8, for why that trade is kept.
+   **Except the observation** (1.5.0): the newest `past` frame is sampled afresh and cached under
+   `observed:<path>`, so the +60 min extrapolation first cached under that path can no longer
+   stand in for what actually fell. One tile more per cycle, inside `hourly_cap()`; when the budget
+   cannot afford it, the forecast sample is used as before.
+   **And it is checked for a frozen feed:** its raw tile bytes are digested and compared with the
+   previous observation's. A *different* frame that repeats its predecessor byte for byte and
+   carries echo anywhere in the tile cannot be weather — on 2026-11-12 two hours of `past` frames
+   were one tile while the timestamps advanced, so by age the series looked fresh — and the
+   adapter reports `stale` with no series until the observation changes. An empty tile repeating
+   is dry weather and passes. The first observation of a run has nothing to compare with.
 2. Project home lat/lon to Web Mercator pixel coordinates at z=8: at 52° N one 256 px tile spans
    ~96.4 km (≈ 0.377 km/px), so the r ≤ 15 km disc spans ≤ 80 px and touches 1 tile in the
    common case, up to 4 at tile corners.
@@ -260,7 +270,9 @@ heavy} mapped to its mm/h lower bound (0.1 / 2.5 / 7.6):
 - `agreement(t) = |2·risk(t) − 1|` — 1 when unanimous either way, 0 at a 50/50 split
 - `confidence(t) = agreement(t) × cap(n_t)` where `n_t` = number of contributing sources and
   `cap` is the phase 0 degradation table: 3 → 1.0, 2 → 0.8, 1 → 0.5, 0 → slot has no data
-- a slot is **wet** when `risk(t) ≥ 0.5` (strict majority by weight)
+- a slot is **wet** when `risk(t) ≥ 0.5` (strict majority by weight) **and it is not disputed**
+- a slot is **disputed** when two or more radars reach it and some, but not all, of them vote
+  wet (since 1.5.0 — see below); a disputed slot is never wet
 
 **Inside the radar's reach only the radars vote** (1.3.1, after a live false alarm). On
 2026-11-02 both models forecast 0.1 mm/h — the smallest value Open-Meteo publishes, and exactly the
@@ -271,6 +283,17 @@ the radars' to decide. The models still appear in the per-source breakdown and s
 slot no radar reaches — a `later` window beyond the hour, the preliminary notice. `contributors`
 keeps listing every source that reached the slot (coverage, `n_t`, `degraded`); `voters` names the
 ones whose vote counted, and the displayed intensity is their weighted mean.
+
+**Where two radars reach a slot, they must agree** (1.5.0, after a second live false alarm). With
+only the radars voting, a slot both reach is one vote against one, and the weights merely decide
+who always wins: `librewxr` at 1.0 against a range-scaled `chmi` at 0.665 is risk 0.601 and
+confidence 0.20 whenever they split. On 2026-11-12 the split was a frozen OPERA composite's
+extrapolation (§ Frame sampling strategy) that nothing else saw, and a raincoat alert went out. So
+a split is not a verdict but its own state: the slot is **disputed** — not wet, so it moves no walk
+and sends no alert, and the window carries `disputed` so a walk left in place can be given one
+quiet notice (§ Coordinator scheduling). `risk` and `confidence` are computed exactly as before,
+which is why a disputed walk shows risk 0.601 next to `direction: none`. The models keep the plain
+weighted majority wherever they vote; they are too uncertain to break a tie between radars.
 
 Correlated sources never both contribute (phase 0 rule): the adapter registry enables at most
 one member of each correlated pair — concretely, `metno` is polled only while Open-Meteo is
@@ -465,6 +488,15 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
   alert follows at `T − E` and replaces the maybe through the shared tag. Neither counts as an
   alert for material-change purposes: `_notified` stays empty, so the first radar-backed alert is
   always news.
+- **The disputed notice** (1.5.0): when the scheduled walk is left in place only because the
+  radars disagree about it (`Recommendation.disputed`), one quiet message says so — same channel,
+  importance and interruption level as the preliminary notice, at `T − E` like any radar-backed
+  advice, once per walk and never after an alert. If both radars then see rain, the ordinary alert
+  follows and replaces it; nothing withdraws it otherwise. A disputed walk also blocks
+  `radar_clear`, whose "the radar expects no rain" would be false.
+- **Delivery priority** (1.5.0): every message except the two quiet ones goes out with
+  `priority: high` and `ttl: 0`. Measured on 2026-11-12: an alert fired at 12:43 reached an
+  Android phone at 12:57, held by Doze at FCM's normal priority.
 - **Notification dispatch** (`notifier.py`): evaluated on the cycle that lands on `T − E`, fires
   with the freshest coordinator data **only if** the scheduled window is radar-backed and not dry;
   afterwards
@@ -563,8 +595,9 @@ Purpose: never refetch or re-sample an already-processed frame; survive a HA res
 active window without a cold refetch. The cache stores **sampled results, never raw tiles or
 responses** — that is what keeps it tiny.
 
-- **Frame sample cache** (the persisted part): map `frame path` (string — the identity that
-  changes when a nowcast frame is re-issued) → `{slot_utc, mm_per_h}`. Shared by both image
+- **Frame sample cache** (the persisted part): map `frame path` (string; for LibreWXR the
+  frame's valid time, plus an `observed:`-prefixed key for the frame re-read as the observation)
+  → `{slot_utc, mm_per_h}`. Shared by both image
   sources — a path for LibreWXR, the full URL for CHMI — so their entries cannot collide. Bound:
   **48 entries, LRU** (LibreWXR 12 past + 6 nowcast = 18, CHMI one observed frame per 5-minute run;
   48 gives slack across runs). Persisted with `homeassistant.helpers.storage.Store` (version 1, key

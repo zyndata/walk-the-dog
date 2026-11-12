@@ -122,6 +122,25 @@ Switched off, nothing at all is said until a radar has seen the walk. The `walk_
 event fires for the preliminary notice too, with `preliminary: true`; an automation that acts on
 alerts will usually want to skip those.
 
+### When the radars disagree
+
+Where both radars reach the walk, they have to agree for it to count as rain (since 1.5.0). When
+one sees rain on the walk and the other sees none, the walk is not moved and no alert is sent;
+instead, at `T − earlier_margin`, one quiet message — same channel and importance as the
+preliminary notice, and sent whatever `preliminary_alert` is set to — says so:
+
+> One radar sees rain during your 18:00 walk, the other sees none. Nothing certain, so walk as
+> planned — a jacket would not hurt. I will tell you if both radars start to see it.
+
+If both radars then see rain, the ordinary alert follows and replaces it on the phone. The event
+carries `disputed: true`, and so does the sensor while the disagreement lasts.
+
+### How urgently a push travels
+
+Alerts, confirmations and all-clears are sent with `priority: high` and `ttl: 0`, so Android
+delivers them at once instead of holding them while the phone sleeps. The two maybes — the
+preliminary notice and the disputed one — keep the normal priority on their quiet channel.
+
 ### Shortening the walk
 
 Rain around the walk does not always mean there is nowhere to go. When nothing of the full
@@ -389,6 +408,7 @@ is saved; nothing reads it.
   "horizon_limited": false,
   "provisional": false,
   "radar_backed": true,
+  "disputed": false,
   "data_age_s": 0,
   "muted": false,
   "confirmation": false,
@@ -426,6 +446,7 @@ is saved; nothing reads it.
 | `horizon_limited` | bool | The walk reaches past what the sources forecast |
 | `provisional` | bool | No radar reaches the recommended window, so the timing rests on hourly models. An early answer the coordinator keeps re-checking, not a final one |
 | `radar_backed` | bool | A radar reaches every slot of the *scheduled* walk. Since 1.3.0 an alert is only ever decided while this holds (or after it has held once for this walk); everything before it is at most the preliminary notice |
+| `disputed` | bool | The walk was left in place only because the radars disagree about it: one sees rain, another reaching the same minutes does not ([When the radars disagree](#when-the-radars-disagree)). Always `false` unless `direction` is `none` |
 | `data_age_s` | int \| `null` | Age of the freshest source that voted |
 | `muted` | bool | Nobody was reached at all. One phone being skipped does not set it; an entry with an always-notified device effectively never does |
 | `confirmation` | bool | This is the pre-departure reassurance rather than a new recommendation |

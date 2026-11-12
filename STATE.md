@@ -2403,3 +2403,88 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Released as [`v1.4.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.4.0)**
   (2026-11-02), with CI, Validate and Release green, published, not a draft and not a
   pre-release.
+
+## Change — a frozen LibreWXR feed sent a false raincoat alert (2026-11-12, out of phase)
+
+- **Status:** done, not yet released (`[Unreleased]` in `CHANGELOG.md`)
+- **Date:** 2026-11-12
+- **Why it exists:** on 2026-11-12 the maintainer got *"Rain is expected around 12:45 and there
+  is no dry 15-minute window nearby. Take a raincoat."* with no rain on any radar map. Read from
+  the live instance's recorder and frame cache: for the whole hour CHMI, KNMI and ICON-EU said
+  dry, LibreWXR alone said 0.18 mm/h (11 dBZ). Four faults lined up. **Deviation from `PLAN.md`,
+  recorded here before proceeding.**
+  1. **LibreWXR's observation was frozen.** Every `past` frame of the last two hours was the
+     byte-identical tile (same ETag) — the composite had stopped updating, while the frame
+     timestamps kept advancing, so the series looked fresh (age 180–300 s). Its nowcast was an
+     extrapolation of that frozen image, decaying 23 → 11 dBZ over the hour.
+  2. **The observed frame is never re-read** (open since phase 8). Each slot kept the value
+     first sampled at +60 min lead, so the cache held 0.18 mm/h for every slot all hour.
+  3. **LibreWXR always wins a radar disagreement.** Since 1.3.1 only radars vote where one
+     reaches; at 1.0 vs a range-scaled CHMI 0.665, a lone LibreWXR "wet" is risk 0.601 ≥ 0.5,
+     confidence 0.20, and nothing gates on confidence.
+  4. **The push was 14 minutes late** (event 12:43, phone 12:57): alerts go out at normal FCM
+     priority, which Android may hold in Doze. And the sentence names the *walk* time as if it
+     were the time rain is expected.
+- **Plan (maintainer's choices):** the radars alone keep voting wherever one reaches — the hourly
+  models are too uncertain for that, and stay as they are beyond the radar's reach.
+  1. **Detect a frozen LibreWXR:** an observed frame whose tile bytes equal the previous
+     observed frame's *and* that carries echo marks LibreWXR stale for the cycle (an empty tile
+     repeating is just dry weather). At a cold start the previous past frame is fetched once to
+     have something to compare with.
+  2. **Re-read the observed frame every cycle**, cached under its own key so a forecast sample
+     of the same path cannot stand in for it; one extra tile a cycle, inside `hourly_cap()`.
+  3. **Radars must agree for a slot to be wet.** Where two or more radars reach a slot and they
+     disagree, the slot is *disputed*: not wet (no alert, no move), and a disputed scheduled walk
+     gets one quiet notice — "one radar sees rain, the other does not" — on the preliminary
+     notice's low-importance channel (maintainer's choice of: quiet notice / silence / no change).
+  4. **Alerts at high priority** (`priority: high`, `ttl: 0`), quiet notices unchanged; the
+     alert sentences say "during your {scheduled} walk".
+- **What was built:**
+  - `engine/consensus.py` — `SlotScore.disputed`: some but not all of the radars reaching a slot
+    vote wet; `wet` now also requires `not disputed`. Risk and confidence formulas unchanged.
+  - `engine/window.py` — `WindowVerdict.disputed` (any covered slot disputed) and
+    `Recommendation.disputed` (direction `none` and the scheduled window disputed).
+  - `sources/librewxr.py` — the newest `past` frame is sampled afresh under
+    `observed:<path>` (falls back to the forecast sample when the budget cannot afford it);
+    `_sample_frame` returns a `FrameSample` with a BLAKE2 digest of the raw tiles and, for the
+    observation only, whether any tile pixel is opaque; `_track_observation` sets `frozen` when a
+    new observation path repeats the previous digest with echo, and the cycle then returns no
+    series and status `stale` with `FROZEN_DETAIL`.
+  - `notifier.py` — `TEXT_DISPUTED`, sent once per walk at `T − E` while `_notified` is empty, on
+    the preliminary channel (`QUIET_KEYS`); `radar_clear` is not sent for a disputed walk; every
+    non-quiet push carries `priority: high`, `ttl: 0`.
+  - `coordinator.py` — `disputed` in the sensor attributes and event payload.
+  - Strings (en, pl): `notification_disputed`, `logbook_disputed`; the four alert sentences now
+    name the walk ("Rain is expected during your 12:45 walk" / "Na spacer o 12:45 zapowiada się
+    deszcz") instead of reading as the time rain starts.
+  - Docs: ARCHITECTURE.md § Consensus scoring, § Frame sampling strategy, § Coordinator
+    scheduling, § Frame cache; CONFIG.md § When the radars disagree, § How urgently a push
+    travels, event payload; DATA_SOURCES.md LibreWXR risk cell.
+  - 17 new tests (consensus 4, window 3, LibreWXR 4, notifier 6); the reported-case ones fail on
+    1.4.0. **624 tests green**, `ruff` clean.
+- **Decisions:**
+  - **One repeat is enough to call the feed frozen.** Real echo is never byte-identical ten
+    minutes later; a false positive costs one cycle in which CHMI decides alone.
+  - **No extra request at a cold start to have something to compare with.** The window opens
+    30 min before `T − E`, so the third cycle at the latest has caught a freeze before any alert.
+  - **The cache schema is unchanged** — a prefixed key instead of a run field, so no migration;
+    `MAX_ENTRIES` stays 48, as superseded observations are the least recently used entries.
+  - **The quiet notice reuses the preliminary channel** — renaming the channel would orphan the
+    one users already tuned in Android settings; its name ("early notices") fits less well.
+  - **The disputed notice is never withdrawn** — it promises only to escalate; a second message
+    to say "still nothing" would be noise.
+  - **iOS interruption level left alone** — `time-sensitive` breaks through Focus modes, which
+    nobody asked for; the delay was Android's Doze.
+  - **Radars only, models as they were** (maintainer's call): no model tie-breaker.
+- **Open questions carried forward:**
+  - **A disputed slot counts as dry in the search.** A `later` move can land on a window one
+    radar sees rain in. Preferring agreed-dry candidates first would need a second pass.
+  - **A disputed walk shows risk 0.601 beside `direction: none`** — honest (risk is a weighted
+    fraction), but it reads oddly in the sensor attributes.
+  - **A restart inside the window after `T − E`** has no previous observation to compare with, so
+    one cycle may trust a frozen feed; with the dispute rule a lone LibreWXR can no longer alert
+    where CHMI reaches, which leaves only locations outside CHMI's composite exposed.
+  - **A frozen *empty* tile still reads dry**, as does a transparent outage — unchanged from 1.3.1.
+  - **The +10 min nowcast frame is still never re-read** — only the observation is.
+  - README/info.md screenshots and their alt text show the old "rain is expected around" wording.
+  - Live verification on the maintainer's instance once released.

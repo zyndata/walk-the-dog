@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A stuck rain radar can no longer send a false alert.** One of the two radars sometimes stops
+  updating while still looking up to date, and keeps showing the same old rain shower for hours.
+  On 2026-11-12 that sent "take a raincoat" for a walk with no rain anywhere near. A radar picture
+  that does not change at all from one frame to the next is now recognised as stuck and ignored
+  until it moves again.
+- **The radar's view of the present is read fresh.** The integration used to keep the radar's
+  hour-old guess about "now" instead of looking at what the radar actually saw. It now reads the
+  latest real radar picture every time.
+- **Notifications arrive on time.** Android could hold an alert for a quarter of an hour while
+  the phone was asleep; alerts are now sent as urgent. The quiet "maybe" messages stay quiet.
+- **The alert says which time it means.** "Rain is expected around 12:45" named the walk time,
+  not the time rain was expected; it now reads "Rain is expected during your 12:45 walk".
+
+### Changed
+
+- **Both radars have to see the rain.** When one radar sees rain on your walk and the other sees
+  none, the walk is no longer moved and no alert is sent. Instead you get one quiet message saying
+  the radars disagree, and the real alert follows if both start to see the rain. The weather
+  models still have no say wherever a radar can see.
+
 ## [1.4.0] - 2026-11-02
 
 ### Added

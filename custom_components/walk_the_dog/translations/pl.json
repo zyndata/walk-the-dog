@@ -287,13 +287,14 @@
   },
   "common": {
     "notification_title": "Idź już z psem",
-    "notification_earlier": "Deszcz spodziewany około {scheduled}. Wyjdź o {recommended} — {shift} min wcześniej — a cały {duration}-minutowy spacer powinien być suchy; z powrotem w domu o {until}.",
-    "notification_later": "Deszcz spodziewany około {scheduled}. Poczekaj do {recommended} — {shift} min później — a cały {duration}-minutowy spacer powinien być suchy; z powrotem w domu o {until}.",
-    "notification_shorter": "Deszcz spodziewany około {scheduled} i nie ma w pobliżu suchego {duration}-minutowego okna. Zmieści się krótszy spacer: wyjdź o {recommended} i wróć do {until} — {recommended_duration} minut bez deszczu.",
+    "notification_earlier": "Na spacer o {scheduled} zapowiada się deszcz. Wyjdź o {recommended} — {shift} min wcześniej — a cały {duration}-minutowy spacer powinien być suchy; z powrotem w domu o {until}.",
+    "notification_later": "Na spacer o {scheduled} zapowiada się deszcz. Poczekaj do {recommended} — {shift} min później — a cały {duration}-minutowy spacer powinien być suchy; z powrotem w domu o {until}.",
+    "notification_shorter": "Na spacer o {scheduled} zapowiada się deszcz i nie ma w pobliżu suchego {duration}-minutowego okna. Zmieści się krótszy spacer: wyjdź o {recommended} i wróć do {until} — {recommended_duration} minut bez deszczu.",
     "notification_provisional": "Radar nie sięga jeszcze tak daleko, więc to szacunek z modelu — obserwuję dalej i dam znać, jeśli coś się zmieni.",
     "notification_preliminary": "Około {scheduled} możliwy deszcz, ale na razie widzą go tylko godzinowe modele pogody — żaden radar nie sięga jeszcze Twojego spaceru. Na razie nic nie trzeba robić: potwierdzę albo odwołam, gdy radar go zobaczy.",
     "notification_preliminary_channel": "Idź już z psem: wczesne ostrzeżenia",
-    "notification_no_dry_window": "Deszcz spodziewany około {scheduled} i nie ma w pobliżu suchego {duration}-minutowego okna. Weź kurtkę przeciwdeszczową.",
+    "notification_disputed": "Jeden radar widzi deszcz w czasie spaceru o {scheduled}, drugi nie widzi nic. Nic pewnego, więc idź o zwykłej porze — kurtka nie zaszkodzi. Dam znać, jeśli deszcz zobaczą oba radary.",
+    "notification_no_dry_window": "Na spacer o {scheduled} zapowiada się deszcz i nie ma w pobliżu suchego {duration}-minutowego okna. Weź kurtkę przeciwdeszczową.",
     "walk_slot_all": "codziennie",
     "walk_slot_weekday": "od poniedziałku do piątku",
     "walk_slot_weekend": "w soboty i niedziele",
@@ -317,7 +318,8 @@
     "logbook_no_dry_window": "Brak suchego okna",
     "logbook_stand_down": "Spacer o zwykłej porze",
     "logbook_confirmed": "Plan aktualny — {recommended}",
-    "logbook_preliminary": "Możliwy deszcz — {scheduled}"
+    "logbook_preliminary": "Możliwy deszcz — {scheduled}",
+    "logbook_disputed": "Radary się różnią — {scheduled}"
   },
   "services": {
     "walked": {

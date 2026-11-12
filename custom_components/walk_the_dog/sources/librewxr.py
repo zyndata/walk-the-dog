@@ -13,16 +13,29 @@ STATE.md): the renderer encodes reflectivity as
 `librewxr/colors/color_table.csv`, whose row `i` is grey `#iiiiii` at
 `dBZ = i - 32`. So the rendered grey level *is* `dBZ + 32`, and grey 0 is both
 "no echo" and "no data" (fully transparent, alpha 0).
+
+The observed frame is read afresh, not taken from the cache (since 1.5.0). A
+frame's path is its own valid time, so the same path is first a +60 min
+extrapolation and an hour later the observation; caching by path alone kept the
+extrapolation for good. The observation is cached under a key of its own instead.
+
+And it is compared with the observation before it. On 2026-11-12 the composite
+stopped updating while the frame timestamps kept advancing: every `past` frame of
+two hours was the same tile, byte for byte, and the nowcast went on extrapolating
+it. A frame that repeats its predecessor exactly *and carries echo* cannot be
+weather — real echo moves every ten minutes — so the source is reported stale
+until the observation changes. An empty tile repeating is just dry weather.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
 import math
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 from aiohttp import ClientSession, ClientTimeout
@@ -101,6 +114,24 @@ DBZ_OFFSET = 32  # grey = dBZ + 32
 
 #: Spatial aggregation over the disc: robust against single-pixel radar speckle.
 PERCENTILE = 90
+
+#: Cache key prefix for a frame sampled as the observation rather than as a
+#: forecast. The path alone names both.
+OBSERVED_KEY_PREFIX = "observed:"
+
+#: Status detail while the observation repeats itself.
+FROZEN_DETAIL = "radar composite frozen: the observed frame repeats the previous one"
+
+
+class FrameSample(NamedTuple):
+    """One frame reduced to the disc's value, plus what identifies the frame itself."""
+
+    mm_per_h: float
+    #: Digest of the raw tile bytes — equal digests are the same rendered frame.
+    fingerprint: bytes
+    #: Whether any pixel of the fetched tiles carries echo, inside the disc or not.
+    has_echo: bool
+
 
 _TIMEOUT_S = 20
 _METERS_PER_PIXEL_EQUATOR = 156543.03392804097
@@ -187,6 +218,15 @@ class LibreWxrAdapter:
         self._mask_key: str | None = None
         self._last: FetchResult | None = None
         self._last_fetch_at: datetime | None = None
+        # The last observed frame read, and whether it repeated the one before it.
+        self._observed_path: str | None = None
+        self._observed_print: bytes | None = None
+        self._frozen = False
+
+    @property
+    def frozen(self) -> bool:
+        """True while the composite's observation repeats itself with echo in it."""
+        return self._frozen
 
     # --- adapter protocol ---------------------------------------------------
 
@@ -304,28 +344,51 @@ class LibreWxrAdapter:
             raise RuntimeError("hourly request budget exhausted")
         index = await self._get_json(session, BASE_URL + WEATHER_MAPS_PATH)
         host, frames = parse_weather_maps(index)
+        observed_path = newest_past_path(index)
 
         mask = self._disc_mask(geometry)
         issued_at = frames[0][0]  # newest past frame == the current observation
         slots: list[tuple[datetime, float]] = []
 
         for slot_time, path in frames:
-            cached = self._cache.get(path) if self._cache else None
+            observed = path == observed_path
+            key = OBSERVED_KEY_PREFIX + path if observed else path
+            cached = self._cache.get(key) if self._cache else None
             if cached is not None:
                 slots.append((slot_time, cached))
                 continue
             if self._budget.remaining(now) < mask.tile_count:
                 # Out of budget: stop sampling rather than exceed it. Whatever was
-                # already collected still forms a usable (shorter) series.
+                # already collected still forms a usable (shorter) series — and an
+                # observation we cannot afford to re-read still has its forecast.
+                fallback = self._cache.get(path) if observed and self._cache else None
+                if fallback is not None:
+                    slots.append((slot_time, fallback))
+                    continue
                 _LOGGER.debug("LibreWXR budget reached; %d frames sampled", len(slots))
                 break
-            value = await self._sample_frame(session, host, path, mask, now)
+            sample = await self._sample_frame(session, host + path, mask, now, inspect=observed)
+            if observed:
+                self._track_observation(path, sample)
             if self._cache is not None:
-                self._cache.set(path, slot_time, value)
-            slots.append((slot_time, value))
+                self._cache.set(key, slot_time, sample.mm_per_h)
+            slots.append((slot_time, sample.mm_per_h))
 
         if not slots:
             raise RuntimeError("no frames could be sampled")
+        if self._frozen:
+            _LOGGER.debug("LibreWXR observation %s repeats the previous one", observed_path)
+            return FetchResult(
+                statuses=(
+                    SourceStatus(
+                        SOURCE_LIBREWXR,
+                        STATE_STALE,
+                        age_s=max(0, int((now - issued_at).total_seconds())),
+                        contributed=False,
+                        detail=FROZEN_DETAIL,
+                    ),
+                ),
+            )
 
         series = SourceSeries(
             source_id=SOURCE_LIBREWXR,
@@ -349,29 +412,48 @@ class LibreWxrAdapter:
             ),
         )
 
+    def _track_observation(self, path: str, sample: FrameSample) -> None:
+        """Compare a newly read observation with the previous one.
+
+        Only a *different* frame can repeat its predecessor; re-reading the same path
+        (no cache) says nothing either way. The first observation of a run has nothing
+        to compare with, so the adapter starts out trusting the feed.
+        """
+        if self._observed_path is not None and path != self._observed_path:
+            self._frozen = sample.has_echo and sample.fingerprint == self._observed_print
+        self._observed_path = path
+        self._observed_print = sample.fingerprint
+
     async def _sample_frame(
         self,
         session: ClientSession,
-        host: str,
-        path: str,
+        frame_url: str,
         mask: DiscMask,
         now: datetime,
-    ) -> float:
+        *,
+        inspect: bool = False,
+    ) -> FrameSample:
         """Reduce one frame to a single mm/h value over the disc.
 
         Tiles are fetched and decoded one at a time and released immediately, so
         peak transient memory is one decoded 256x256 tile regardless of frame count.
+        `inspect` also asks whether the tiles carry any echo at all, which costs a
+        whole-tile alpha pass and is only needed for the observation.
         """
         collected: list[np.ndarray] = []
+        digest = hashlib.blake2b(digest_size=16)
+        has_echo = False
         for tile_x, tile_y, (ry0, ry1, rx0, rx1), tile_mask in mask.tiles:
             url = (
-                f"{host}{path}/{TILE_SIZE}/{mask.zoom}/{tile_x}/{tile_y}"
+                f"{frame_url}/{TILE_SIZE}/{mask.zoom}/{tile_x}/{tile_y}"
                 f"/{COLOR_SCHEME}/{SMOOTH}_{SNOW}.png"
             )
             if not self._budget.consume(now):
                 raise RuntimeError("hourly request budget exhausted")
             raw = await self._get_bytes(session, url)
-            grey = _decode_grey(raw, (rx0, ry0, rx1, ry1))
+            digest.update(raw)
+            grey, echo = _decode_grey(raw, (rx0, ry0, rx1, ry1), inspect=inspect)
+            has_echo = has_echo or echo
             collected.append(grey[tile_mask])
             del grey, raw
 
@@ -380,7 +462,7 @@ class LibreWxrAdapter:
         # maps back to a real dBZ step instead of interpolating between palette codes.
         grey_p90 = int(np.percentile(values, PERCENTILE, method="nearest"))
         del values, collected
-        return grey_to_mm_per_h(grey_p90)
+        return FrameSample(grey_to_mm_per_h(grey_p90), digest.digest(), has_echo)
 
     async def _get_json(self, session: ClientSession, url: str) -> Any:
         async with session.get(
@@ -402,8 +484,13 @@ class LibreWxrAdapter:
         return {"User-Agent": self._user_agent, "Accept-Encoding": "gzip"}
 
 
-def _decode_grey(raw: bytes, box: tuple[int, int, int, int]) -> np.ndarray:
+def _decode_grey(
+    raw: bytes, box: tuple[int, int, int, int], *, inspect: bool = False
+) -> tuple[np.ndarray, bool]:
     """Decode the `box` (left, top, right, bottom) of a scheme-0 tile to uint8 grey.
+
+    Also returns, when `inspect` is set, whether any pixel of the whole tile is
+    opaque — i.e. carries echo; False otherwise.
 
     Transparent pixels become 0. Scheme 0 is a pure grey ramp, so the red channel
     *is* the grey level — reading it directly avoids the rounding that a luminance
@@ -415,9 +502,10 @@ def _decode_grey(raw: bytes, box: tuple[int, int, int, int]) -> np.ndarray:
     """
     with Image.open(io.BytesIO(raw)) as image:
         rgba = np.asarray(image.crop(box).convert("RGBA"))
+        has_echo = inspect and image.convert("RGBA").getchannel("A").getbbox() is not None
     grey = np.where(rgba[..., 3] > 0, rgba[..., 0], 0).astype(np.uint8)
     del rgba
-    return grey
+    return grey, has_echo
 
 
 def parse_weather_maps(index: Any) -> tuple[str, list[tuple[datetime, str]]]:
@@ -445,6 +533,12 @@ def parse_weather_maps(index: Any) -> tuple[str, list[tuple[datetime, str]]]:
     return str(host), frames
 
 
+def newest_past_path(index: Any) -> str | None:
+    """Path of the current observation in a parsed-OK index, or None if it has none."""
+    past = [f for f in index["radar"].get("past") or [] if _is_frame(f)]
+    return str(max(past, key=lambda f: f["time"])["path"]) if past else None
+
+
 def _is_frame(frame: Any) -> bool:
     return (
         isinstance(frame, dict)
@@ -456,12 +550,16 @@ def _is_frame(frame: Any) -> bool:
 
 __all__ = [
     "CYCLES_PER_HOUR",
+    "FROZEN_DETAIL",
+    "OBSERVED_KEY_PREFIX",
     "DiscMask",
+    "FrameSample",
     "LibreWxrAdapter",
     # Re-exported: the Marshall-Palmer conversion moved to `base` when a second
     # radar source needed it, and this keeps the phase 3 import path working.
     "dbz_to_mm_per_h",
     "grey_to_mm_per_h",
     "hourly_cap",
+    "newest_past_path",
     "parse_weather_maps",
 ]

@@ -25,11 +25,13 @@ from custom_components.walk_the_dog.const import (
 from custom_components.walk_the_dog.sources.base import (
     STATE_FAILED,
     STATE_OK,
+    STATE_STALE,
     SampleGeometry,
 )
 from custom_components.walk_the_dog.sources.librewxr import (
     BASE_URL,
     COLOR_SCHEME,
+    FROZEN_DETAIL,
     MAX_REQUESTS_PER_HOUR,
     MIN_INTERVAL_S,
     NOWCAST_FRAMES,
@@ -566,3 +568,120 @@ async def test_the_cadence_shifts_onto_the_publications_and_stays_there(
 
     assert not adapter.should_fetch(aligned + timedelta(seconds=MIN_INTERVAL_S // 2))
     assert adapter.should_fetch(NEXT_PAST + timedelta(seconds=MIN_INTERVAL_S) + settle)
+
+
+# --- 1.5.0: the observation is read afresh, and checked for a frozen feed ------
+
+
+def _empty_tile() -> bytes:
+    """A tile with no echo anywhere — what a dry hour looks like."""
+    buffer = io.BytesIO()
+    Image.new("RGBA", (TILE_SIZE, TILE_SIZE), (0, 0, 0, 0)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+async def test_the_observation_is_read_afresh_not_taken_from_its_forecast(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    wet_geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """A frame's path is its valid time, so it is a forecast first and an observation later.
+
+    Cached by path alone, the +10 min extrapolation stood in for what then actually
+    fell, for good. The observation is re-read — one tile more a cycle, not seven.
+    """
+    cache = SampleCache(wet_geometry.key)
+    adapter = LibreWxrAdapter(UA, cache=cache)
+    session = async_get_clientsession(hass)
+    _mock_frames(aioclient_mock, wet_geometry, load_bytes("librewxr", "tile_dry.png"))
+    first = await adapter.fetch(session, wet_geometry, now)
+    assert first.series[0].slots[1][1] == 0.0  # the +10 min forecast: dry
+
+    aioclient_mock.clear_requests()
+    _mock_frames(aioclient_mock, wet_geometry, load_bytes("librewxr", "tile_wet.png"), shift=STEP)
+    later = await adapter.fetch(session, wet_geometry, now)
+
+    # The same frame, now observed: it rained after all.
+    assert later.series[0].slots[0] == (NEXT_PAST, pytest.approx(3.646332, abs=1e-6))
+    # Index, the observation, and the one newly published nowcast frame.
+    assert len(aioclient_mock.mock_calls) == 3
+
+
+async def test_a_frozen_composite_is_reported_stale_not_believed(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    wet_geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """The reported case: two hours of `past` frames, every one the same tile.
+
+    The timestamps kept moving, so by age the series was fresh; its echo had not
+    moved in hours, which real weather never does. It speaks for nothing.
+    """
+    adapter = LibreWxrAdapter(UA, cache=SampleCache(wet_geometry.key))
+    session = async_get_clientsession(hass)
+    wet = load_bytes("librewxr", "tile_wet.png")
+    _mock_frames(aioclient_mock, wet_geometry, wet)
+    assert (await adapter.fetch(session, wet_geometry, now)).series
+
+    aioclient_mock.clear_requests()
+    _mock_frames(aioclient_mock, wet_geometry, wet, shift=STEP)
+    frozen = await adapter.fetch(session, wet_geometry, now)
+
+    assert adapter.frozen
+    assert frozen.series == ()
+    assert frozen.statuses[0].state == STATE_STALE
+    assert not frozen.statuses[0].contributed
+    assert frozen.statuses[0].detail == FROZEN_DETAIL
+    assert adapter.cached(now).series == ()
+
+    # The composite moves again: so does the source.
+    aioclient_mock.clear_requests()
+    _mock_frames(
+        aioclient_mock, wet_geometry, load_bytes("librewxr", "tile_dry.png"), shift=2 * STEP
+    )
+    thawed = await adapter.fetch(session, wet_geometry, now)
+
+    assert not adapter.frozen
+    assert thawed.ok
+    assert thawed.series
+
+
+async def test_an_empty_sky_repeating_itself_is_just_dry_weather(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """With no echo for a hundred kilometres, every frame is the same empty tile."""
+    adapter = LibreWxrAdapter(UA, cache=SampleCache(geometry.key))
+    session = async_get_clientsession(hass)
+    _mock_frames(aioclient_mock, geometry, _empty_tile())
+    await adapter.fetch(session, geometry, now)
+
+    aioclient_mock.clear_requests()
+    _mock_frames(aioclient_mock, geometry, _empty_tile(), shift=STEP)
+    result = await adapter.fetch(session, geometry, now)
+
+    assert not adapter.frozen
+    assert result.ok
+    assert result.series[0].slots[0][1] == 0.0
+
+
+async def test_the_first_observation_has_nothing_to_be_frozen_against(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    wet_geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """Re-reading the same frame (no cache) is not a repeat: there is no next frame yet."""
+    adapter = LibreWxrAdapter(UA)
+    session = async_get_clientsession(hass)
+    _mock_frames(aioclient_mock, wet_geometry, load_bytes("librewxr", "tile_wet.png"))
+
+    await adapter.fetch(session, wet_geometry, now)
+    again = await adapter.fetch(session, wet_geometry, now + timedelta(minutes=10))
+
+    assert not adapter.frozen
+    assert again.series

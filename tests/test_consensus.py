@@ -308,3 +308,54 @@ def test_no_sources_at_all_scores_nothing() -> None:
 def _status(consensus, source_id):
     """The refined status the engine assigned to one source."""
     return next(status for status in consensus.statuses if status.source_id == source_id)
+
+
+# --- 1.5.0: two radars must agree ------------------------------------------
+
+
+def test_two_radars_that_disagree_dispute_the_slot_instead_of_calling_rain() -> None:
+    """The reported case: LibreWXR alone sees drizzle, CHMI sees nothing.
+
+    By weight alone LibreWXR's 1.0 beats CHMI's 0.95 every time — risk 0.51, wet. A
+    one-against-one vote is not a forecast, so the slot is disputed and not wet.
+    """
+    consensus = _consensus([_radar([0.2] * 3), _radar([0.0] * 3, source_id=SOURCE_CHMI)])
+    slot = consensus.at(T)
+
+    assert slot.risk == pytest.approx(1.0 / (1.0 + 0.95))
+    assert slot.disputed
+    assert not slot.wet
+
+
+def test_two_radars_that_agree_on_rain_call_it() -> None:
+    """Agreement is all it takes; the models, dry or not, still have no say."""
+    consensus = _consensus(
+        [
+            _radar([0.2] * 3),
+            _radar([0.3] * 3, source_id=SOURCE_CHMI),
+            _hourly(SOURCE_ICON_EU, 0.0),
+        ]
+    )
+    slot = consensus.at(T)
+
+    assert slot.wet
+    assert not slot.disputed
+    assert slot.risk == 1.0
+
+
+def test_a_lone_radar_still_decides_on_its_own() -> None:
+    """Outside the CHMI composite LibreWXR is the only radar: nothing to dispute with."""
+    consensus = _consensus([_radar([0.2] * 3), _hourly(SOURCE_ICON_EU, 0.0)])
+    slot = consensus.at(T)
+
+    assert slot.wet
+    assert not slot.disputed
+
+
+def test_the_models_keep_the_weighted_majority_beyond_the_radar() -> None:
+    """Disagreeing models are a weighted vote as before, never a dispute."""
+    consensus = _consensus([_hourly(SOURCE_KNMI, 0.5), _hourly(SOURCE_ICON_EU, 0.0)])
+    slot = consensus.at(T)
+
+    assert slot.wet
+    assert not slot.disputed

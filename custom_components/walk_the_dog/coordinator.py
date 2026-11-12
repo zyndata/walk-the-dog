@@ -160,6 +160,7 @@ class WalkData:
             "horizon_limited": False,
             "provisional": False,
             "radar_backed": False,
+            "disputed": False,
             "sources": [],
             "data_age_s": None,
         }
@@ -193,6 +194,9 @@ class WalkData:
                 # A radar reaches every minute of the scheduled walk — the condition
                 # for an alert to be sent at all (docs/CONFIG.md § Event payload).
                 "radar_backed": recommendation.radar_backed,
+                # The walk looks dry only because the radars disagree about it: one
+                # sees rain, another does not (docs/CONFIG.md § Event payload).
+                "disputed": recommendation.disputed,
                 "sources": [_source_payload(source) for source in recommendation.sources],
                 "data_age_s": _freshness_s(recommendation.sources),
             }

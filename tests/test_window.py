@@ -18,6 +18,7 @@ import pytest
 from custom_components.walk_the_dog.const import (
     INTENSITY_THRESHOLD_LIGHT,
     INTENSITY_THRESHOLD_MODERATE,
+    SOURCE_CHMI,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
@@ -817,3 +818,38 @@ def test_radar_backed_rain_can_still_point_to_a_model_only_window() -> None:
     assert recommendation.direction == DIRECTION_LATER
     assert recommendation.radar_backed
     assert recommendation.provisional
+
+
+# --- 1.5.0: a walk the radars disagree about ---------------------------------
+
+
+def test_a_walk_the_radars_disagree_about_stays_put_and_says_so() -> None:
+    """LibreWXR sees rain on the walk, CHMI does not: no move, but not a clean dry either."""
+    wet = _pattern(SCHEDULED_INDEX, SCHEDULED_INDEX + 1)
+    recommendation = _recommend(
+        _consensus({SOURCE_LIBREWXR: wet, SOURCE_CHMI: _pattern()}), now=NOW
+    )
+
+    assert recommendation.direction == DIRECTION_NONE
+    assert recommendation.scheduled.dry
+    assert recommendation.scheduled.disputed
+    assert recommendation.disputed
+
+
+def test_an_agreed_dry_walk_is_not_disputed() -> None:
+    """Only a split counts; two radars seeing nothing is the ordinary dry walk."""
+    recommendation = _recommend(
+        _consensus({SOURCE_LIBREWXR: _pattern(), SOURCE_CHMI: _pattern()}), now=NOW
+    )
+
+    assert recommendation.direction == DIRECTION_NONE
+    assert not recommendation.disputed
+
+
+def test_a_dispute_elsewhere_does_not_mark_a_moved_walk() -> None:
+    """`disputed` speaks for a walk left where it was, never for advice to move it."""
+    both = _pattern(SCHEDULED_INDEX)
+    recommendation = _recommend(_consensus({SOURCE_LIBREWXR: both, SOURCE_CHMI: both}), now=NOW)
+
+    assert recommendation.direction != DIRECTION_NONE
+    assert not recommendation.disputed

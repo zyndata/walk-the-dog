@@ -172,6 +172,23 @@ PRELIMINARY_IMPORTANCE: Final = "low"
 #: iOS's spelling of the same idea: delivered to the list, no sound, no wake.
 PRELIMINARY_INTERRUPTION: Final = "passive"
 
+#: The radars disagree about the scheduled walk: one sees rain, another reaching
+#: the same minutes does not. Too little to move the walk, too much to say nothing
+#: (since 1.5.0) — so it is said once, quietly, like the models' maybe.
+TEXT_DISPUTED: Final = "disputed"
+
+#: The messages that are a maybe rather than advice. They share the preliminary
+#: notice's quiet channel — renaming that channel would leave the user's existing
+#: one orphaned in the phone's settings — and keep the default delivery priority.
+QUIET_KEYS: Final = frozenset({TEXT_PRELIMINARY, TEXT_DISPUTED})
+
+#: Delivery for everything else. Measured on 2026-11-12: an alert fired at 12:43
+#: reached an Android phone at 12:57, held by Doze at FCM's normal priority; advice
+#: about a walk minutes away is worthless a quarter of an hour late. `ttl: 0` asks
+#: FCM to deliver now or not at all, which is what makes `high` stick.
+ALERT_PRIORITY: Final = "high"
+ALERT_TTL: Final = 0
+
 #: The shapes the optional confirmation takes shortly before setting off: the plan
 #: still stands, or the rain has gone and the walk is back to its normal time. A
 #: shortened plan gets its own wording — "still on" must not quietly drop the one
@@ -197,6 +214,7 @@ LOGBOOK_KEYS: Final[dict[str, str]] = {
     TEXT_CONFIRMED_NO_DRY_WINDOW: DIRECTION_NO_DRY_WINDOW,
     TEXT_STAND_DOWN: TEXT_STAND_DOWN,
     TEXT_PRELIMINARY: TEXT_PRELIMINARY,
+    TEXT_DISPUTED: TEXT_DISPUTED,
     # Withdrawing a maybe reads, in a list, exactly like any other all-clear.
     TEXT_RADAR_CLEAR: TEXT_STAND_DOWN,
 }
@@ -215,7 +233,9 @@ CONFIRMATION_KEYS: Final = frozenset(
 #: for the whole-home logbook, where a record of every message sent is the point:
 #: Home Assistant renders every instance of an event type it has been taught, so an
 #: alert cannot be silently dropped — only filed somewhere else.
-LOGGED_UNDER_ENTITY: Final = frozenset({TEXT_STAND_DOWN, TEXT_PRELIMINARY, TEXT_RADAR_CLEAR})
+LOGGED_UNDER_ENTITY: Final = frozenset(
+    {TEXT_STAND_DOWN, TEXT_PRELIMINARY, TEXT_DISPUTED, TEXT_RADAR_CLEAR}
+)
 
 #: Label on the one action button the push carries.
 TEXT_ACTION_WALKED: Final = "action_walked"
@@ -321,6 +341,7 @@ class WalkNotifier:
         self._confirmed = False
         self._radar_seen = False
         self._preliminary_sent = False
+        self._disputed_sent = False
         self._cleared = False
 
     @property
@@ -335,6 +356,7 @@ class WalkNotifier:
         self._confirmed = False
         self._radar_seen = False
         self._preliminary_sent = False
+        self._disputed_sent = False
         self._cleared = False
 
     def has_spoken(self, walk_start: datetime | None) -> bool:
@@ -348,7 +370,7 @@ class WalkNotifier:
         return (
             walk_start is not None
             and walk_start == self._walk_start
-            and (self._notified is not None or self._preliminary_sent)
+            and (self._notified is not None or self._preliminary_sent or self._disputed_sent)
         )
 
     def away_entity_for(self, target: WalkTarget) -> str | None:
@@ -480,13 +502,17 @@ class WalkNotifier:
             await self._async_dispatch(data, recommendation, target, key=None)
             return
 
+        if self._disputed_due(recommendation, now):
+            self._disputed_sent = True
+            await self._async_dispatch(data, recommendation, target, key=TEXT_DISPUTED)
+            return
+
         if not due or self._confirmed or self._notified is None:
             return
         key = self._confirmation_key(recommendation, now)
-        if key is None:
-            return
-        self._confirmed = True
-        await self._async_dispatch(data, recommendation, target, key=key)
+        if key is not None:
+            self._confirmed = True
+            await self._async_dispatch(data, recommendation, target, key=key)
 
     async def _async_radar_gate(
         self,
@@ -542,6 +568,22 @@ class WalkNotifier:
             and not self._cleared
             and self._notified is None
             and recommendation.direction == DIRECTION_NONE
+            # "The radar expects no rain" is not true while one radar sees some.
+            and not recommendation.disputed
+            and is_actionable(recommendation, now)
+        )
+
+    def _disputed_due(self, recommendation: Recommendation, now: datetime) -> bool:
+        """Whether the radars' disagreement about the walk is worth one quiet message.
+
+        Once per walk, never after a real alert — advice already given outranks a
+        maybe — and only while the walk is still ahead. If the radars later agree on
+        rain, the ordinary alert follows and replaces this on the phone.
+        """
+        return (
+            not self._disputed_sent
+            and self._notified is None
+            and recommendation.disputed
             and is_actionable(recommendation, now)
         )
 
@@ -654,10 +696,13 @@ class WalkNotifier:
                 }
             ],
         }
-        if key == TEXT_PRELIMINARY:
+        if key in QUIET_KEYS:
             data["channel"] = _lookup(texts, TEXT_PRELIMINARY_CHANNEL, {})
             data["importance"] = PRELIMINARY_IMPORTANCE
             data["push"] = {"interruption-level": PRELIMINARY_INTERRUPTION}
+        else:
+            data["priority"] = ALERT_PRIORITY
+            data["ttl"] = ALERT_TTL
         if entity_id is not None:
             click = f"{CLICK_ENTITY_PREFIX}{entity_id}"
             # The two companion apps spell the same idea differently; sending both
@@ -876,12 +921,14 @@ __all__ = [
     "LOGBOOK_KEYS",
     "LOGBOOK_PREFIX",
     "LOGGED_UNDER_ENTITY",
+    "QUIET_KEYS",
     "STICKY",
     "TAG_PREFIX",
     "TEXT_ACTION_WALKED",
     "TEXT_CONFIRMED",
     "TEXT_CONFIRMED_NO_DRY_WINDOW",
     "TEXT_CONFIRMED_SHORTER",
+    "TEXT_DISPUTED",
     "TEXT_PREFIX",
     "TEXT_PRELIMINARY",
     "TEXT_PRELIMINARY_CHANNEL",

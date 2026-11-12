@@ -22,6 +22,15 @@ they publish — outvoted two radars seeing nothing, 1.70 to 1.665. Radar
 extrapolation beats an hourly model inside the hour; that is why the radars are
 weighted highest at all, and this makes it a rule rather than a margin.
 
+**Where two radars reach a slot, they must agree for it to be wet** (since 1.5.0).
+Two radars are a vote of one against one, and weights only decide which of them
+always wins: at 1.0 against a range-scaled CHMI, LibreWXR's lone "wet" was risk
+0.601 every time — and on 2026-11-12 that was a frozen composite's extrapolation,
+seen by nothing else. A split slot is *disputed*: not wet, so it moves no walk and
+sends no alert, but it is kept apart from an agreed dry so the user can be told
+quietly that one radar sees rain. The hourly models, voting only beyond the
+radar's reach, keep the plain weighted majority.
+
 No I/O, no homeassistant imports, no clock reads: `now` is always a parameter.
 """
 
@@ -88,6 +97,8 @@ class SlotScore:
     #: The sources whose vote decided the slot: the radars wherever one reaches it,
     #: otherwise everyone in `contributors`. Empty means "same as contributors".
     voters: tuple[str, ...] = ()
+    #: Two or more radars reach the slot and they disagree about rain. Never wet.
+    disputed: bool = False
 
     @property
     def n_sources(self) -> int:
@@ -101,8 +112,8 @@ class SlotScore:
 
     @property
     def wet(self) -> bool:
-        """True when the weighted majority expects rain at or above the threshold."""
-        return self.has_data and self.risk >= WET_RISK
+        """True when the weighted majority expects rain — and no radar disputes it."""
+        return self.has_data and not self.disputed and self.risk >= WET_RISK
 
     @property
     def intensity(self) -> str:
@@ -187,12 +198,13 @@ def _score_slot(
     if not contributors:
         return SlotScore(slot, risk=0.0, confidence=0.0, intensity_mm_h=0.0, contributors=())
 
-    voters = tuple(source_id for source_id in contributors if source_id in NOWCAST_SOURCES)
-    voters = voters or contributors
+    radars = tuple(source_id for source_id in contributors if source_id in NOWCAST_SOURCES)
+    voters = radars or contributors
     total = sum(weights[source_id] for source_id in voters)
-    wet = sum(
-        weights[source_id] for source_id in voters if aligned[source_id][slot] >= threshold_mm_h
-    )
+    wet_voters = [source_id for source_id in voters if aligned[source_id][slot] >= threshold_mm_h]
+    wet = sum(weights[source_id] for source_id in wet_voters)
+    # Some radars but not all: needs two of them, and is never true of the models.
+    disputed = 0 < len(wet_voters) < len(radars)
     mean = sum(weights[source_id] * aligned[source_id][slot] for source_id in voters) / total
     risk = wet / total
     cap = SOURCE_COUNT_CAP.get(len(contributors), FULL_CAP)
@@ -203,6 +215,7 @@ def _score_slot(
         intensity_mm_h=mean,
         contributors=contributors,
         voters=voters,
+        disputed=disputed,
     )
 
 

@@ -40,6 +40,7 @@ from custom_components.walk_the_dog.const import (
     DOMAIN,
     EVENT_ALERT,
     NOTIFY_DOMAIN,
+    SOURCE_CHMI,
     SOURCE_ICON_EU,
     SOURCE_KNMI,
     SOURCE_LIBREWXR,
@@ -48,6 +49,7 @@ from custom_components.walk_the_dog.coordinator import CYCLE, WalkCoordinator
 from custom_components.walk_the_dog.engine import (
     DIRECTION_EARLIER,
     DIRECTION_NO_DRY_WINDOW,
+    DIRECTION_NONE,
     DIRECTION_SHORTER,
     Recommendation,
     WindowVerdict,
@@ -224,7 +226,7 @@ async def test_the_alert_speaks_the_users_language(
     assert len(notifications) == 1
     sent = notifications[0].data
     assert sent["title"] == "Idź już z psem"
-    assert sent["message"].startswith("Deszcz spodziewany około 05:00.")
+    assert sent["message"].startswith("Na spacer o 05:00 zapowiada się deszcz.")
     assert "Wyjdź o 04:30" in sent["message"]
     assert sent["data"]["actions"][0]["title"] == "Już byliśmy"
 
@@ -1562,3 +1564,135 @@ async def test_the_radars_verdict_outlives_the_walk_leaving_its_reach(
     await run_cycle(hass, freezer, ARM_AT + CYCLE)
 
     assert len(notifications) == 2
+
+
+# --- 1.5.0: the radars disagree; how urgently a push travels ----------------------
+
+
+def _radars_disagree(now: datetime, chmi: list[float] = NO_RAIN) -> Any:
+    """Rain at five on LibreWXR and both models; CHMI, the other radar, sees `chmi`."""
+    series, statuses = radar_sources(now, RAIN_AT_FIVE)
+    frames = [value for value in chmi for _ in range(6)]
+    start = datetime(2026, 8, 25, 3, 0, tzinfo=UTC)
+    series.append(make_series(SOURCE_CHMI, frames, start=start, issued_at=now))
+    statuses.append(make_status(SOURCE_CHMI, age_s=0, contributed=True))
+    return series, statuses
+
+
+async def test_radars_that_disagree_send_one_quiet_notice_and_no_alert(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+    alerts: list,
+) -> None:
+    """One radar sees rain on the walk, the other does not: a maybe, once, quietly."""
+    fetch.build = _radars_disagree
+
+    moment = WINDOW_START
+    while moment < WALK_START:
+        await run_cycle(hass, freezer, moment)
+        moment += CYCLE
+
+    assert coordinator.data.direction == DIRECTION_NONE
+    assert len(notifications) == 1
+    push = notifications[0].data
+    assert push["message"].startswith("One radar sees rain during your 05:00 walk")
+    assert push["data"]["importance"] == "low"
+    assert push["data"]["channel"] == "Walk the dog: early notices"
+    assert "priority" not in push["data"]
+
+    assert len(alerts) == 1
+    assert alerts[0].data["disputed"] is True
+    assert alerts[0].data["preliminary"] is False
+    assert alerts[0].data[ATTR_SUMMARY] == "Radars disagree — 05:00"
+
+
+async def test_the_notice_waits_for_the_promised_moment(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """It is radar-backed advice like any other, so it is not sent before `arm_at`."""
+    fetch.build = _radars_disagree
+    await run_cycle(hass, freezer, WINDOW_START)
+    await run_cycle(hass, freezer, ARM_AT - CYCLE)
+
+    assert notifications == []
+
+
+async def test_radars_coming_to_agree_on_rain_send_the_real_alert(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """The maybe was a promise to say so if both radars see it: the alert replaces it."""
+    fetch.build = _radars_disagree
+    await run_cycle(hass, freezer, ARM_AT)
+
+    fetch.build = lambda now: _radars_disagree(now, chmi=RAIN_AT_FIVE)
+    await run_cycle(hass, freezer, ARM_AT + CYCLE)
+
+    assert len(notifications) == 2
+    alert = notifications[1].data
+    assert "04:30" in alert["message"]
+    assert alert["data"]["tag"] == notifications[0].data["data"]["tag"]
+    assert alert["data"]["priority"] == "high"
+
+
+async def test_a_dispute_after_the_alert_says_nothing_more(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Advice already given outranks a maybe; whether it stands is the confirmation's job."""
+    fetch.build = lambda now: _radars_disagree(now, chmi=RAIN_AT_FIVE)
+    await run_cycle(hass, freezer, ARM_AT)
+
+    fetch.build = _radars_disagree
+    await run_cycle(hass, freezer, ARM_AT + CYCLE)
+
+    assert len(notifications) == 1
+
+
+async def test_the_models_maybe_is_not_called_off_by_a_disputed_radar(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """An all-clear ("the radar expects no rain") would be false while one radar sees rain."""
+    fetch.build = _models_only
+    await run_cycle(hass, freezer, WINDOW_START)
+
+    fetch.build = _radars_disagree
+    await run_cycle(hass, freezer, WINDOW_START + CYCLE)
+    assert len(notifications) == 1, "no all-clear while the radars disagree"
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert len(notifications) == 2
+    assert notifications[1].data["message"].startswith("One radar sees rain")
+
+
+async def test_an_alert_travels_at_high_priority(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    freezer: FrozenDateTimeFactory,
+    notifications: list[ServiceCall],
+) -> None:
+    """Measured: a normal-priority push left at 12:43 and reached the phone at 12:57."""
+    await run_cycle(hass, freezer, ARM_AT)
+
+    data = notifications[0].data["data"]
+    assert data["priority"] == "high"
+    assert data["ttl"] == 0
+    assert "importance" not in data
