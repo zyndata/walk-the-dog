@@ -2406,7 +2406,7 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Change — a frozen LibreWXR feed sent a false raincoat alert (2026-11-12, out of phase)
 
-- **Status:** done, not yet released (`[Unreleased]` in `CHANGELOG.md`)
+- **Status:** done, released in 1.5.0 (see the next entry).
 - **Date:** 2026-11-12
 - **Why it exists:** on 2026-11-12 the maintainer got *"Rain is expected around 12:45 and there
   is no dry 15-minute window nearby. Take a raincoat."* with no rain on any radar map. Read from
@@ -2488,3 +2488,22 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - **The +10 min nowcast frame is still never re-read** — only the observation is.
   - README/info.md screenshots and their alt text show the old "rain is expected around" wording.
   - Live verification on the maintainer's instance once released.
+
+## Release 1.5.0 — a stuck or lone radar no longer alerts (2026-11-12, out of phase)
+
+- **Status:** released (see the last line)
+- **Date:** 2026-11-12
+- **What the release contains:** the change recorded in the entry above, commit `a5c07f9` — a
+  frozen LibreWXR composite is detected and dropped, the observed frame is re-read every cycle,
+  two radars must agree for a slot to be wet (a split gets one quiet notice instead of an alert),
+  alerts travel at high priority, and the alert sentences name the walk time explicitly.
+- **Checks run:** `scripts/release.py` — manifest and CHANGELOG agree on 1.5.0; `scripts/lint.py`
+  clean; **624 tests green** offline in `wtd-test`; secret scan over `v1.4.0..HEAD` — no hits;
+  `.env` and `.claude/settings.local.json` untracked; CI and Validate green on `a5c07f9`.
+- **Decisions:** **minor (1.5.0)** — besides the fixes, a `### Changed` entry with new
+  user-visible behaviour (the disputed notice) and a new `disputed` field in the sensor
+  attributes and event payload; nothing removed or renamed, no reconfiguration needed.
+- **Open questions carried forward:** as in the entry above — disputed slots count as dry in the
+  search, risk 0.601 beside `direction: none`, a restart after `T − E` cannot detect a freeze for
+  one cycle, a frozen empty tile reads dry, the +10 min frame is still never re-read, outdated
+  README screenshots; live verification of 1.5.0 on the maintainer's instance.
