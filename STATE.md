@@ -2507,3 +2507,6 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   search, risk 0.601 beside `direction: none`, a restart after `T − E` cannot detect a freeze for
   one cycle, a frozen empty tile reads dry, the +10 min frame is still never re-read, outdated
   README screenshots; live verification of 1.5.0 on the maintainer's instance.
+- **Released as [`v1.5.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.5.0)**
+  (2026-11-12), with CI, Validate and Release green, published, not a draft and not a
+  pre-release.
