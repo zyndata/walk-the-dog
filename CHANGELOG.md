@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-17
+
 ### Fixed
 
 - **"Set off now" is offered again.** When the best moment to leave was the very minute the
@@ -739,7 +741,8 @@ way; all of it is written up in `docs/DATA_SOURCES.md` § CHMI:
 - RainViewer is no longer a candidate: its public API serves past radar frames only, and the
   live `radar.nowcast` array is empty.
 
-[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/zyndata/walk-the-dog/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.5.1
 [1.5.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.5.0
 [1.4.0]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.4.0
 [1.3.1]: https://github.com/zyndata/walk-the-dog/releases/tag/v1.3.1

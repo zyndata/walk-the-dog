@@ -2541,3 +2541,17 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
     decide which departure a stand-down is timed against.
   - `LibreWxrAdapter` and `ChmiAdapter` duplicate their failure and cache handling.
   - Scripts, tests and CI were not part of the review.
+
+## Release 1.5.1 — fixes from the code review (2026-11-17, out of phase)
+
+- **Status:** released (see the last line)
+- **Date:** 2026-11-17
+- **What the release contains:** the change recorded in the entry above, commit `bfbb6be` —
+  "set off now" is offered again, rain returning after a stand-down is announced, the stand-down
+  waits for both radars, *Already went* closes only the walk it belongs to, and a failed push no
+  longer blanks the sensor.
+- **Checks run:** `scripts/release.py` — manifest and CHANGELOG agree on 1.5.1; `scripts/lint.py`
+  clean; **625 tests green** offline in `wtd-test`; secret scan over `v1.5.0..HEAD` — no hits;
+  `.env` and `.claude/settings.local.json` untracked; CI and Validate green on the base `e4cdfe5`.
+- **Decisions:** **patch (1.5.1)** — only `### Fixed` entries; nothing added, removed or renamed.
+- **Open questions carried forward:** as in the entry above, and those of release 1.5.0.
