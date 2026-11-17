@@ -342,12 +342,17 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         currently being watched — which is what the service defaults to.
         """
         walk = self._walk
-        target = walk_start if walk_start is not None else (walk.start if walk else None)
-        if target is None:
+        # Only the walk being watched can be closed. A button from any other one
+        # must change nothing at all: not what was said about this walk, and not
+        # the record that this walk was already closed.
+        if walk is None or (walk_start is not None and walk_start != walk.start):
             return
-        self._dismissed = target
-        if walk is not None and walk.start == target:
-            await self.notifier.async_clear(self._target_for(walk), target)
+        if not self._is_active(dt_util.utcnow()):
+            # Between two walks the one held here is the next one, hours away and
+            # not yet watched: "already went" cannot be about it.
+            return
+        self._dismissed = walk.start
+        await self.notifier.async_clear(self._target_for(walk), walk.start)
         self.notifier.reset()
         await self.async_refresh()
 
@@ -380,14 +385,23 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         if not self._enabled or walk is None or not self._is_active(now):
             return self._idle(active=False)
 
-        data = await self._cycle(now, walk)
-        await self.notifier.async_process(
-            data,
-            now,
-            arm_at=walk.start - self._search.earlier_margin,
-            confirm_at=self._confirm_at(walk),
-            target=self._target_for(walk),
-        )
+        # A timer armed for 17:30:00 fires a few milliseconds after it, and every
+        # decision below compares against whole minutes: unrounded, "set off at
+        # 17:30" would already be in the past on the very cycle meant to offer it.
+        decided_at = now.replace(second=0, microsecond=0)
+        data = await self._cycle(now, walk, decided_at)
+        try:
+            await self.notifier.async_process(
+                data,
+                decided_at,
+                arm_at=walk.start - self._search.earlier_margin,
+                confirm_at=self._confirm_at(walk),
+                target=self._target_for(walk),
+            )
+        except Exception:
+            # A message that could not be built or sent must not cost the sensor
+            # the recommendation this cycle already has.
+            _LOGGER.exception("Could not dispatch the walk notification")
         return data
 
     async def _async_take_down(self, walk: Walk) -> None:
@@ -416,8 +430,12 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
             away_entity=stored.get(CONF_TARGET_AWAY_ENTITY) or None,
         )
 
-    async def _cycle(self, now: datetime, walk: Walk) -> WalkData:
-        """Fetch what is due, score every slot the search can reach, recommend."""
+    async def _cycle(self, now: datetime, walk: Walk, decided_at: datetime) -> WalkData:
+        """Fetch what is due, score every slot the search can reach, recommend.
+
+        `now` times the requests and ages the data; `decided_at` is the same moment
+        to the minute, and is what the search treats as the present.
+        """
         session = async_get_clientsession(self.hass)
         series, statuses = await self._registry.async_fetch(session, self._geometry, now)
         self._issued = {item.source_id: item.issued_at for item in series}
@@ -437,7 +455,7 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
             search=self._search,
             # Without this the search would keep offering slots that have passed,
             # for as long as the window below stays open.
-            now=now,
+            now=decided_at,
         )
         spent, cap = self._registry.budget(now)
         return WalkData(

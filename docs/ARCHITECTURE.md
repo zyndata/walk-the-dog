@@ -541,7 +541,9 @@ notification decision at `T − E`; it is also exactly what the phase 0 request 
   button carries the walk's UTC start inside its action identifier, because that is the one field
   both companion apps hand back, and a leftover notification from yesterday must not close today's
   walk. Tapping it also pushes `clear_notification` to the walk's other devices, which would
-  otherwise go on showing advice about a walk that is over. In memory only: a restart inside the
+  otherwise go on showing advice about a walk that is over. Only the walk being watched can be
+  closed, and only while its window is open: a button naming any other walk, or the service
+  called between walks, changes nothing. In memory only: a restart inside the
   window resurrects the walk, which is the safe way round to be wrong.
 - **Provider failover** (phase 0 rule, owned by the adapter registry): Open-Meteo failed on 2
   consecutive cycles → enable `metno`; Open-Meteo healthy twice in a row → disable it again.

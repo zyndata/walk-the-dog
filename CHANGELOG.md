@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Set off now" is offered again.** When the best moment to leave was the very minute the
+  integration checked the weather, that moment was treated as already gone, so the advice to go
+  out earlier could be missed or never sent at all.
+- **Rain that comes back is announced again.** After a message saying the rain had gone and the
+  walk was back at its normal time, the same rain returning was not reported a second time.
+- **"Rain is no longer expected" waits for both radars.** That message is no longer sent while
+  one radar still sees rain on the walk.
+- **_Already went_ only closes the walk it belongs to.** Tapping the button on a notification
+  left over from an earlier walk no longer disturbs the current one or repeats its alert, and
+  calling `walk_the_dog.walked` between walks no longer cancels the next walk, hours away.
+- **A notification that cannot be sent no longer blanks the sensor.** The recommendation stays
+  available in Home Assistant even when a push fails.
+
 ## [1.5.0] - 2026-11-12
 
 ### Fixed

@@ -372,6 +372,23 @@ async def test_the_service_closes_the_walk_and_stops_polling(
     assert coordinator.enabled is True
 
 
+async def test_the_service_between_walks_leaves_the_next_walk_alone(
+    hass: HomeAssistant,
+    coordinator: WalkCoordinator,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """An "already went" said while nothing is watched is not about a walk hours away."""
+    freezer.move_to(IDLE)
+
+    await hass.services.async_call(DOMAIN, SERVICE_WALKED, blocking=True)
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert coordinator.data.active is True
+    assert coordinator.data.walk_start == WALK_START
+    assert fetch.calls > 0
+
+
 async def test_a_tapped_button_closes_the_walk_it_names(
     hass: HomeAssistant,
     coordinator: WalkCoordinator,

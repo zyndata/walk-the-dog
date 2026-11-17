@@ -2510,3 +2510,34 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Released as [`v1.5.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.5.0)**
   (2026-11-12), with CI, Validate and Release green, published, not a draft and not a
   pre-release.
+
+## Change — fixes from a whole-integration code review (2026-11-17, out of phase)
+
+- **Status:** done
+- **Date:** 2026-11-17
+- **What was built:** a review of everything in `custom_components/walk_the_dog` found nine
+  problems; five are fixed, plus the user's ruling on a sixth:
+  - decisions (the search and the notifier) run on the cycle's time floored to the minute, so
+    the slot equal to the cycle's own minute is no longer already past; fetch timing and data
+    ages keep the exact clock;
+  - a stand-down is recorded as the last thing said, so the same rain returning is news again;
+  - the stand-down is withheld while the radars dispute the walk;
+  - `async_mark_walked` acts only on the walk being watched, and only while its window is open —
+    a leftover button or the service called between walks changes nothing;
+  - an exception while dispatching a notification is logged and the cycle's data is still
+    published.
+- **Decisions:**
+  - *Already went* closes the walk its notification was about, never the next one (user,
+    2026-11-17). The service has no walk to name, so it is limited to an open window.
+  - No regression tests were added for the first, second, third and fifth fix — only for the
+    service between walks. 625 tests green.
+- **Open questions carried forward:**
+  - The scheduled window is re-scored after it has passed, from whatever sources still cover it;
+    with a later margin of about 90 minutes or more the watch can close before the suggested
+    start is radar-checked (`engine/window.py`). Needs a design decision, e.g. freezing the
+    scheduled verdict once the walk has started.
+  - `confirm_at` is computed from the previous cycle's recommendation.
+    `test_the_rain_going_away_stands_the_alert_down` depends on that, so the fix must first
+    decide which departure a stand-down is timed against.
+  - `LibreWxrAdapter` and `ChmiAdapter` duplicate their failure and cache handling.
+  - Scripts, tests and CI were not part of the review.

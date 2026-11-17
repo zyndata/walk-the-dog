@@ -512,6 +512,10 @@ class WalkNotifier:
         key = self._confirmation_key(recommendation, now)
         if key is not None:
             self._confirmed = True
+            if key == TEXT_STAND_DOWN:
+                # The advice was withdrawn, so it is no longer what the user holds:
+                # the same rain coming back has to count as news again.
+                self._notified = recommendation
             await self._async_dispatch(data, recommendation, target, key=key)
 
     async def _async_radar_gate(
@@ -613,7 +617,8 @@ class WalkNotifier:
         names something its recommendation does not have.
         """
         if recommendation.direction == DIRECTION_NONE:
-            return TEXT_STAND_DOWN
+            # "Rain is no longer expected" is not true while one radar sees some.
+            return None if recommendation.disputed else TEXT_STAND_DOWN
         if recommendation.direction in ALERT_DIRECTIONS and is_actionable(recommendation, now):
             if recommendation.direction == DIRECTION_SHORTER:
                 return TEXT_CONFIRMED_SHORTER
