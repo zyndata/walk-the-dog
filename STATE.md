@@ -2555,3 +2555,6 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   `.env` and `.claude/settings.local.json` untracked; CI and Validate green on the base `e4cdfe5`.
 - **Decisions:** **patch (1.5.1)** — only `### Fixed` entries; nothing added, removed or renamed.
 - **Open questions carried forward:** as in the entry above, and those of release 1.5.0.
+- **Released as [`v1.5.1`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.5.1)**
+  (2026-11-17), with CI, Validate and Release green, published, not a draft and not a
+  pre-release.
