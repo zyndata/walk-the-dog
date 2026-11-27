@@ -2561,8 +2561,7 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 
 ## Change — snow no longer alerts; a language per phone (2026-11-27, out of phase)
 
-- **Status:** done on `main`, not yet released (`[Unreleased]` is ready for `/release`; `### Added`
-  entries, so **1.6.0**).
+- **Status:** done, released in 1.6.0 (see the next entry).
 - **Date:** 2026-11-27
 - **Why it exists:** two reports from the maintainer. **Deviation from `PLAN.md`, recorded here
   before proceeding, as workflow rule 3 requires** — no phase is open; all phases are done.
@@ -2652,3 +2651,24 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
   - Release 1.6.0 not cut yet; live verification on the maintainer's instance once deployed
     (put the phones on the language lists first).
   - Everything from the earlier entries, unchanged.
+
+## Release 1.6.0 — snow is not rain; a language per phone (2026-11-27, out of phase)
+
+- **Status:** released (see the last line)
+- **Date:** 2026-11-27
+- **What the release contains:** the change recorded in the entry above, commit
+  [`e68768c`](https://github.com/zyndata/walk-the-dog/commit/e68768c) — dry snow no longer
+  sends a raincoat alert (new *Ignore snow* option, default on; only at +1 °C or below; `snow`
+  in the sensor attributes and event payload), each phone can be given Polish or English in
+  the alert settings, and the `disputed` attribute has a translated name.
+- **Checks run:** `scripts/release.py` — manifest and CHANGELOG agree on 1.6.0;
+  `scripts/lint.py` clean; **665 tests green** offline in `wtd-test`; secret scan over
+  `v1.5.1..HEAD` — the only hits are the Rzeszów city-centre test geometry and the Open-Meteo
+  grid points around it in the recorded fixture, no tokens, URLs, emails or home coordinates;
+  `.env` and `.claude/settings.local.json` untracked; CI and Validate green on `e68768c`.
+- **Decisions:** **minor (1.6.0)** — `### Added` entries: a new option and new user-visible
+  behaviour; nothing removed or renamed, no reconfiguration needed (an entry without
+  `ignore_snow` reads the default, on).
+- **Open questions carried forward:** as in the entry above — LibreWXR's undocumented snow
+  zone, the +1 °C line, heavy snow ignored like light snow, live verification on the
+  maintainer's instance (with both phones put on the Polish list).
