@@ -2672,3 +2672,6 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Open questions carried forward:** as in the entry above — LibreWXR's undocumented snow
   zone, the +1 °C line, heavy snow ignored like light snow, live verification on the
   maintainer's instance (with both phones put on the Polish list).
+- **Released as [`v1.6.0`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.6.0)**
+  (2026-11-27), with CI, Validate and Release green, published, not a draft and not a
+  pre-release.
