@@ -346,8 +346,10 @@ carries the *when* of the recommendation.
 - Endpoint: `GET https://api.librewxr.net/public/weather-maps.json` → `radar.past` (12 frames) and
   `radar.nowcast` (6 frames, +10…+60 min). Tiles at
   `{host}{path}/{size}/{z}/{x}/{y}/{color}/{smooth}_{snow}.png`.
-- Use `color=0` (grayscale intensity ramp) and `smooth=0`, `snow=0`: unsmoothed tiles come back as
+- Use `color=0` (grayscale intensity ramp) and `smooth=0`: unsmoothed tiles come back as
   paletted PNGs with only a handful of distinct indices, so intensity survives decoding exactly.
+  `snow=1` since 1.6.0 (`snow=0` before): the snow mask costs nothing extra and tells rain from
+  snow per pixel (below).
   A z=8 tile over Poland measured **317–1 631 bytes** **(measured)**.
 - Send an identifying `User-Agent`. Python's default `Python-urllib/*` was rejected with HTTP 403
   while `curl` and a normal browser string succeeded **(measured)**.
@@ -483,6 +485,16 @@ see the note below), then dBZ → rain rate with Marshall–Palmer
 >
 > Rows 128–255 of the table are the snow ramp; requesting `snow=0` keeps every value in 0–127, so
 > snow greys can never be mistaken for extreme rain.
+>
+> **The snow ramp, measured 2026-11-27** with light snow over central and south-eastern Poland,
+> on the same frames requested both ways: every rain pixel has the same grey in both tiles; every
+> snow pixel's grey is its `snow=0` grey **+ 128** (42 → 170, 43 → 171, … on every level seen);
+> and where no echo falls inside the snow zone, the `snow=1` tile is an opaque grey **128** — the
+> snow ramp's own dBZ −32 — instead of transparent. So `grey & 127` is the intensity as before,
+> `grey ≥ 128` the phase, and grey 128 itself no echo. How LibreWXR draws the snow zone is not
+> documented; it follows a temperature field rather than the radar, which is why the integration
+> also asks the models for the temperature (ARCHITECTURE.md § Consensus scoring, dry snow).
+> Recorded as `tests/fixtures/librewxr/tile_snow.png` (Rzeszów, all echo snow, p90 21 dBZ).
 
 ---
 

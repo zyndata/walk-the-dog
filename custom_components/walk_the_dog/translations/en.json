@@ -58,8 +58,11 @@
           "min_walk_duration_min": "Shortest walk still worth it",
           "confirm_margin_min": "Second message shortly before you leave",
           "preliminary_alert": "Heads-up before the radar can see the walk",
+          "ignore_snow": "Ignore snow",
           "notify_service": "Always notify this device",
-          "auto_mute_entity": "Skip phones while this person is away"
+          "auto_mute_entity": "Skip phones while this person is away",
+          "polish_devices": "Phones told in Polish",
+          "english_devices": "Phones told in English"
         },
         "data_description": {
           "radius_km": "The circle around the walk location that is checked for rain.",
@@ -70,8 +73,11 @@
           "min_walk_duration_min": "When no dry window of the full length can be found anywhere in the margins, offer the longest dry window that is at least this long: a short walk in the dry beats a full one in the rain. It moves in 10-minute steps because that is one radar frame — the shortest gap any source can actually see — and a shortened walk is only ever suggested where the radar reaches. 0 switches it off, and you are then only told about a full-length walk or a raincoat.",
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
           "preliminary_alert": "A quiet early message when the hourly weather models expect rain but no radar reaches your walk yet. It is only a maybe: the real alert still waits for the radar, and if the radar then sees your walk dry, you are told the maybe is off. Turn it off to hear only what a radar has confirmed.",
+          "ignore_snow": "Snow does not soak a dog the way rain does, so a walk in falling snow is not a reason for an alert. Only dry snow is ignored: when the weather models put the temperature above +1 °C, snow is likely wet snow or sleet, and it counts as rain. Turn it off to be told about snow as well.",
           "notify_service": "The companion app device that receives every walk's alert. Nothing silences it — not being away, not muting a single walk — except the Alerting switch. Phones added to an individual walk are notified alongside it. Leave empty to notify only the per-walk phones.",
-          "auto_mute_entity": "A fallback presence rule for phones that cannot say where they are. A companion app phone has a tracker of its own and answers for itself; only a phone without one asks about this person, and falls silent while they are away. The always-notified device is never affected."
+          "auto_mute_entity": "A fallback presence rule for phones that cannot say where they are. A companion app phone has a tracker of its own and answers for itself; only a phone without one asks about this person, and falls silent while they are away. The always-notified device is never affected.",
+          "polish_devices": "Phones whose notifications are always written in Polish, whatever language their user has chosen in Home Assistant.",
+          "english_devices": "Phones whose notifications are always written in English. A phone on neither list is written to in the language its user picked on their Home Assistant profile — and in the server's language if the profile is left on following the browser, which is what to fix here."
         }
       }
     },
@@ -81,7 +87,8 @@
       "invalid_notify_service": "Pick one of the listed devices, or type a notify service name that starts with mobile_app_.",
       "min_walk_too_long": "The shortest walk still worth it cannot be longer than the walk itself. Lower it, or set it to 0 to never shorten a walk.",
       "beyond_radar": "The rain radars see about {reach} minutes ahead, and the alert waits until they can see the whole walk. With a {duration}-minute walk the notice can be at most {widest} minutes — lower this margin, or shorten the walk.",
-      "walk_too_long": "The rain radars see about {reach} minutes ahead, and the whole walk has to fit inside that. Enter {reach} minutes or less."
+      "walk_too_long": "The rain radars see about {reach} minutes ahead, and the whole walk has to fit inside that. Enter {reach} minutes or less.",
+      "language_conflict": "A phone can only be on one language list."
     }
   },
   "options": {
@@ -135,8 +142,11 @@
           "min_walk_duration_min": "Shortest walk still worth it",
           "confirm_margin_min": "Second message shortly before you leave",
           "preliminary_alert": "Heads-up before the radar can see the walk",
+          "ignore_snow": "Ignore snow",
           "notify_service": "Always notify this device",
-          "auto_mute_entity": "Skip phones while this person is away"
+          "auto_mute_entity": "Skip phones while this person is away",
+          "polish_devices": "Phones told in Polish",
+          "english_devices": "Phones told in English"
         },
         "data_description": {
           "radius_km": "The circle around the walk location that is checked for rain.",
@@ -147,8 +157,11 @@
           "min_walk_duration_min": "When no dry window of the full length can be found anywhere in the margins, offer the longest dry window that is at least this long: a short walk in the dry beats a full one in the rain. It moves in 10-minute steps because that is one radar frame — the shortest gap any source can actually see — and a shortened walk is only ever suggested where the radar reaches. 0 switches it off, and you are then only told about a full-length walk or a raincoat.",
           "confirm_margin_min": "A second, short message this many minutes before you actually set off, saying that the plan you were given still stands — or that the rain has gone and you can walk at the normal time after all. It goes to the same devices as the first message. 0 switches it off, which is the default: no news already means nothing has changed.",
           "preliminary_alert": "A quiet early message when the hourly weather models expect rain but no radar reaches your walk yet. It is only a maybe: the real alert still waits for the radar, and if the radar then sees your walk dry, you are told the maybe is off. Turn it off to hear only what a radar has confirmed.",
+          "ignore_snow": "Snow does not soak a dog the way rain does, so a walk in falling snow is not a reason for an alert. Only dry snow is ignored: when the weather models put the temperature above +1 °C, snow is likely wet snow or sleet, and it counts as rain. Turn it off to be told about snow as well.",
           "notify_service": "The companion app device that receives every walk's alert. Nothing silences it — not being away, not muting a single walk — except the Alerting switch. Phones added to an individual walk are notified alongside it. Leave empty to notify only the per-walk phones.",
-          "auto_mute_entity": "A fallback presence rule for phones that cannot say where they are. A companion app phone has a tracker of its own and answers for itself; only a phone without one asks about this person, and falls silent while they are away. The always-notified device is never affected."
+          "auto_mute_entity": "A fallback presence rule for phones that cannot say where they are. A companion app phone has a tracker of its own and answers for itself; only a phone without one asks about this person, and falls silent while they are away. The always-notified device is never affected.",
+          "polish_devices": "Phones whose notifications are always written in Polish, whatever language their user has chosen in Home Assistant.",
+          "english_devices": "Phones whose notifications are always written in English. A phone on neither list is written to in the language its user picked on their Home Assistant profile — and in the server's language if the profile is left on following the browser, which is what to fix here."
         }
       }
     },
@@ -158,7 +171,8 @@
       "invalid_notify_service": "Pick one of the listed devices, or type a notify service name that starts with mobile_app_.",
       "min_walk_too_long": "The shortest walk still worth it cannot be longer than the walk itself. Lower it, or set it to 0 to never shorten a walk.",
       "beyond_radar": "The rain radars see about {reach} minutes ahead, and the alert waits until they can see the whole walk. With a {duration}-minute walk the notice can be at most {widest} minutes — lower this margin, or shorten the walk.",
-      "walk_too_long": "The rain radars see about {reach} minutes ahead, and the whole walk has to fit inside that. Enter {reach} minutes or less."
+      "walk_too_long": "The rain radars see about {reach} minutes ahead, and the whole walk has to fit inside that. Enter {reach} minutes or less.",
+      "language_conflict": "A phone can only be on one language list."
     }
   },
   "selector": {
@@ -253,6 +267,12 @@
           },
           "radar_backed": {
             "name": "Radar sees the whole walk"
+          },
+          "disputed": {
+            "name": "Radars disagree"
+          },
+          "snow": {
+            "name": "Snow ignored"
           },
           "requests_last_hour": {
             "name": "Requests this hour"

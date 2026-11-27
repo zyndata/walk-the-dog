@@ -43,10 +43,12 @@ from .const import (
     CONF_AUTO_MUTE_ENTITY,
     CONF_CONFIRM_MARGIN_MIN,
     CONF_EARLIER_MARGIN_MIN,
+    CONF_IGNORE_SNOW,
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
     CONF_MIN_WALK_DURATION_MIN,
+    CONF_NOTIFY_LANGUAGES,
     CONF_NOTIFY_SERVICE,
     CONF_PRELIMINARY_ALERT,
     CONF_RADIUS_KM,
@@ -60,6 +62,7 @@ from .const import (
     CONFIRM_STEP_MIN,
     DEFAULT_CONFIRM_MARGIN_MIN,
     DEFAULT_EARLIER_MARGIN_MIN,
+    DEFAULT_IGNORE_SNOW,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
     DEFAULT_MIN_WALK_DURATION_MIN,
@@ -77,6 +80,7 @@ from .const import (
     MIN_RADIUS_KM,
     MIN_WALK_DURATION_MIN,
     NOTIFY_DOMAIN,
+    NOTIFY_LANGUAGE_FIELDS,
     NOTIFY_SERVICE_PREFIX,
     RADAR_REACH_MIN,
     RADIUS_STEP_KM,
@@ -117,6 +121,9 @@ ERROR_BEYOND_RADAR: Final = "beyond_radar"
 #: A walk longer than the radar can see whole even with no notice at all. The
 #: selector's own maximum already prevents it; this is the message if it is typed.
 ERROR_WALK_TOO_LONG: Final = "walk_too_long"
+
+#: One phone put on the list of more than one language.
+ERROR_LANGUAGE_CONFLICT: Final = "language_conflict"
 
 #: The widest notice period offered at all — the one the shortest walk allows.
 MAX_EARLIER_MARGIN_MIN: Final = max_earlier_margin(MIN_WALK_DURATION_MIN) or 0
@@ -208,6 +215,7 @@ def _collect_params(user_input: dict[str, Any], *, keep_notify: bool = True) -> 
         CONF_PRELIMINARY_ALERT: bool(
             user_input.get(CONF_PRELIMINARY_ALERT, DEFAULT_PRELIMINARY_ALERT)
         ),
+        CONF_IGNORE_SNOW: bool(user_input.get(CONF_IGNORE_SNOW, DEFAULT_IGNORE_SNOW)),
     }
     if auto_mute := user_input.get(CONF_AUTO_MUTE_ENTITY):
         params[CONF_AUTO_MUTE_ENTITY] = auto_mute
@@ -216,6 +224,37 @@ def _collect_params(user_input: dict[str, Any], *, keep_notify: bool = True) -> 
     if notify_service := _validate_notify_service(user_input.get(CONF_NOTIFY_SERVICE)):
         params[CONF_NOTIFY_SERVICE] = notify_service
     return params
+
+
+def _collect_languages(user_input: Mapping[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    """The phones given a language by hand, and the errors in how they were given.
+
+    Returns `{service: language}` and the form errors, keyed by field. A phone on
+    no list follows its user's profile and is not stored at all; a phone on two is
+    an error on the later list, because there is no telling which one was meant.
+    """
+    languages: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    for language, field in NOTIFY_LANGUAGE_FIELDS.items():
+        for raw in user_input.get(field) or ():
+            try:
+                service = _validate_notify_service(raw)
+            except vol.Invalid:
+                errors[field] = ERROR_INVALID_NOTIFY_SERVICE
+                continue
+            if service is None:
+                continue
+            if languages.setdefault(service, language) != language:
+                errors[field] = ERROR_LANGUAGE_CONFLICT
+    return languages, errors
+
+
+def _language_lists(languages: Mapping[str, str]) -> dict[str, list[str]]:
+    """Stored `{service: language}` back into the form's one list per language."""
+    return {
+        field: [service for service, chosen in languages.items() if chosen == language]
+        for language, field in NOTIFY_LANGUAGE_FIELDS.items()
+    }
 
 
 def _shortening_exceeds_walk(params: Mapping[str, Any]) -> bool:
@@ -299,6 +338,9 @@ class _WalkFlowSteps:
     _targets: dict[str, dict[str, Any]]
     _pending: list[WalkSlot]
     _params: dict[str, Any]
+    #: The language lists exactly as last submitted, so a form shown again for an
+    #: error keeps what the user picked rather than what was stored before.
+    _language_input: dict[str, list[str]] | None
 
     def _init_steps(self, current: Mapping[str, Any]) -> None:
         """Seed the shared steps with the values they should prefill from."""
@@ -310,6 +352,7 @@ class _WalkFlowSteps:
         }
         self._pending = []
         self._params = {}
+        self._language_input = None
 
     async def _async_finish(self) -> ConfigFlowResult:
         """Store the collected schedule and parameters. Implemented per flow."""
@@ -493,6 +536,17 @@ class _WalkFlowSteps:
         """Step 3's schema, in the order docs/CONFIG.md lists the options."""
         current: Mapping[str, Any] = self._params or self._current
         notify_services = self._notify_services()
+        language_lists = self._language_input or _language_lists(
+            current.get(CONF_NOTIFY_LANGUAGES) or {}
+        )
+        phones = SelectSelector(
+            SelectSelectorConfig(
+                options=notify_services,
+                multiple=True,
+                custom_value=True,
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        )
         later = _minutes_selector(MIN_MARGIN_MIN, MAX_MARGIN_MIN, MARGIN_STEP_MIN)
         earlier = _minutes_selector(MIN_MARGIN_MIN, MAX_EARLIER_MARGIN_MIN, MARGIN_STEP_MIN)
         return vol.Schema(
@@ -533,6 +587,7 @@ class _WalkFlowSteps:
                 _marker(
                     CONF_PRELIMINARY_ALERT, current, DEFAULT_PRELIMINARY_ALERT
                 ): BooleanSelector(),
+                _marker(CONF_IGNORE_SNOW, current, DEFAULT_IGNORE_SNOW): BooleanSelector(),
                 _marker(CONF_NOTIFY_SERVICE, current, required=False): SelectSelector(
                     SelectSelectorConfig(
                         options=notify_services,
@@ -543,6 +598,10 @@ class _WalkFlowSteps:
                 _marker(CONF_AUTO_MUTE_ENTITY, current, required=False): EntitySelector(
                     EntitySelectorConfig(domain=["person", "device_tracker"])
                 ),
+                **{
+                    vol.Optional(field, default=language_lists.get(field, [])): phones
+                    for field in NOTIFY_LANGUAGE_FIELDS.values()
+                },
             }
         )
 
@@ -556,6 +615,14 @@ class _WalkFlowSteps:
                 # Keep everything else the user typed; only the bad field is flagged.
                 self._params = _collect_params(user_input, keep_notify=False)
                 errors[CONF_NOTIFY_SERVICE] = ERROR_INVALID_NOTIFY_SERVICE
+            languages, language_errors = _collect_languages(user_input)
+            if languages:
+                self._params[CONF_NOTIFY_LANGUAGES] = languages
+            self._language_input = {
+                field: list(user_input.get(field) or ())
+                for field in NOTIFY_LANGUAGE_FIELDS.values()
+            }
+            errors.update(language_errors)
             if _shortening_exceeds_walk(self._params):
                 errors[CONF_MIN_WALK_DURATION_MIN] = ERROR_MIN_WALK_TOO_LONG
             errors.update(_timing_errors(self._params))

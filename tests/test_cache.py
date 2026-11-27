@@ -103,6 +103,34 @@ def test_round_trips_through_its_serialized_form() -> None:
     assert restored.get("/frame/1") == 0.0
 
 
+def test_the_rain_part_of_a_frame_round_trips_with_it() -> None:
+    """Since 1.6.0 a LibreWXR frame carries its rain share; CHMI's still do not."""
+    cache = _cache()
+    cache.set("/frame/snow", NOW, 0.75, 0.0)
+    cache.set("chmi-frame", NOW, 0.5)
+
+    restored = _cache()
+    restored.load_dict(cache.as_dict())
+
+    assert restored.sample("/frame/snow").liquid_mm_per_h == 0.0
+    assert restored.sample("chmi-frame").liquid_mm_per_h is None
+    assert "liquid_mm_per_h" not in cache.as_dict()["entries"][1]
+
+
+def test_an_entry_stored_before_the_rain_share_loads_without_one() -> None:
+    """1.5's entries have no `liquid_mm_per_h`; they load, and say they cannot tell."""
+    restored = _cache()
+    restored.load_dict(
+        {
+            "geometry_key": GEOMETRY.key,
+            "entries": [{"path": "/frame/0", "slot": NOW.isoformat(), "mm_per_h": 1.5}],
+        }
+    )
+
+    assert restored.get("/frame/0") == 1.5
+    assert restored.sample("/frame/0").liquid_mm_per_h is None
+
+
 def test_stored_data_for_another_geometry_is_discarded() -> None:
     """Restoring after the user moved must not resurrect the old location's samples."""
     cache = _cache()

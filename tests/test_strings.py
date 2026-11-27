@@ -50,6 +50,16 @@ POLISH_TITLE = "Idź już z psem"
 #: flow renders a form for it.
 FORWARDING_STEPS = {"init"}
 
+#: What `sensor.py` adds to the payload — the integration's own state.
+SENSOR_EXTRA_ATTRIBUTES = {
+    "alerting",
+    "polling",
+    "failover",
+    "last_fetch",
+    "requests_last_hour",
+    "requests_hourly_cap",
+}
+
 
 def _string_literals(keyword: str) -> set[str]:
     """Every literal passed as `keyword=` anywhere in config_flow.py."""
@@ -137,6 +147,19 @@ def test_every_sensor_state_is_translated() -> None:
     states = STRINGS["entity"]["sensor"]["recommendation"]["state"]
 
     assert set(states) == set(OPTIONS)
+
+
+def test_every_sensor_attribute_is_named() -> None:
+    """Every attribute the sensor shows has a name of its own in the more-info dialog.
+
+    `disputed` (1.5.0) went out without one, so a Polish screen showed it raw.
+    """
+    from custom_components.walk_the_dog.coordinator import WalkData  # noqa: PLC0415
+
+    named = set(STRINGS["entity"]["sensor"]["recommendation"]["state_attributes"])
+    shown = set(WalkData(enabled=True, active=False).payload()) | SENSOR_EXTRA_ATTRIBUTES
+
+    assert shown - named == set()
 
 
 def test_both_entities_are_named() -> None:

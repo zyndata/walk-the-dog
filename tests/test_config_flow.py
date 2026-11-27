@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.walk_the_dog.config_flow import (
     ERROR_BEYOND_RADAR,
     ERROR_INVALID_NOTIFY_SERVICE,
+    ERROR_LANGUAGE_CONFLICT,
     ERROR_MIN_WALK_TOO_LONG,
     ERROR_WALK_TOO_LONG,
     MAX_EARLIER_MARGIN_MIN,
@@ -27,10 +28,12 @@ from custom_components.walk_the_dog.const import (
     CONF_AUTO_MUTE_ENTITY,
     CONF_CONFIRM_MARGIN_MIN,
     CONF_EARLIER_MARGIN_MIN,
+    CONF_IGNORE_SNOW,
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
     CONF_MIN_WALK_DURATION_MIN,
+    CONF_NOTIFY_LANGUAGES,
     CONF_NOTIFY_SERVICE,
     CONF_PRELIMINARY_ALERT,
     CONF_RADIUS_KM,
@@ -43,6 +46,7 @@ from custom_components.walk_the_dog.const import (
     CONF_WALK_TARGETS,
     DEFAULT_CONFIRM_MARGIN_MIN,
     DEFAULT_EARLIER_MARGIN_MIN,
+    DEFAULT_IGNORE_SNOW,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
     DEFAULT_MIN_WALK_DURATION_MIN,
@@ -53,6 +57,7 @@ from custom_components.walk_the_dog.const import (
     MAX_RADIUS_KM,
     MAX_WALK_DURATION_MIN,
     MIN_RADIUS_KM,
+    NOTIFY_LANGUAGE_FIELDS,
     RADAR_REACH_MIN,
     SCHEDULE_MODE_DAILY,
     SCHEDULE_MODE_PER_DAY,
@@ -78,6 +83,7 @@ PARAMS: dict[str, Any] = {
     CONF_MIN_WALK_DURATION_MIN: DEFAULT_MIN_WALK_DURATION_MIN,
     CONF_CONFIRM_MARGIN_MIN: DEFAULT_CONFIRM_MARGIN_MIN,
     CONF_PRELIMINARY_ALERT: DEFAULT_PRELIMINARY_ALERT,
+    CONF_IGNORE_SNOW: DEFAULT_IGNORE_SNOW,
 }
 
 STORED_PARAMS: dict[str, Any] = {**PARAMS}
@@ -362,6 +368,93 @@ async def test_the_preliminary_notice_is_on_unless_switched_off(hass: HomeAssist
     assert result["options"][CONF_PRELIMINARY_ALERT] is False
 
 
+async def test_snow_is_ignored_unless_switched_off(hass: HomeAssistant) -> None:
+    """On by default — a winter of raincoat alerts about snow is what it fixes."""
+    result = await to_params(hass)
+    assert marker_for(result["data_schema"], CONF_IGNORE_SNOW).default() is True
+
+    result = await advance(hass, result, {**PARAMS, CONF_IGNORE_SNOW: False})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_IGNORE_SNOW] is False
+
+
+POLISH = NOTIFY_LANGUAGE_FIELDS["pl"]
+ENGLISH = NOTIFY_LANGUAGE_FIELDS["en"]
+
+
+async def test_a_phone_can_be_given_a_language(hass: HomeAssistant) -> None:
+    """Stored as one mapping; a phone on no list is not stored and follows its profile."""
+    result = await run_wizard(
+        hass,
+        params={
+            **PARAMS,
+            POLISH: ["notify.mobile_app_anna", "mobile_app_jan"],
+            ENGLISH: ["mobile_app_guest"],
+        },
+    )
+
+    assert result["options"][CONF_NOTIFY_LANGUAGES] == {
+        "mobile_app_anna": "pl",
+        "mobile_app_jan": "pl",
+        "mobile_app_guest": "en",
+    }
+    assert POLISH not in result["options"]
+
+
+async def test_no_language_chosen_stores_nothing(hass: HomeAssistant) -> None:
+    """Every phone following its profile is the 1.4.0 behaviour, and stores no key."""
+    result = await run_wizard(hass)
+
+    assert CONF_NOTIFY_LANGUAGES not in result["options"]
+
+
+async def test_one_phone_on_both_language_lists_is_refused(hass: HomeAssistant) -> None:
+    """There is no telling which was meant; the lists come back as they were typed."""
+    result = await to_params(hass)
+
+    result = await advance(
+        hass,
+        result,
+        {**PARAMS, POLISH: ["mobile_app_anna"], ENGLISH: ["notify.mobile_app_anna"]},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {ENGLISH: ERROR_LANGUAGE_CONFLICT}
+    assert marker_for(result["data_schema"], ENGLISH).default() == ["notify.mobile_app_anna"]
+
+
+async def test_a_language_list_refuses_what_is_not_a_phone(hass: HomeAssistant) -> None:
+    """The same rule as every other device field: companion-app services only."""
+    result = await to_params(hass)
+
+    result = await advance(hass, result, {**PARAMS, POLISH: ["telegram"]})
+
+    assert result["errors"] == {POLISH: ERROR_INVALID_NOTIFY_SERVICE}
+
+
+async def test_the_options_flow_shows_the_stored_languages(hass: HomeAssistant) -> None:
+    """Editing starts from the phones already given a language."""
+    entry = await options_entry(hass)
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, CONF_NOTIFY_LANGUAGES: {"mobile_app_phone": "pl"}},
+    )
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCHEDULE_MODE: SCHEDULE_MODE_DAILY}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"all": ["07:00"]}
+    )
+    result = await drain_targets(hass.config_entries.options.async_configure, result)
+
+    assert marker_for(result["data_schema"], POLISH).default() == ["mobile_app_phone"]
+    assert marker_for(result["data_schema"], ENGLISH).default() == []
+
+
 async def test_notification_devices_are_offered_from_the_service_registry(
     hass: HomeAssistant,
 ) -> None:
@@ -639,6 +732,7 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
             CONF_MIN_WALK_DURATION_MIN: 20,
             CONF_CONFIRM_MARGIN_MIN: 15,
             CONF_PRELIMINARY_ALERT: False,
+            CONF_IGNORE_SNOW: False,
         },
     )
     await hass.async_block_till_done()
@@ -655,6 +749,7 @@ async def test_options_flow_round_trip(hass: HomeAssistant) -> None:
         CONF_MIN_WALK_DURATION_MIN: 20,
         CONF_CONFIRM_MARGIN_MIN: 15,
         CONF_PRELIMINARY_ALERT: False,
+        CONF_IGNORE_SNOW: False,
     }
     # The location is entry data, so the options flow never touches it.
     assert entry.data == {CONF_LOCATION: LOCATION}

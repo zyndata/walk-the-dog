@@ -38,6 +38,7 @@ from .cache import SampleCache
 from .const import (
     CONF_CONFIRM_MARGIN_MIN,
     CONF_EARLIER_MARGIN_MIN,
+    CONF_IGNORE_SNOW,
     CONF_INTENSITY_THRESHOLD,
     CONF_LATER_MARGIN_MIN,
     CONF_LOCATION,
@@ -53,6 +54,7 @@ from .const import (
     CONF_WALK_TARGETS,
     DEFAULT_CONFIRM_MARGIN_MIN,
     DEFAULT_EARLIER_MARGIN_MIN,
+    DEFAULT_IGNORE_SNOW,
     DEFAULT_INTENSITY_THRESHOLD,
     DEFAULT_LATER_MARGIN_MIN,
     DEFAULT_MIN_WALK_DURATION_MIN,
@@ -161,6 +163,7 @@ class WalkData:
             "provisional": False,
             "radar_backed": False,
             "disputed": False,
+            "snow": False,
             "sources": [],
             "data_age_s": None,
         }
@@ -197,6 +200,9 @@ class WalkData:
                 # The walk looks dry only because the radars disagree about it: one
                 # sees rain, another does not (docs/CONFIG.md § Event payload).
                 "disputed": recommendation.disputed,
+                # Snow on the scheduled walk was left out of the vote as harmless
+                # (docs/CONFIG.md § Snow).
+                "snow": recommendation.snow,
                 "sources": [_source_payload(source) for source in recommendation.sources],
                 "data_age_s": _freshness_s(recommendation.sources),
             }
@@ -264,6 +270,7 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
         self._mode = options.get(CONF_SCHEDULE_MODE, SCHEDULE_MODE_DAILY)
         self._schedule = options.get(CONF_SCHEDULE, {})
         self._threshold = options.get(CONF_INTENSITY_THRESHOLD, DEFAULT_INTENSITY_THRESHOLD)
+        self._ignore_snow = bool(options.get(CONF_IGNORE_SNOW, DEFAULT_IGNORE_SNOW))
         self._search = Search(
             duration=timedelta(minutes=int(options.get(CONF_WALK_DURATION_MIN, 30))),
             earlier_margin=timedelta(
@@ -448,6 +455,7 @@ class WalkCoordinator(DataUpdateCoordinator[WalkData]):
             slots=evaluation_slots(walk.start, self._search),
             threshold=self._threshold,
             now=now,
+            ignore_snow=self._ignore_snow,
         )
         recommendation = recommend(
             consensus,

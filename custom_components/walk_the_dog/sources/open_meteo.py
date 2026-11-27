@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -55,6 +56,16 @@ MODEL_IDS: dict[str, str] = {
     SOURCE_ICON_EU: "icon_eu",
     SOURCE_KNMI: "knmi_harmonie_arome_europe",
 }
+
+#: Everything one request asks for. `rain` and `showers` are the liquid part of
+#: `precipitation` (the rest is snow's water equivalent), and the temperature is what
+#: decides whether that snow is dry enough to ignore (docs/ARCHITECTURE.md § Snow).
+#: Same request, same budget: four variables cost a few hundred bytes more.
+PRECIPITATION = "precipitation"
+RAIN = "rain"
+SHOWERS = "showers"
+TEMPERATURE = "temperature_2m"
+HOURLY_VARIABLES = ",".join((PRECIPITATION, RAIN, SHOWERS, TEMPERATURE))
 
 STEP_S = 3600  # hourly series; the 15-minutely one is interpolated and lossy
 _STEP = timedelta(seconds=STEP_S)
@@ -154,7 +165,7 @@ class OpenMeteoAdapter:
         params = {
             "latitude": ",".join(f"{lat}" for lat, _ in points),
             "longitude": ",".join(f"{lon}" for _, lon in points),
-            "hourly": "precipitation",
+            "hourly": HOURLY_VARIABLES,
             "models": ",".join(MODEL_IDS[sid] for sid in self.source_ids),
             "forecast_hours": str(FORECAST_HOURS + 1),
             "timeformat": "unixtime",
@@ -208,9 +219,17 @@ def parse_forecast(payload: Any, fetched_at: datetime) -> list[SourceSeries]:
     (checked 2026-08-25), so upstream run age cannot be measured. Freshness then
     tracks our own fetch age, which is exactly what degrades when Open-Meteo stops
     answering — the failure this guards against. Recorded in STATE.md, phase 3.
+
+    The liquid part (`rain + showers`) is reduced the same way, max across points,
+    and never reported above the slot's own total. A model that leaves `showers`
+    null is read as having none; one that leaves `rain` null cannot be split, and
+    the slot gets no liquid value. The temperature is an instant at its stamp, so a
+    slot spans two of them and takes the warmer, across all five points.
     """
     entries = payload if isinstance(payload, list) else [payload]
-    per_model: dict[str, dict[datetime, float]] = {sid: {} for sid in MODEL_IDS}
+    totals: dict[str, dict[datetime, float]] = {sid: {} for sid in MODEL_IDS}
+    liquids: dict[str, dict[datetime, float]] = {sid: {} for sid in MODEL_IDS}
+    instants: dict[str, dict[datetime, float]] = {sid: {} for sid in MODEL_IDS}
 
     for entry in entries:
         if not isinstance(entry, dict):
@@ -222,24 +241,32 @@ def parse_forecast(payload: Any, fetched_at: datetime) -> list[SourceSeries]:
         if not isinstance(times, list):
             continue
         for source_id, model_id in MODEL_IDS.items():
-            values = hourly.get(f"precipitation_{model_id}")
-            if not isinstance(values, list):
-                continue
-            slots = per_model[source_id]
-            for raw_time, raw_value in zip(times, values, strict=False):
-                if raw_value is None or not isinstance(raw_time, int | float):
+            column = _columns(hourly, model_id, len(times))
+            for index, raw_time in enumerate(times):
+                if not isinstance(raw_time, int | float):
+                    continue
+                stamp = datetime.fromtimestamp(int(raw_time), tz=UTC)
+                _keep_max(instants[source_id], stamp, column[TEMPERATURE][index])
+                total = column[PRECIPITATION][index]
+                if total is None:
                     continue
                 # Stamped at the end of the hour it sums: file it under the start.
-                slot = datetime.fromtimestamp(int(raw_time), tz=UTC) - _STEP
-                value = max(0.0, float(raw_value))
-                # max across the five sample points
-                if value > slots.get(slot, -1.0):
-                    slots[slot] = value
+                slot = stamp - _STEP
+                _keep_max(totals[source_id], slot, max(0.0, total))
+                rain = column[RAIN][index]
+                if rain is not None:
+                    liquid = max(0.0, rain) + max(0.0, column[SHOWERS][index] or 0.0)
+                    _keep_max(liquids[source_id], slot, liquid)
 
     result = []
-    for source_id, slots in per_model.items():
+    for source_id, slots in totals.items():
         if not slots:
             continue
+        liquid = {
+            slot: min(value, slots[slot])
+            for slot, value in liquids[source_id].items()
+            if slot in slots
+        }
         result.append(
             SourceSeries(
                 source_id=source_id,
@@ -249,9 +276,47 @@ def parse_forecast(payload: Any, fetched_at: datetime) -> list[SourceSeries]:
                 slots=tuple(sorted(slots.items())),
                 cell_km=CELL_KM[source_id],
                 reliability=RELIABILITY[source_id],
+                liquid=tuple(sorted(liquid.items())),
+                temperature_c=_slot_temperatures(slots, instants[source_id]),
             )
         )
     return result
+
+
+def _columns(hourly: dict[str, Any], model_id: str, length: int) -> dict[str, list[float | None]]:
+    """One model's variables, each as a list of floats or None as long as `time`.
+
+    A missing or malformed column reads as all None, so a response that predates a
+    variable — or a model that does not publish one — degrades to "unknown" rather
+    than failing the whole series.
+    """
+    columns: dict[str, list[float | None]] = {}
+    for variable in (PRECIPITATION, RAIN, SHOWERS, TEMPERATURE):
+        raw = hourly.get(f"{variable}_{model_id}")
+        values = raw if isinstance(raw, list) else []
+        columns[variable] = [
+            float(value) if isinstance(value, int | float) else None
+            for value in (values + [None] * length)[:length]
+        ]
+    return columns
+
+
+def _keep_max(values: dict[datetime, float], key: datetime, value: float | None) -> None:
+    """Record `value` under `key` unless a larger one is already there."""
+    if value is not None and value > values.get(key, -math.inf):
+        values[key] = value
+
+
+def _slot_temperatures(
+    slots: dict[datetime, float], instants: dict[datetime, float]
+) -> tuple[tuple[datetime, float], ...]:
+    """The warmer of the two instants each hourly slot spans, where either is known."""
+    temperatures = []
+    for slot in sorted(slots):
+        ends = [instants[moment] for moment in (slot, slot + _STEP) if moment in instants]
+        if ends:
+            temperatures.append((slot, max(ends)))
+    return tuple(temperatures)
 
 
 __all__ = ["MODEL_IDS", "OpenMeteoAdapter", "parse_forecast"]

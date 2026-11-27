@@ -167,6 +167,13 @@ class SourceSeries:
     slots: tuple[tuple[datetime, float], ...]
     cell_km: float
     reliability: float
+    #: The part of each slot's intensity that falls as rain rather than snow, on the
+    #: same slot starts as `slots`. A slot missing here is one the source cannot
+    #: split; empty means the source never can (CHMI's composite carries no phase).
+    liquid: tuple[tuple[datetime, float], ...] = ()
+    #: 2 m air temperature in °C per slot — the warmest value the slot spans. Only
+    #: the models publish one.
+    temperature_c: tuple[tuple[datetime, float], ...] = ()
 
     def age_s(self, now: datetime) -> int:
         """Seconds since the data was issued upstream."""

@@ -76,6 +76,10 @@ WET_GEOMETRY = SampleGeometry(latitude=54.0191, longitude=23.0081, radius_km=5.0
 #: It is also where the recorded `tests/fixtures/chmi/` frames were sampled.
 CHMI_GEOMETRY = SampleGeometry(latitude=49.8224, longitude=19.0584, radius_km=5.0)
 
+#: Rzeszów city centre — the disc `librewxr/tile_snow.png` and `open_meteo/snow.json`
+#: were recorded for on 2026-11-27, with light snow falling and nothing else.
+SNOW_GEOMETRY = SampleGeometry(latitude=50.0413, longitude=21.999, radius_km=5.0)
+
 #: Frozen "now" used across the suite, close to when the fixtures were recorded.
 NOW = datetime(2026, 8, 25, 7, 0, tzinfo=UTC)
 
@@ -127,25 +131,36 @@ def make_series(
     step_s: int | None = None,
     issued_at: datetime | None = None,
     fetched_at: datetime | None = None,
+    liquid: Sequence[float | None] | None = None,
+    temperature: Sequence[float | None] | None = None,
 ) -> SourceSeries:
     """Build a normalized series from a list of mm/h values, one per step.
 
     The engine only ever sees `SourceSeries`, so its tests build them directly
     instead of driving adapters: that is what "pure, hardware-independent" buys.
+
+    `liquid` and `temperature` run step for step alongside `values`; a None in
+    either is a step the source says nothing about.
     """
     step = step_s if step_s is not None else STEP_S[source_id]
-    slots = tuple(
-        (start + timedelta(seconds=index * step), float(value))
-        for index, value in enumerate(values)
-    )
+
+    def _steps(per_step: Sequence[float | None] | None) -> tuple[tuple[datetime, float], ...]:
+        return tuple(
+            (start + timedelta(seconds=index * step), float(value))
+            for index, value in enumerate(per_step or ())
+            if value is not None
+        )
+
     return SourceSeries(
         source_id=source_id,
         issued_at=issued_at if issued_at is not None else start,
         fetched_at=fetched_at if fetched_at is not None else (issued_at or start),
         step_s=step,
-        slots=slots,
+        slots=_steps(values),
         cell_km=CELL_KM[source_id],
         reliability=RELIABILITY[source_id],
+        liquid=_steps(liquid),
+        temperature_c=_steps(temperature),
     )
 
 

@@ -110,6 +110,8 @@ class WindowVerdict:
     #: True when the radars disagree about at least one slot. Such a slot is not
     #: wet, so a disputed window can still be `dry` — dry by agreement it is not.
     disputed: bool = False
+    #: True when at least one slot would have been wet but for dry snow.
+    snow: bool = False
 
     @property
     def has_data(self) -> bool:
@@ -236,6 +238,15 @@ class Recommendation:
         return self.direction == DIRECTION_NONE and self.scheduled.disputed
 
     @property
+    def snow(self) -> bool:
+        """True when snow on the scheduled walk was left out as harmless.
+
+        Says why a walk with precipitation on every radar map was let be — the
+        question a user looking at a snowy sky would ask first.
+        """
+        return self.scheduled.snow
+
+    @property
     def provisional(self) -> bool:
         """True when no radar reaches the window being recommended.
 
@@ -308,6 +319,7 @@ def evaluate_window(consensus: Consensus, start: datetime, duration: timedelta) 
         horizon_limited=horizon_limited,
         nowcast_covered=nowcast_covered,
         disputed=any(score.disputed for score in covered),
+        snow=any(score.snow for score in covered),
     )
 
 

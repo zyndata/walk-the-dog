@@ -257,3 +257,64 @@ async def test_failures_are_reported_not_raised(
 
     assert not result.ok
     assert result.statuses[0].state == STATE_FAILED
+
+
+# --- rain, snow and temperature (since 1.6.0) ------------------------------------
+
+
+def _hour(time: str, amount: float, symbol: str | None, temperature: float) -> dict:
+    next_hour: dict = {"details": {"precipitation_amount": amount}}
+    if symbol is not None:
+        next_hour["summary"] = {"symbol_code": symbol}
+    return {
+        "time": time,
+        "data": {
+            "instant": {"details": {"air_temperature": temperature}},
+            "next_1_hours": next_hour,
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("symbol", "rain"),
+    [
+        ("lightsnow", 0.0),
+        ("snowshowers_day", 0.0),
+        ("heavysnowandthunder", 0.0),
+        # Sleet soaks like rain, and rain is rain.
+        ("lightsleet", 0.6),
+        ("rain", 0.6),
+        ("cloudy", 0.6),
+    ],
+)
+def test_the_symbol_says_whether_the_hour_is_snow(symbol: str, rain: float) -> None:
+    """MET Norway's compact form has no rain/snow split; the hour's symbol is the phase."""
+    series = parse_compact(
+        {
+            "properties": {
+                "timeseries": [_hour("2026-11-27T07:00:00Z", 0.6, symbol, -1.0)],
+            }
+        },
+        NOW,
+    )
+
+    assert series.liquid[0][1] == pytest.approx(rain)
+
+
+def test_no_symbol_leaves_the_phase_unknown_and_the_temperature_spans_the_hour() -> None:
+    """The hour 07-08 is bounded by the instants at 07:00 and 08:00; the warmer one counts."""
+    series = parse_compact(
+        {
+            "properties": {
+                "timeseries": [
+                    _hour("2026-11-27T07:00:00Z", 0.6, None, -2.0),
+                    _hour("2026-11-27T08:00:00Z", 0.0, "cloudy", 0.8),
+                ],
+            }
+        },
+        NOW,
+    )
+
+    first = datetime(2026, 11, 27, 7, 0, tzinfo=UTC)
+    assert first not in dict(series.liquid)
+    assert dict(series.temperature_c)[first] == 0.8

@@ -31,6 +31,7 @@ from custom_components.walk_the_dog.const import (
     CONF_CONFIRM_MARGIN_MIN,
     CONF_LATER_MARGIN_MIN,
     CONF_MIN_WALK_DURATION_MIN,
+    CONF_NOTIFY_LANGUAGES,
     CONF_NOTIFY_SERVICE,
     CONF_PRELIMINARY_ALERT,
     CONF_TARGET_AWAY_ENTITY,
@@ -302,6 +303,35 @@ async def test_a_user_without_a_profile_language_gets_the_servers(
 
     assert len(morning) == 1
     assert morning[0].data["title"] == "Idź już z psem"
+
+
+async def test_a_language_chosen_for_the_phone_beats_the_profile(
+    hass: HomeAssistant,
+    entry: MockConfigEntry,
+    fetch: FakeFetch,
+    freezer: FrozenDateTimeFactory,
+    morning: list[ServiceCall],
+    evening: list[ServiceCall],
+) -> None:
+    """The reported case: an English server, one profile in English, one left unset.
+
+    Both phones got English. Choosing Polish for a phone in the integration's own
+    settings wins over whatever its user's profile says, or does not say; a phone
+    nobody chose for keeps the 1.4.0 rule.
+    """
+    await _sign_in(hass, "Morning", "en")
+    await _sign_in(hass, "evening", None)
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_NOTIFY_LANGUAGES: {MORNING_PHONE: "pl"}}
+    )
+    await setup_with_target(
+        hass, entry, fetch, freezer, {CONF_TARGET_SERVICES: [MORNING_PHONE, EVENING_PHONE]}
+    )
+
+    await run_cycle(hass, freezer, ARM_AT)
+
+    assert morning[0].data["title"] == "Idź już z psem"
+    assert evening[0].data["title"] == "Walk the dog"
 
 
 async def test_an_unreadable_profile_falls_back_to_the_servers_language(

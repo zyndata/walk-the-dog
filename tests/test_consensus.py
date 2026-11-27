@@ -359,3 +359,146 @@ def test_the_models_keep_the_weighted_majority_beyond_the_radar() -> None:
 
     assert slot.wet
     assert not slot.disputed
+
+
+# --- snow (since 1.6.0) ----------------------------------------------------------
+#
+# The 2026-11-27 case: LibreWXR sees 0.75 mm/h over the disc, all of it snow; both
+# models sit at about -1 °C. Light snow is not a reason to move a walk.
+
+SNOWFALL = 0.75
+
+
+def _snowy(*, cold: float = -1.0, chmi: bool = True, models: bool = True):
+    """LibreWXR seeing only snow, CHMI the same echo with no phase, models at `cold`."""
+    series = [_radar([SNOWFALL] * 3, liquid=[0.0] * 3)]
+    if chmi:
+        series.append(_radar([SNOWFALL] * 3, source_id=SOURCE_CHMI))
+    if models:
+        series += [
+            _hourly(SOURCE_KNMI, 0.4, liquid=[0.0], temperature=[cold]),
+            _hourly(SOURCE_ICON_EU, 0.3, liquid=[0.0], temperature=[cold - 0.3]),
+        ]
+    return series
+
+
+def _snow_consensus(series, **kwargs):
+    statuses = [make_status(item.source_id) for item in series]
+    return build_consensus(
+        series,
+        statuses,
+        slots=SLOTS,
+        threshold=INTENSITY_THRESHOLD_LIGHT,
+        now=T,
+        ignore_snow=True,
+        **kwargs,
+    )
+
+
+def test_dry_snow_is_not_rain() -> None:
+    """Below +1 °C, a radar that sees only snow votes dry — and so does CHMI with it."""
+    slot = _snow_consensus(_snowy()).at(T)
+
+    assert not slot.wet
+    assert not slot.disputed
+    assert slot.snow
+    assert slot.risk == 0.0
+
+
+def test_snow_is_rain_when_the_option_is_off() -> None:
+    """The option is the only thing between the old behaviour and the new."""
+    slot = _consensus(_snowy()).at(T)
+
+    assert slot.wet
+    assert not slot.snow
+
+
+def test_snow_above_plus_one_counts_as_rain() -> None:
+    """Warmer than +1 °C, "snow" is wet snow or sleet: it soaks like rain."""
+    slot = _snow_consensus(_snowy(cold=1.5)).at(T)
+
+    assert slot.wet
+    assert not slot.snow
+
+
+def test_the_warmest_model_decides_whether_it_is_cold() -> None:
+    """One model at +2 °C is enough doubt: the snow might be slush."""
+    series = _snowy()
+    series[2] = _hourly(SOURCE_KNMI, 0.4, liquid=[0.0], temperature=[2.0])
+
+    assert _snow_consensus(series).at(T).wet
+
+
+def test_with_no_temperature_the_radar_phase_is_trusted() -> None:
+    """No model answering is no reason to call snow rain."""
+    slot = _snow_consensus(_snowy(models=False)).at(T)
+
+    assert not slot.wet
+    assert slot.snow
+
+
+def test_freezing_rain_still_counts() -> None:
+    """Rain at -2 °C is ice on the pavement — the cold does not excuse it."""
+    series = [
+        _radar([SNOWFALL] * 3, liquid=[SNOWFALL] * 3),
+        _hourly(SOURCE_KNMI, 0.4, liquid=[0.4], temperature=[-2.0]),
+    ]
+    slot = _snow_consensus(series).at(T)
+
+    assert slot.wet
+    assert not slot.snow
+
+
+def test_chmi_takes_the_rain_share_of_the_radar_that_can_tell() -> None:
+    """Half of LibreWXR's echo is rain, so half of CHMI's is: 0.15 -> 0.075, dry."""
+    series = [
+        _radar([1.0] * 3, liquid=[0.5] * 3),
+        _radar([0.15] * 3, source_id=SOURCE_CHMI),
+    ]
+    consensus = _snow_consensus(series)
+
+    assert consensus.aligned[SOURCE_CHMI][T] == pytest.approx(0.075)
+    assert consensus.aligned[SOURCE_LIBREWXR][T] == pytest.approx(0.5)
+
+
+def test_chmi_takes_the_models_share_when_librewxr_sees_nothing() -> None:
+    """The radar that can tell has no echo here, so the models' phase is the evidence."""
+    series = [
+        _radar([0.0] * 3, liquid=[0.0] * 3),
+        _radar([SNOWFALL] * 3, source_id=SOURCE_CHMI),
+        _hourly(SOURCE_KNMI, 0.4, liquid=[0.0], temperature=[-1.0]),
+    ]
+    slot = _snow_consensus(series).at(T)
+
+    assert not slot.wet
+    assert not slot.disputed
+    assert slot.snow
+
+
+def test_nothing_is_ignored_when_nobody_can_tell_rain_from_snow() -> None:
+    """CHMI alone, no phase anywhere: its echo counts as it always did."""
+    slot = _snow_consensus([_radar([SNOWFALL] * 3, source_id=SOURCE_CHMI)]).at(T)
+
+    assert slot.wet
+    assert not slot.snow
+
+
+def test_snow_below_the_threshold_was_never_news() -> None:
+    """A trace of snow under the threshold is dry either way, and not flagged as snow."""
+    series = [_radar([0.05] * 3, liquid=[0.0] * 3)]
+    slot = _snow_consensus(series).at(T)
+
+    assert not slot.wet
+    assert not slot.snow
+
+
+def test_a_models_snow_inside_the_radars_reach_explains_nothing() -> None:
+    """The radar sees a clear sky and decides; the model's snow there is not the reason."""
+    series = [
+        _radar([0.0] * 3, liquid=[0.0] * 3),
+        _hourly(SOURCE_KNMI, 0.4, liquid=[0.0], temperature=[-1.0]),
+    ]
+    slot = _snow_consensus(series).at(T)
+
+    assert not slot.wet
+    assert not slot.snow

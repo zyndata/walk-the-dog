@@ -75,11 +75,18 @@ def align(series: SourceSeries, slots: Sequence[datetime]) -> dict[datetime, flo
     left — all three mean the same thing to the consensus vote: this source casts
     no vote here.
     """
-    if not series.slots:
+    return align_pairs(series.slots, series.step_s, slots)
+
+
+def align_pairs(
+    pairs: Sequence[tuple[datetime, float]], step_s: int, slots: Sequence[datetime]
+) -> dict[datetime, float]:
+    """`align` for any per-step values a series carries, not only its intensity."""
+    if not pairs:
         return {}
-    step = timedelta(seconds=series.step_s)
-    starts = [start for start, _ in series.slots]
-    values = [value for _, value in series.slots]
+    step = timedelta(seconds=step_s)
+    starts = [start for start, _ in pairs]
+    values = [value for _, value in pairs]
     aligned: dict[datetime, float] = {}
     for slot in slots:
         index = bisect_right(starts, slot) - 1

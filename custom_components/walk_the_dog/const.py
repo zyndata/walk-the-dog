@@ -40,6 +40,19 @@ CONF_AUTO_MUTE_ENTITY: Final = "auto_mute_entity"
 CONF_WALK_TARGETS: Final = "walk_targets"
 CONF_CONFIRM_MARGIN_MIN: Final = "confirm_margin_min"
 CONF_PRELIMINARY_ALERT: Final = "preliminary_alert"
+CONF_IGNORE_SNOW: Final = "ignore_snow"
+
+#: Stored: `{notify service: language code}` for the phones whose language the user
+#: chose by hand. A phone absent from it follows its user's profile (since 1.6.0).
+CONF_NOTIFY_LANGUAGES: Final = "notify_languages"
+
+#: The form fields that fill `notify_languages`: one list of phones per language the
+#: integration is translated into. Two labelled lists rather than one field per phone,
+#: because a field named after a phone is a label no translation can supply.
+NOTIFY_LANGUAGE_FIELDS: Final[dict[str, str]] = {
+    "pl": "polish_devices",
+    "en": "english_devices",
+}
 
 # Keys inside one walk's entry of `walk_targets` (docs/CONFIG.md § Per-walk alerts)
 CONF_TARGET_SERVICES: Final = "notify_services"
@@ -68,6 +81,16 @@ LEAD_TIME_MIN: Final = 30
 #: default: it is the only early word a user gets now that the real alert waits for
 #: the radar, and it never decides anything (docs/CONFIG.md § The preliminary notice).
 DEFAULT_PRELIMINARY_ALERT: Final = True
+
+#: Whether snow is left out of the rain vote. On by default: snow does not soak a dog
+#: the way rain does, and since the radar decides the alert, every winter snowfall
+#: was sending a raincoat alert (docs/CONFIG.md § Snow).
+DEFAULT_IGNORE_SNOW: Final = True
+
+#: Above this 2 m temperature "snow" is wet snow or sleet, which soaks like rain, so
+#: it is not ignored however the radar labels it. The models' warmest value at the
+#: hour decides: it is the reading that can still turn snow to slush on the way down.
+SNOW_MAX_TEMP_C: Final = 1.0
 
 #: How long before setting off the "it still stands" message is sent. 0 disables it,
 #: which is the default: silence already means "nothing changed", and this option

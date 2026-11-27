@@ -37,6 +37,7 @@ from custom_components.walk_the_dog.sources.librewxr import (
     NOWCAST_FRAMES,
     SMOOTH,
     SNOW,
+    SNOW_OFFSET,
     STEP_S,
     TILE_SIZE,
     WEATHER_MAPS_PATH,
@@ -47,7 +48,7 @@ from custom_components.walk_the_dog.sources.librewxr import (
     parse_weather_maps,
 )
 
-from .conftest import load_bytes, load_fixture
+from .conftest import SNOW_GEOMETRY, load_bytes, load_fixture
 
 INDEX_URL = BASE_URL + WEATHER_MAPS_PATH
 UA = "walk_the_dog/test (+https://github.com/zyndata/walk-the-dog)"
@@ -685,3 +686,130 @@ async def test_the_first_observation_has_nothing_to_be_frozen_against(
 
     assert not adapter.frozen
     assert again.series
+
+
+# --- snow (since 1.6.0) ----------------------------------------------------------
+
+
+def _tile(background: tuple[int, int, int, int], echo_grey: int | None = None) -> bytes:
+    """A tile of one background, with a block of echo in its middle if asked for."""
+    image = Image.new("RGBA", (TILE_SIZE, TILE_SIZE), background)
+    if echo_grey is not None:
+        block = Image.new("RGBA", (64, 64), (echo_grey, echo_grey, echo_grey, 255))
+        image.paste(block, (96, 96))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+TRANSPARENT = (0, 0, 0, 0)
+#: The snow zone where nothing falls: opaque grey 128.
+SNOW_ZONE = (SNOW_OFFSET, SNOW_OFFSET, SNOW_OFFSET, 255)
+
+
+async def test_a_snow_tile_reads_as_snow_not_rain(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    now: datetime,
+) -> None:
+    """Recorded over Rzeszów on 2026-11-27: every echo pixel is snow.
+
+    The disc's 90th percentile is grey 181, i.e. 53 once the snow flag is masked
+    off — 21 dBZ, 0.75 mm/h, light. None of it is rain.
+    """
+    _mock_frames(aioclient_mock, SNOW_GEOMETRY, load_bytes("librewxr", "tile_snow.png"))
+
+    result = await LibreWxrAdapter(UA).fetch(async_get_clientsession(hass), SNOW_GEOMETRY, now)
+
+    series = result.series[0]
+    assert series.slots[0][1] == pytest.approx(grey_to_mm_per_h(53), abs=1e-6)
+    assert intensity_class(series.slots[0][1]) == INTENSITY_THRESHOLD_LIGHT
+    assert [value for _, value in series.liquid] == [0.0] * 7
+
+
+async def test_rain_is_all_liquid(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    wet_geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """A rain pixel keeps its grey under the snow mask, so the two values agree."""
+    _mock_frames(aioclient_mock, wet_geometry, load_bytes("librewxr", "tile_wet.png"))
+
+    result = await LibreWxrAdapter(UA).fetch(async_get_clientsession(hass), wet_geometry, now)
+
+    series = result.series[0]
+    assert series.liquid == series.slots
+
+
+async def test_the_snow_zone_alone_is_dry_and_not_echo(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """Opaque grey 128 everywhere is a cold sky with nothing falling from it.
+
+    Repeating, it must read like any empty sky: dry, and not a frozen composite.
+    """
+    adapter = LibreWxrAdapter(UA, cache=SampleCache(geometry.key))
+    session = async_get_clientsession(hass)
+    _mock_frames(aioclient_mock, geometry, _tile(SNOW_ZONE))
+    await adapter.fetch(session, geometry, now)
+
+    aioclient_mock.clear_requests()
+    _mock_frames(aioclient_mock, geometry, _tile(SNOW_ZONE), shift=STEP)
+    result = await adapter.fetch(session, geometry, now)
+
+    assert not adapter.frozen
+    assert result.ok
+    assert result.series[0].slots[0][1] == 0.0
+    assert result.series[0].liquid[0][1] == 0.0
+
+
+async def test_a_frozen_composite_is_caught_under_a_moving_snow_zone(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """The echo repeats exactly while the snow zone around it is redrawn.
+
+    The zone comes from a temperature field, not from the radar, so it can change
+    under a composite that has stopped: comparing raw bytes would miss the freeze.
+    """
+    adapter = LibreWxrAdapter(UA, cache=SampleCache(geometry.key))
+    session = async_get_clientsession(hass)
+    snow_echo = SNOW_OFFSET + 50
+    _mock_frames(aioclient_mock, geometry, _tile(TRANSPARENT, snow_echo))
+    await adapter.fetch(session, geometry, now)
+
+    aioclient_mock.clear_requests()
+    _mock_frames(aioclient_mock, geometry, _tile(SNOW_ZONE, snow_echo), shift=STEP)
+    frozen = await adapter.fetch(session, geometry, now)
+
+    assert adapter.frozen
+    assert frozen.series == ()
+
+
+async def test_a_cached_frame_without_its_phase_is_sampled_again(
+    hass: HomeAssistant,
+    aioclient_mock: AiohttpClientMocker,
+    wet_geometry: SampleGeometry,
+    now: datetime,
+) -> None:
+    """A frame cached by 1.5 has no rain/snow split; the first 1.6 cycle reads it again."""
+    cache = SampleCache(wet_geometry.key)
+    index, mask = _mock_frames(aioclient_mock, wet_geometry, load_bytes("librewxr", "tile_wet.png"))
+    _, frames = parse_weather_maps(index)
+    for slot_time, path in frames[1:]:
+        cache.set(path, slot_time, 99.0)
+
+    result = await LibreWxrAdapter(UA, cache=cache).fetch(
+        async_get_clientsession(hass), wet_geometry, now
+    )
+
+    # Index + every frame, the observation included: nothing was taken from the cache.
+    assert len(aioclient_mock.mock_calls) == 1 + len(frames) * mask.tile_count
+    assert all(value != 99.0 for _, value in result.series[0].slots)
+    assert cache.sample(frames[1][1]).liquid_mm_per_h is not None

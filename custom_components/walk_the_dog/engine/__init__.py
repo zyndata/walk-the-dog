@@ -29,7 +29,7 @@ from .consensus import (
     freshness,
     source_weight,
 )
-from .grid import SLOT, align, ceil_slot, floor_slot, slots_between, slots_for_window
+from .grid import SLOT, align, align_pairs, ceil_slot, floor_slot, slots_between, slots_for_window
 from .window import (
     DIRECTION_EARLIER,
     DIRECTION_LATER,
@@ -75,6 +75,7 @@ __all__ = [
     "SourceBreakdown",
     "WindowVerdict",
     "align",
+    "align_pairs",
     "build_consensus",
     "candidate_starts",
     "ceil_slot",

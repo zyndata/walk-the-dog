@@ -124,8 +124,17 @@ All sampling covers a disc of the configured alert radius `r` (default 5 km, see
 [Alert radius decision](#alert-radius-decision)) around the configured location.
 
 **LibreWXR (tiles).** Fixed parameters: `z=8`, `size=256`, `color=0` (grayscale ramp, survives
-palette decoding exactly), `smooth=0`, `snow=0`, identifying `User-Agent` (mandatory — default
-Python UA is rejected with 403, measured in phase 0).
+palette decoding exactly), `smooth=0`, `snow=1` (since 1.6.0; `snow=0` before), identifying
+`User-Agent` (mandatory — default Python UA is rejected with 403, measured in phase 0).
+
+**The snow mask** (measured 2026-11-27, snow over central Poland): a rain pixel keeps its grey
+(`dBZ + 32`, 0–127); a snow pixel's grey is shifted up by exactly 128 on every level seen
+(42 → 170); and the snow zone where nothing falls is painted an opaque grey 128 — dBZ −32 on the
+snow ramp, i.e. no echo. Each frame is therefore reduced to **two** p90 values over the disc: the
+whole precipitation (snow flag masked off) and the rain alone (snow pixels as 0). Same tiles, same
+requests. The frozen-feed check below looks at the echo only — intensity with the snow flag masked
+off, grey 128 as nothing — because the snow zone is drawn from a temperature field that can be
+redrawn under a composite that has stopped.
 
 1. Fetch `/public/weather-maps.json` (1 request/cycle). Take the newest `past` frame + all 6
    `nowcast` frames; identify each frame by its `path` string, which is the cache key.
@@ -201,17 +210,23 @@ which is why the crop happens before the conversion rather than after.
 
 **Open-Meteo (`icon_eu` + `knmi`).** One `GET /v1/forecast` request with **5 coordinates**
 (centre + 4 points at bearings 0°/90°/180°/270° at distance r) ×
-`models=icon_eu,knmi_harmonie_arome_europe` × `hourly=precipitation`, `forecast_hours=13`
+`models=icon_eu,knmi_harmonie_arome_europe` × `hourly=precipitation,rain,showers,temperature_2m`
+(the last three since 1.6.0, for § Snow), `forecast_hours=13`
 (the first stamp is the current hour's sum, already fallen, so twelve hours of lookahead need
 thirteen stamps), `timeformat=unixtime`. Measured at 508 bytes gzipped for 5 points × 3 models in phase 0. Per
 model and hour, the sampled intensity is the **max across the 5 points** (few samples of a
 smooth NWP field — no speckle risk; max is the conservative choice). mm per hourly step = mm/h
 directly; the interpolated `minutely_15` series is never requested (phase 0: carries no
-information for Poland and loses precision to quantisation).
+information for Poland and loses precision to quantisation). The rain part is `rain + showers`
+(a null `showers` reads as 0, a null `rain` leaves the hour unsplit), reduced the same way and
+capped at the hour's total; the temperature is an instant at its stamp, so an hourly slot takes
+the warmer of the two instants it spans, across all five points.
 
 **MET Norway (failover only).** One `compact?lat=&lon=` request for the **centre point only** —
 its ~10 km cell alone covers any permitted radius, and the terms ask to conserve requests.
-`next_1_hours.details.precipitation_amount` mm = mm/h. Mandatory identifying `User-Agent` with
+`next_1_hours.details.precipitation_amount` mm = mm/h; the hour is all snow when its
+`symbol_code` names snow but not sleet, and the slot's temperature is the warmer of the
+`instant.details.air_temperature` at its two ends. Mandatory identifying `User-Agent` with
 contact info; `If-Modified-Since` on every request; next poll no earlier than the `Expires`
 header and never < 10 min apart.
 
@@ -294,6 +309,24 @@ and sends no alert, and the window carries `disputed` so a walk left in place ca
 quiet notice (§ Coordinator scheduling). `risk` and `confidence` are computed exactly as before,
 which is why a disputed walk shows risk 0.601 next to `direction: none`. The models keep the plain
 weighted majority wherever they vote; they are too uncertain to break a tie between radars.
+
+**Dry snow is not rain** (1.6.0, option `ignore_snow`, default on; after a winter of raincoat
+alerts about snow). Before the vote, in every slot where it is cold enough, each source's value is
+replaced by the part of it that falls as rain, so snow alone votes dry:
+
+- *Cold enough* = the warmest 2 m temperature any live model gives for the slot is ≤ +1 °C
+  (`SNOW_MAX_TEMP_C`). Warmer, "snow" is wet snow or sleet and counts in full. With no model
+  temperature at all, the sources' own phase is trusted.
+- A source that reports its rain part (`SourceSeries.liquid`: LibreWXR, the models) uses it.
+- A source that cannot (CHMI) is scaled by the **rain share** of the same slot: the radars that
+  can tell, if they see anything there; otherwise the models; and it is left unchanged when
+  nobody can tell.
+- Rain in the frost is rain — freezing rain is not excused by the temperature.
+
+The adjusted values are what the window layer and the per-source breakdown see. A slot where the
+adjustment turned a *voter* from wet to dry carries `snow`, and so does a window containing one;
+the recommendation's `snow` is the scheduled window's, surfaced in the payload. A model's snow
+inside the radar's reach does not set it: the model was never going to decide that slot.
 
 Correlated sources never both contribute (phase 0 rule): the adapter registry enables at most
 one member of each correlated pair — concretely, `metno` is polled only while Open-Meteo is
@@ -599,7 +632,8 @@ responses** — that is what keeps it tiny.
 
 - **Frame sample cache** (the persisted part): map `frame path` (string; for LibreWXR the
   frame's valid time, plus an `observed:`-prefixed key for the frame re-read as the observation)
-  → `{slot_utc, mm_per_h}`. Shared by both image
+  → `{slot_utc, mm_per_h, liquid_mm_per_h?}` — the last only for LibreWXR, since 1.6.0; an entry
+  without it, stored by 1.5, is sampled again while the budget allows. Shared by both image
   sources — a path for LibreWXR, the full URL for CHMI — so their entries cannot collide. Bound:
   **48 entries, LRU** (LibreWXR 12 past + 6 nowcast = 18, CHMI one observed frame per 5-minute run;
   48 gives slack across runs). Persisted with `homeassistant.helpers.storage.Store` (version 1, key

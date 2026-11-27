@@ -2558,3 +2558,97 @@ whenever a decision deviates from [PLAN.md](PLAN.md)). Statuses: `not started` /
 - **Released as [`v1.5.1`](https://github.com/zyndata/walk-the-dog/releases/tag/v1.5.1)**
   (2026-11-17), with CI, Validate and Release green, published, not a draft and not a
   pre-release.
+
+## Change — snow no longer alerts; a language per phone (2026-11-27, out of phase)
+
+- **Status:** done on `main`, not yet released (`[Unreleased]` is ready for `/release`; `### Added`
+  entries, so **1.6.0**).
+- **Date:** 2026-11-27
+- **Why it exists:** two reports from the maintainer. **Deviation from `PLAN.md`, recorded here
+  before proceeding, as workflow rule 3 requires** — no phase is open; all phases are done.
+  1. **Winter alerts about snow.** The radar sees snow as echo like any rain, and since 1.3.0 the
+     radar decides the alert, so snowfall sends a raincoat alert. Snow is not a problem on a walk.
+  2. **Pushes always in English.** Read from the live instance: the server language is `en`; the
+     maintainer's own profile is explicitly `en`; the second user's profile has no saved language
+     at all (left on "follow the browser"), so 1.4.0's fallback gives the server language. The
+     Android companion app reports no locale anywhere (registration data, 271 `mobile_app`
+     entities checked), so the server cannot learn the phone's language by itself.
+- **Measured before deciding (2026-11-27, snow over central and southern Poland):** LibreWXR's
+  `snow=1` tiles keep a rain pixel's grey unchanged and add 128 to a snow pixel's (42 → 170, a
+  1:1 shift on every level seen), and paint the whole snow zone grey 128, opaque, where there is
+  no echo — so the snow tile costs no extra request and carries phase per pixel and per frame.
+  Open-Meteo returns `rain`, `showers`, `snowfall`, `temperature_2m` for both models in the same
+  request (Kraków today: 2.3 mm precipitation, 0 mm rain, 1.6 cm snow, −2.0…−1.1 °C). CHMI's
+  composite carries no phase.
+- **Plan (maintainer's choices of the options offered):**
+  - **Snow is ignored only when it is cold** — a slot the radar marks as snow counts as dry only
+    while the models' 2 m temperature is ≤ +1 °C; warmer "snow" is likely wet snow or sleet and
+    still alerts. Without a temperature the radar's mask is trusted.
+  - **An option, default on** (`ignore_snow`).
+  - **A language per phone** in the notification options: *automatic* (the 1.4.0 profile rule),
+    Polish or English.
+  - Bugs found on the way are fixed and listed here.
+- **What was built:**
+  - `sources/base.py` — `SourceSeries.liquid` (the rain part of each slot) and
+    `SourceSeries.temperature_c` (2 m, warmest value the slot spans); both optional, empty means
+    "cannot tell".
+  - `sources/librewxr.py` — tiles asked for with `snow=1`; each frame reduced to two p90 values,
+    all precipitation (`grey & 127`) and rain alone (snow pixels as 0). The frozen-feed check and
+    its fingerprint now look at the echo plane only, so the opaque grey-128 snow zone is neither
+    echo nor a difference between frames.
+  - `cache.py` — `Sample.liquid_mm_per_h` (persisted only where known), `SampleCache.sample()`;
+    an entry stored by 1.5 has none and is sampled again while the budget allows.
+  - `sources/open_meteo.py` — `hourly=precipitation,rain,showers,temperature_2m` in the same
+    request; `sources/met_norway.py` — phase from `symbol_code` (snow but not sleet), temperature
+    from `instant`.
+  - `engine/consensus.py` — `build_consensus(..., ignore_snow=)`: per slot, if the warmest model
+    temperature is ≤ `SNOW_MAX_TEMP_C` (+1 °C) or unknown, every value is cut to its rain part;
+    CHMI by the rain share of the radars that can tell, else of the models, else not at all.
+    `SlotScore.snow` when a *voter* went from wet to dry. `engine/grid.align_pairs`.
+  - `engine/window.py` — `WindowVerdict.snow`, `Recommendation.snow`; `coordinator.py` — the
+    option, and `snow` in the sensor attributes and event payload.
+  - `config_flow.py` — `ignore_snow` toggle (default on) and two device lists, `polish_devices` /
+    `english_devices`, stored as `notify_languages: {service: code}`; a phone on both is
+    `language_conflict`. `notifier.py` — that choice comes before the profile language.
+  - Strings (en + pl) for the three fields, the error, and the `snow` attribute — plus the
+    `disputed` attribute, which 1.5.0 shipped without a name.
+  - Docs: CONFIG.md (options, § Snow, payload, § Language rewritten as an order of precedence,
+    the Android channel caveat), ARCHITECTURE.md (snow mask, dry snow under § Consensus scoring,
+    model variables, cache entry), DATA_SOURCES.md (the snow ramp, measured), README features.
+  - Tests: recorded fixtures `librewxr/tile_snow.png` and `open_meteo/snow.json` (Rzeszów,
+    2026-11-27, light snow at −1 °C); 40 new tests across consensus, window, LibreWXR, Open-Meteo,
+    MET Norway, cache, config flow, notifier and strings — among them a guard that every sensor
+    attribute is named. **665 tests green** offline in `wtd-test`, `ruff` clean.
+  - **Verified live** (2026-11-27, real adapters + engine over public landmarks): Rzeszów, snow at
+    −1 °C — `no_dry_window` without the option, `none` with `snow: true` with it; Kraków —
+    `earlier` → `none`, `snow: true`; Warszawa, dry — unchanged.
+- **Bugs found while reviewing:**
+  - **The English pushes were not a code fault** (see *Why it exists*): the maintainer's profile
+    is explicitly English, the second user's has no saved language. Fixed by the per-phone choice;
+    the maintainer has to put the phones on the lists once.
+  - **`disputed` had no translated attribute name** since 1.5.0 — fixed, with a test that fails
+    for any future attribute added without one.
+  - **The snow mask would have broken the frozen-feed check** (opaque grey 128 read as echo, and
+    a redrawn snow zone hiding a freeze) — handled before it shipped, with two tests.
+  - Not a bug, documented: the Android quiet channel is named in the push's language, and the
+    companion app keys channels by name, so changing a phone's language creates it afresh.
+- **Decisions:**
+  - **Two lists in the alert settings, not a field per phone.** A field named after a phone has a
+    label no translation can supply (`test_every_field_is_labelled`), and a separate step would
+    add a screen to every options edit.
+  - **The warmest model decides "cold".** One model at +2 °C is enough doubt that the snow is
+    slush; with no model at all the radar's label is trusted (maintainer's choice).
+  - **Freezing rain still alerts**: the rule removes snow, never rain, whatever the temperature.
+  - **Only a voter's snow sets `snow`** — a model's snow inside the radar's reach decided nothing.
+  - **`build_consensus` keeps its signature** plus one keyword, with a `noqa: PLR0913`, rather
+    than a parameter object every test would have to change.
+  - **No migration**: an entry without `ignore_snow` reads the default, on.
+- **Open questions carried forward:**
+  - **How LibreWXR draws the snow zone is undocumented** (it follows a temperature field, not the
+    radar). Watch a few snowy walks: the sensor's `snow` and the per-source values say what it did.
+  - **The +1 °C line is a judgement**, not a measurement. Wet snow at 0…+1 °C is still ignored.
+  - **Heavy snow is ignored like light snow.** If a blizzard should still warn, the option could
+    take an intensity ceiling.
+  - Release 1.6.0 not cut yet; live verification on the maintainer's instance once deployed
+    (put the phones on the language lists first).
+  - Everything from the earlier entries, unchanged.

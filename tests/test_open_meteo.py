@@ -197,7 +197,7 @@ async def test_fetch_asks_for_five_coordinates_and_the_hourly_series(
     query = aioclient_mock.mock_calls[0][1].query
     assert len(query["latitude"].split(",")) == 5
     assert len(query["longitude"].split(",")) == 5
-    assert query["hourly"] == "precipitation"
+    assert query["hourly"] == "precipitation,rain,showers,temperature_2m"
     assert query["models"] == "icon_eu,knmi_harmonie_arome_europe"
     assert query["timeformat"] == "unixtime"
     # The interpolated 15-minutely series is never requested — it is lossy for Poland.
@@ -389,3 +389,83 @@ def test_the_first_value_of_a_response_describes_the_hour_just_gone() -> None:
     for entry in series:
         assert entry.slots[0][0] == NOW - timedelta(seconds=STEP_S)
         assert entry.slots[1][0] == NOW
+
+
+# --- rain, snow and temperature (since 1.6.0) ------------------------------------
+
+H0 = 1787641200  # 2026-08-25 07:00 UTC
+H = 3600
+
+
+def test_the_recorded_snow_is_snow_and_cold() -> None:
+    """Rzeszów, 2026-11-27: light snow, no rain, both models just below freezing."""
+    series = {s.source_id: s for s in parse_forecast(load_fixture("open_meteo", "snow.json"), NOW)}
+    icon = series[SOURCE_ICON_EU]
+
+    assert icon.slots[0][1] == pytest.approx(0.1)
+    assert icon.liquid[0] == (icon.slots[0][0], 0.0)
+    assert all(-1.5 < value < 0.0 for _, value in icon.temperature_c)
+    assert all(-1.5 < value < 0.0 for _, value in series[SOURCE_KNMI].temperature_c)
+
+
+def test_rain_and_showers_are_the_liquid_part() -> None:
+    """`precipitation` = rain + showers + snow; the first two are what soaks a dog."""
+    series = parse_forecast(
+        {
+            "hourly": {
+                "time": [H0, H0 + H],
+                "precipitation_icon_eu": [1.0, 1.0],
+                "rain_icon_eu": [0.2, 0.5],
+                "showers_icon_eu": [0.3, None],
+            }
+        },
+        NOW,
+    )[0]
+
+    assert [value for _, value in series.liquid] == [pytest.approx(0.5), pytest.approx(0.5)]
+
+
+def test_no_rain_column_means_the_phase_is_unknown() -> None:
+    """A model that does not split its total gets no liquid value — not a zero."""
+    series = parse_forecast(
+        {"hourly": {"time": [H0], "precipitation_icon_eu": [1.0]}},
+        NOW,
+    )[0]
+
+    assert series.liquid == ()
+    assert series.temperature_c == ()
+
+
+def test_the_liquid_part_never_exceeds_the_total() -> None:
+    """Rounded upstream columns can disagree by a tenth; the total is the ceiling."""
+    series = parse_forecast(
+        {
+            "hourly": {
+                "time": [H0],
+                "precipitation_icon_eu": [0.1],
+                "rain_icon_eu": [0.1],
+                "showers_icon_eu": [0.1],
+            }
+        },
+        NOW,
+    )[0]
+
+    assert series.liquid[0][1] == pytest.approx(0.1)
+
+
+def test_a_slot_is_as_warm_as_the_warmer_of_its_two_instants() -> None:
+    """The value stamped H covers (H-1h, H]; the temperatures at both ends bound it."""
+    series = parse_forecast(
+        {
+            "hourly": {
+                "time": [H0, H0 + H, H0 + 2 * H],
+                "precipitation_icon_eu": [0.0, 0.0, 0.0],
+                "temperature_2m_icon_eu": [-3.0, 0.5, -1.0],
+            }
+        },
+        NOW,
+    )[0]
+
+    start = datetime.fromtimestamp(H0, tz=UTC)
+    assert dict(series.temperature_c)[start] == 0.5
+    assert dict(series.temperature_c)[start - timedelta(hours=1)] == -3.0

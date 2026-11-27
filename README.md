@@ -58,6 +58,11 @@ back — and says plainly that the radar cannot see that far yet, so the time ma
   re-checked as 14:00 comes into radar range. You are told again only if the answer changes. In
   the last twenty minutes before you set off it looks twice as often, where a radar publishes
   fast enough for that to mean anything.
+- **Snow is not rain** — dry snow does not soak a dog, so falling snow sends no alert (an option,
+  on by default). Only while the models put it at +1 °C or below: wet snow, sleet and freezing
+  rain still count as rain.
+- **Each phone in its own language** — a push is written in the language of the Home Assistant
+  user the phone is signed in as, or in Polish or English chosen for that phone in the settings.
 - **One button: *Already went*** — closes that walk, on every phone it was sent to, and stops
   the requests with it. Optionally, a short "still on" (or "the rain has gone, walk as normal")
   a few minutes before you actually leave.

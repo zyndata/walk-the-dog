@@ -25,6 +25,14 @@ two hours was the same tile, byte for byte, and the nowcast went on extrapolatin
 it. A frame that repeats its predecessor exactly *and carries echo* cannot be
 weather — real echo moves every ten minutes — so the source is reported stale
 until the observation changes. An empty tile repeating is just dry weather.
+
+The tiles are asked for with the snow mask on (since 1.6.0). Measured 2026-11-27,
+with snow over central Poland: a rain pixel keeps its grey, a snow pixel's grey is
+shifted up by 128 on every level seen (42 -> 170), and the whole snow zone is
+painted an opaque grey 128 where there is no echo at all. So one request carries
+both the intensity and its phase, and each frame is reduced to two values: all the
+precipitation over the disc, and the part of it that falls as rain. The engine
+decides what to make of the difference (docs/ARCHITECTURE.md § Snow).
 """
 
 from __future__ import annotations
@@ -71,7 +79,7 @@ ZOOM = 8
 TILE_SIZE = 256
 COLOR_SCHEME = 0  # grayscale ramp: grey level == dBZ + 32
 SMOOTH = 0  # unsmoothed, so pixel values stay exactly on the palette
-SNOW = 0  # rain LUT only; the snow LUT would reuse grey levels 128-255
+SNOW = 1  # snow mask on: a snow pixel's grey is its rain grey + 128
 
 STEP_S = 600  # 10-minute frames
 NOWCAST_FRAMES = 6  # +10...+60 min
@@ -112,6 +120,12 @@ MAX_REQUESTS_PER_HOUR = hourly_cap(1)
 GREY_NODATA = 0
 DBZ_OFFSET = 32  # grey = dBZ + 32
 
+#: Added to a pixel's grey level when the renderer files it under snow. Grey 128
+#: itself is the snow zone with no echo — dBZ -32, the snow ramp's own "nothing".
+SNOW_OFFSET = 128
+#: The bits of a grey level that carry intensity, with the snow flag masked off.
+INTENSITY_BITS = SNOW_OFFSET - 1
+
 #: Spatial aggregation over the disc: robust against single-pixel radar speckle.
 PERCENTILE = 90
 
@@ -127,7 +141,11 @@ class FrameSample(NamedTuple):
     """One frame reduced to the disc's value, plus what identifies the frame itself."""
 
     mm_per_h: float
-    #: Digest of the raw tile bytes — equal digests are the same rendered frame.
+    #: The same reduction with every snow pixel counted as dry: the rain alone.
+    liquid_mm_per_h: float
+    #: Digest of what the tiles say about echo — equal digests are the same weather.
+    #: The snow zone is left out of it, because it is drawn from a temperature field
+    #: that can move on while a frozen composite does not.
     fingerprint: bytes
     #: Whether any pixel of the fetched tiles carries echo, inside the disc or not.
     has_echo: bool
@@ -349,21 +367,29 @@ class LibreWxrAdapter:
         mask = self._disc_mask(geometry)
         issued_at = frames[0][0]  # newest past frame == the current observation
         slots: list[tuple[datetime, float]] = []
+        liquid: list[tuple[datetime, float]] = []
 
         for slot_time, path in frames:
             observed = path == observed_path
             key = OBSERVED_KEY_PREFIX + path if observed else path
-            cached = self._cache.get(key) if self._cache else None
-            if cached is not None:
-                slots.append((slot_time, cached))
+            cached = self._cache.sample(key) if self._cache else None
+            # An entry stored before 1.6.0 has no phase and is sampled again — while
+            # the budget allows; past that, it still beats no value at all.
+            if cached is not None and cached.liquid_mm_per_h is not None:
+                slots.append((slot_time, cached.mm_per_h))
+                liquid.append((slot_time, cached.liquid_mm_per_h))
                 continue
             if self._budget.remaining(now) < mask.tile_count:
                 # Out of budget: stop sampling rather than exceed it. Whatever was
                 # already collected still forms a usable (shorter) series — and an
                 # observation we cannot afford to re-read still has its forecast.
-                fallback = self._cache.get(path) if observed and self._cache else None
+                fallback = cached
+                if fallback is None and observed and self._cache is not None:
+                    fallback = self._cache.sample(path)
                 if fallback is not None:
-                    slots.append((slot_time, fallback))
+                    slots.append((slot_time, fallback.mm_per_h))
+                    if fallback.liquid_mm_per_h is not None:
+                        liquid.append((slot_time, fallback.liquid_mm_per_h))
                     continue
                 _LOGGER.debug("LibreWXR budget reached; %d frames sampled", len(slots))
                 break
@@ -371,8 +397,9 @@ class LibreWxrAdapter:
             if observed:
                 self._track_observation(path, sample)
             if self._cache is not None:
-                self._cache.set(key, slot_time, sample.mm_per_h)
+                self._cache.set(key, slot_time, sample.mm_per_h, sample.liquid_mm_per_h)
             slots.append((slot_time, sample.mm_per_h))
+            liquid.append((slot_time, sample.liquid_mm_per_h))
 
         if not slots:
             raise RuntimeError("no frames could be sampled")
@@ -398,6 +425,7 @@ class LibreWxrAdapter:
             slots=tuple(slots),
             cell_km=CELL_KM[SOURCE_LIBREWXR],
             reliability=RELIABILITY[SOURCE_LIBREWXR],
+            liquid=tuple(liquid),
         )
         stale = series.is_stale(now)
         return FetchResult(
@@ -433,12 +461,13 @@ class LibreWxrAdapter:
         *,
         inspect: bool = False,
     ) -> FrameSample:
-        """Reduce one frame to a single mm/h value over the disc.
+        """Reduce one frame to its disc values: all precipitation, and the rain in it.
 
         Tiles are fetched and decoded one at a time and released immediately, so
         peak transient memory is one decoded 256x256 tile regardless of frame count.
         `inspect` also asks whether the tiles carry any echo at all, which costs a
-        whole-tile alpha pass and is only needed for the observation.
+        whole-tile pass and is only needed for the observation — as is the
+        fingerprint, which is taken over that same pass rather than the raw bytes.
         """
         collected: list[np.ndarray] = []
         digest = hashlib.blake2b(digest_size=16)
@@ -451,18 +480,23 @@ class LibreWxrAdapter:
             if not self._budget.consume(now):
                 raise RuntimeError("hourly request budget exhausted")
             raw = await self._get_bytes(session, url)
-            digest.update(raw)
             grey, echo = _decode_grey(raw, (rx0, ry0, rx1, ry1), inspect=inspect)
-            has_echo = has_echo or echo
+            digest.update(raw if echo is None else echo)
+            has_echo = has_echo or (echo is not None and echo.count(0) < len(echo))
             collected.append(grey[tile_mask])
-            del grey, raw
+            del grey, raw, echo
 
         values = np.concatenate(collected) if len(collected) > 1 else collected[0]
-        # `nearest` keeps the result an actually observed grey level, so the value
-        # maps back to a real dBZ step instead of interpolating between palette codes.
-        grey_p90 = int(np.percentile(values, PERCENTILE, method="nearest"))
-        del values, collected
-        return FrameSample(grey_to_mm_per_h(grey_p90), digest.digest(), has_echo)
+        snow = values >= SNOW_OFFSET
+        total = np.where(snow, values - SNOW_OFFSET, values)
+        rain = np.where(snow, GREY_NODATA, values)
+        del values, collected, snow
+        return FrameSample(
+            grey_to_mm_per_h(_p90(total)),
+            grey_to_mm_per_h(_p90(rain)),
+            digest.digest(),
+            has_echo,
+        )
 
     async def _get_json(self, session: ClientSession, url: str) -> Any:
         async with session.get(
@@ -484,13 +518,24 @@ class LibreWxrAdapter:
         return {"User-Agent": self._user_agent, "Accept-Encoding": "gzip"}
 
 
+def _p90(values: np.ndarray) -> int:
+    """The disc's 90th-percentile grey level.
+
+    `nearest` keeps the result an actually observed grey level, so the value maps
+    back to a real dBZ step instead of interpolating between palette codes.
+    """
+    return int(np.percentile(values, PERCENTILE, method="nearest"))
+
+
 def _decode_grey(
     raw: bytes, box: tuple[int, int, int, int], *, inspect: bool = False
-) -> tuple[np.ndarray, bool]:
+) -> tuple[np.ndarray, bytes | None]:
     """Decode the `box` (left, top, right, bottom) of a scheme-0 tile to uint8 grey.
 
-    Also returns, when `inspect` is set, whether any pixel of the whole tile is
-    opaque — i.e. carries echo; False otherwise.
+    Also returns, when `inspect` is set, the whole tile's echo — every pixel's
+    intensity with the snow flag masked off, transparent as 0 — so the caller can
+    both ask whether there is any and fingerprint it; None otherwise. The snow
+    zone's opaque grey 128 is no echo, and masks to 0 like the transparent rest.
 
     Transparent pixels become 0. Scheme 0 is a pure grey ramp, so the red channel
     *is* the grey level — reading it directly avoids the rounding that a luminance
@@ -500,12 +545,16 @@ def _decode_grey(
     rectangle is converted to RGBA and handed to numpy: a few hundred pixels rather
     than the 256 KB the full tile would cost, the same economy `chmi._sample` makes.
     """
+    echo: np.ndarray | None = None
     with Image.open(io.BytesIO(raw)) as image:
         rgba = np.asarray(image.crop(box).convert("RGBA"))
-        has_echo = inspect and image.convert("RGBA").getchannel("A").getbbox() is not None
+        if inspect:
+            full = np.asarray(image.convert("RGBA"))
+            echo = np.where(full[..., 3] > 0, full[..., 0] & INTENSITY_BITS, 0).astype(np.uint8)
+            del full
     grey = np.where(rgba[..., 3] > 0, rgba[..., 0], 0).astype(np.uint8)
     del rgba
-    return grey, has_echo
+    return grey, None if echo is None else echo.tobytes()
 
 
 def parse_weather_maps(index: Any) -> tuple[str, list[tuple[datetime, str]]]:
@@ -552,6 +601,7 @@ __all__ = [
     "CYCLES_PER_HOUR",
     "FROZEN_DETAIL",
     "OBSERVED_KEY_PREFIX",
+    "SNOW_OFFSET",
     "DiscMask",
     "FrameSample",
     "LibreWxrAdapter",

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Snow no longer sends a raincoat alert.** Dry snow does not soak a dog, so falling snow is
+  now left out of the rain forecast — the radar tells rain from snow, and the weather models
+  say how cold it is. Only while the models put the temperature at +1 °C or below: wet snow,
+  sleet and freezing rain still count as rain. A new option, *Ignore snow*, on by default; the
+  sensor and the `walk_the_dog_alert` event carry `snow: true` when snow on the walk was the
+  reason nothing was said.
+- **A language can be chosen for each phone.** *Phones told in Polish* and *Phones told in
+  English* in the alert settings. A phone on neither list keeps following its user's Home
+  Assistant profile — but a profile left on "follow the browser" saves no language, so such a
+  phone was told in the server's language, which is how pushes kept arriving in English.
+
+### Fixed
+
+- **The "Radars disagree" attribute has a name of its own** in the sensor's details, in both
+  languages, instead of its raw key.
+
 ## [1.5.1] - 2026-11-17
 
 ### Fixed

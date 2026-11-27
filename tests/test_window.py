@@ -853,3 +853,54 @@ def test_a_dispute_elsewhere_does_not_mark_a_moved_walk() -> None:
 
     assert recommendation.direction != DIRECTION_NONE
     assert not recommendation.disputed
+
+
+# --- snow (since 1.6.0) ----------------------------------------------------------
+
+
+def _snowing(*, ignore_snow: bool):
+    """Snow on every slot, cold enough to stay dry: LibreWXR sees it, KNMI says -1 °C."""
+    step = int(SLOT.total_seconds())
+    series = [
+        make_series(
+            SOURCE_LIBREWXR,
+            [WET_MM_H] * SLOT_COUNT,
+            start=NOW,
+            step_s=step,
+            liquid=[0.0] * SLOT_COUNT,
+        ),
+        make_series(
+            SOURCE_KNMI,
+            [WET_MM_H] * SLOT_COUNT,
+            start=NOW,
+            step_s=step,
+            liquid=[0.0] * SLOT_COUNT,
+            temperature=[-1.0] * SLOT_COUNT,
+        ),
+    ]
+    consensus = build_consensus(
+        series,
+        [make_status(item.source_id) for item in series],
+        slots=evaluation_slots(T, Search(DURATION, EARLIER, LATER)),
+        threshold=INTENSITY_THRESHOLD_LIGHT,
+        now=NOW,
+        ignore_snow=ignore_snow,
+    )
+    return _recommend(consensus, now=NOW)
+
+
+def test_a_walk_in_dry_snow_goes_ahead_and_says_why() -> None:
+    """Snow on every radar map, and the walk stays where it is — flagged as snow."""
+    recommendation = _snowing(ignore_snow=True)
+
+    assert recommendation.direction == DIRECTION_NONE
+    assert recommendation.snow
+    assert recommendation.radar_backed
+
+
+def test_the_same_snow_is_a_raincoat_with_the_option_off() -> None:
+    """Without the option this is the winter alert the maintainer reported."""
+    recommendation = _snowing(ignore_snow=False)
+
+    assert recommendation.direction == DIRECTION_NO_DRY_WINDOW
+    assert not recommendation.snow

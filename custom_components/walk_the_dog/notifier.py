@@ -83,6 +83,12 @@ The push itself is written for the person holding the phone, not for the house (
 the companion app's registration names the user, and the language that user picked on
 their profile page is what the push is rendered in. The `summary` stays in the server
 language — it is one line in a history the whole home shares.
+
+A profile left on "follow the browser" saves no language on the server, and the Android
+companion app reports none either, so such a phone fell back to the server language —
+English, on a server set up in English — with nothing the user could do about it short
+of changing their whole interface's language. Since 1.6.0 a phone's language can be
+chosen in the integration's own settings, and that choice comes first.
 """
 
 from __future__ import annotations
@@ -109,6 +115,7 @@ from .const import (
     ATTR_SUMMARY,
     CLEAR_NOTIFICATION,
     CONF_AUTO_MUTE_ENTITY,
+    CONF_NOTIFY_LANGUAGES,
     CONF_NOTIFY_SERVICE,
     DOMAIN,
     ENTITY_KEY_RECOMMENDATION,
@@ -334,6 +341,8 @@ class WalkNotifier:
         options = entry.options
         self._default_service = options.get(CONF_NOTIFY_SERVICE)
         self._mute_entity = options.get(CONF_AUTO_MUTE_ENTITY)
+        languages = options.get(CONF_NOTIFY_LANGUAGES)
+        self._languages: dict[str, str] = dict(languages) if isinstance(languages, dict) else {}
         self._confirm_margin = confirm_margin
         self._preliminary_allowed = preliminary
         self._walk_start: datetime | None = None
@@ -772,12 +781,14 @@ class WalkNotifier:
         return await async_get_translations(self.hass, language, TRANSLATION_CATEGORY, {DOMAIN})
 
     async def _async_language_for(self, service: str) -> str:
-        """The profile language of whoever this phone is signed in as, else the server's.
+        """The language chosen for this phone, else its user's profile's, else the server's.
 
-        Read at every send rather than remembered: a user who switches their profile
-        to Polish expects the very next push in Polish, and the frontend keeps the
-        store in memory once loaded, so asking again costs a dictionary lookup.
+        The profile is read at every send rather than remembered: a user who switches
+        their profile to Polish expects the very next push in Polish, and the frontend
+        keeps the store in memory once loaded, so asking again costs a dictionary lookup.
         """
+        if chosen := self._languages.get(service):
+            return chosen
         fallback = self.hass.config.language
         user_id = self._user_for(service)
         if user_id is None:

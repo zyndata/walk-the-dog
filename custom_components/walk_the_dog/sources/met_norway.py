@@ -194,19 +194,23 @@ def parse_compact(payload: Any, fetched_at: datetime) -> SourceSeries:
         raise ValueError("locationforecast response has no timeseries")
 
     slots: list[tuple[datetime, float]] = []
+    liquid: list[tuple[datetime, float]] = []
+    instants: dict[datetime, float] = {}
     for step in timeseries:
-        if not isinstance(step, dict) or not isinstance(step.get("time"), str):
+        parsed = _parse_step(step)
+        if parsed is None:
             continue
-        slot = _iso_utc(step["time"])
-        if slot is None:
-            continue
-        details = (step.get("data") or {}).get("next_1_hours", {}).get("details", {})
-        amount = details.get("precipitation_amount") if isinstance(details, dict) else None
-        if not isinstance(amount, int | float):
-            continue
-        slots.append((slot, max(0.0, float(amount))))
+        slot, amount, rain, temperature = parsed
+        if temperature is not None:
+            instants[slot] = temperature
         if len(slots) >= FORECAST_HOURS:
+            # One instant past the last slot is still wanted: it is that slot's end.
             break
+        if amount is None:
+            continue
+        slots.append((slot, amount))
+        if rain is not None:
+            liquid.append((slot, rain))
 
     if not slots:
         raise ValueError("locationforecast response has no hourly precipitation")
@@ -219,7 +223,69 @@ def parse_compact(payload: Any, fetched_at: datetime) -> SourceSeries:
         slots=tuple(sorted(slots)),
         cell_km=CELL_KM[SOURCE_METNO],
         reliability=RELIABILITY[SOURCE_METNO],
+        liquid=tuple(sorted(liquid)),
+        temperature_c=_slot_temperatures(slots, instants),
     )
+
+
+def _parse_step(
+    step: Any,
+) -> tuple[datetime, float | None, float | None, float | None] | None:
+    """One timeseries step: its time, the hour's amount and rain, and the temperature.
+
+    None for a step without a usable time. The rain is the amount unless the hour's
+    symbol forecasts snow alone, and unknown when there is no symbol to go by.
+    """
+    if not isinstance(step, dict) or not isinstance(step.get("time"), str):
+        return None
+    slot = _iso_utc(step["time"])
+    if slot is None:
+        return None
+    data = step.get("data")
+    temperature = _dig(data, "instant", "details", "air_temperature")
+    amount = _dig(data, "next_1_hours", "details", "precipitation_amount")
+    symbol = _dig(data, "next_1_hours", "summary", "symbol_code")
+    value = max(0.0, float(amount)) if isinstance(amount, int | float) else None
+    rain = None
+    if value is not None and isinstance(symbol, str):
+        rain = 0.0 if _is_snow(symbol) else value
+    return (
+        slot,
+        value,
+        rain,
+        float(temperature) if isinstance(temperature, int | float) else None,
+    )
+
+
+def _slot_temperatures(
+    slots: list[tuple[datetime, float]], instants: dict[datetime, float]
+) -> tuple[tuple[datetime, float], ...]:
+    """The warmer of the two instants each hourly slot spans, where either is known."""
+    step = timedelta(seconds=STEP_S)
+    temperatures = []
+    for slot, _ in slots:
+        ends = [instants[at] for at in (slot, slot + step) if at in instants]
+        if ends:
+            temperatures.append((slot, max(ends)))
+    return tuple(temperatures)
+
+
+def _dig(data: Any, *keys: str) -> Any:
+    """`data[k1][k2]...`, or None as soon as a level is missing or not an object."""
+    for key in keys:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
+
+
+def _is_snow(symbol: str) -> bool:
+    """Whether a weather symbol forecasts snow alone — `lightsnow`, `snowshowers_day`.
+
+    Sleet is rain and snow together, and soaks a dog like rain, so it is not snow
+    here; nor is anything that does not name snow at all.
+    """
+    return "snow" in symbol and "sleet" not in symbol
 
 
 def _iso_utc(value: str) -> datetime | None:

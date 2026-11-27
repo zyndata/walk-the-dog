@@ -48,6 +48,9 @@ class Sample(NamedTuple):
 
     slot: datetime
     mm_per_h: float
+    #: How much of that falls as rain rather than snow; None when the frame could
+    #: not tell (CHMI, and every LibreWXR entry stored before 1.6.0).
+    liquid_mm_per_h: float | None = None
 
 
 class SampleCache:
@@ -78,9 +81,22 @@ class SampleCache:
         self._entries.move_to_end(path)
         return entry.mm_per_h
 
-    def set(self, path: str, slot: datetime, mm_per_h: float) -> None:
+    def sample(self, path: str) -> Sample | None:
+        """The whole sampled frame for a path, or None if it was never sampled."""
+        entry = self._entries.get(path)
+        if entry is not None:
+            self._entries.move_to_end(path)
+        return entry
+
+    def set(
+        self,
+        path: str,
+        slot: datetime,
+        mm_per_h: float,
+        liquid_mm_per_h: float | None = None,
+    ) -> None:
         """Record a sampled frame, evicting the least recently used if full."""
-        self._entries[path] = Sample(slot, mm_per_h)
+        self._entries[path] = Sample(slot, mm_per_h, liquid_mm_per_h)
         self._entries.move_to_end(path)
         while len(self._entries) > self._max_entries:
             self._entries.popitem(last=False)
@@ -115,10 +131,7 @@ class SampleCache:
         """Serializable form written to the HA Store."""
         return {
             "geometry_key": self._geometry_key,
-            "entries": [
-                {"path": path, "slot": entry.slot.isoformat(), "mm_per_h": entry.mm_per_h}
-                for path, entry in self._entries.items()
-            ],
+            "entries": [_entry_dict(path, entry) for path, entry in self._entries.items()],
         }
 
     def load_dict(self, data: Any) -> None:
@@ -137,13 +150,18 @@ class SampleCache:
                 continue
             if not isinstance(value, int | float):
                 continue
+            liquid = raw.get("liquid_mm_per_h")
             try:
                 parsed = datetime.fromisoformat(slot)
             except ValueError:
                 continue
             if parsed.tzinfo is None:
                 parsed = parsed.replace(tzinfo=UTC)
-            self._entries[path] = Sample(parsed.astimezone(UTC), float(value))
+            self._entries[path] = Sample(
+                parsed.astimezone(UTC),
+                float(value),
+                float(liquid) if isinstance(liquid, int | float) else None,
+            )
         while len(self._entries) > self._max_entries:
             self._entries.popitem(last=False)
 
@@ -173,6 +191,18 @@ class SampleCache:
             return
         self._store.async_delay_save(self.as_dict, SAVE_DELAY_S)
         self._dirty = False
+
+
+def _entry_dict(path: str, entry: Sample) -> dict[str, Any]:
+    """One stored entry. `liquid_mm_per_h` only where known, so CHMI's stay as small."""
+    stored: dict[str, Any] = {
+        "path": path,
+        "slot": entry.slot.isoformat(),
+        "mm_per_h": entry.mm_per_h,
+    }
+    if entry.liquid_mm_per_h is not None:
+        stored["liquid_mm_per_h"] = entry.liquid_mm_per_h
+    return stored
 
 
 __all__ = ["MAX_ENTRIES", "STORAGE_KEY", "STORAGE_VERSION", "Sample", "SampleCache"]

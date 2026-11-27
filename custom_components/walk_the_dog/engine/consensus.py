@@ -31,6 +31,15 @@ sends no alert, but it is kept apart from an agreed dry so the user can be told
 quietly that one radar sees rain. The hourly models, voting only beyond the
 radar's reach, keep the plain weighted majority.
 
+**Dry snow is not rain** (since 1.6.0, optional, on by default). Before the vote,
+every source's value in a slot where it is cold enough is cut down to the part that
+falls as rain, so snow alone votes dry. "Cold enough" is the warmest 2 m temperature
+any model gives for the slot, at most `SNOW_MAX_TEMP_C`; warmer than that, "snow" is
+wet snow or sleet and counts in full. With no temperature at all the phase the
+sources report is trusted. A source that cannot tell rain from snow — CHMI — is cut
+by the share of rain the others see in the same slot: a radar that can tell first,
+the models otherwise, and not at all when nobody can.
+
 No I/O, no homeassistant imports, no clock reads: `now` is always a parameter.
 """
 
@@ -39,7 +48,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from ..const import INTENSITY_MM_H, NOWCAST_SOURCES, intensity_class
+from ..const import INTENSITY_MM_H, NOWCAST_SOURCES, SNOW_MAX_TEMP_C, intensity_class
 from ..sources.base import (
     STALE_FACTOR,
     STATE_OK,
@@ -48,7 +57,7 @@ from ..sources.base import (
     UPDATE_INTERVAL_S,
     SourceStatus,
 )
-from .grid import align
+from .grid import align, align_pairs
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -99,6 +108,9 @@ class SlotScore:
     voters: tuple[str, ...] = ()
     #: Two or more radars reach the slot and they disagree about rain. Never wet.
     disputed: bool = False
+    #: A voter saw precipitation here at the threshold that was left out of the
+    #: vote because it falls as dry snow.
+    snow: bool = False
 
     @property
     def n_sources(self) -> int:
@@ -146,13 +158,14 @@ class Consensus:
         return tuple(status.source_id for status in self.statuses if status.contributed)
 
 
-def build_consensus(
+def build_consensus(  # noqa: PLR0913 - every argument past `*` is keyword-only
     series: Iterable[SourceSeries],
     statuses: Iterable[SourceStatus],
     *,
     slots: Sequence[datetime],
     threshold: str,
     now: datetime,
+    ignore_snow: bool = False,
 ) -> Consensus:
     """Score every grid slot in `slots` from the sources' series.
 
@@ -160,6 +173,9 @@ def build_consensus(
     its intensity there reaches that class's mm/h lower bound (docs/CONFIG.md).
     Stale series are dropped before the vote, so a source that stopped publishing
     stops influencing the result instead of freezing its last opinion in place.
+
+    `ignore_snow` leaves dry snow out of every value before it is voted on, and the
+    adjusted values are the ones the window layer and the breakdown see.
     """
     threshold_mm_h = INTENSITY_MM_H[threshold]
     by_id = {s.source_id: s for s in series}
@@ -173,7 +189,15 @@ def build_consensus(
         if weight > 0.0:
             aligned[source_id] = align(source, slots)
 
-    scored = tuple(_score_slot(slot, aligned, weights, threshold_mm_h) for slot in slots)
+    snowed: dict[datetime, set[str]] = {}
+    if ignore_snow:
+        live = {source_id: by_id[source_id] for source_id in aligned}
+        aligned, snowed = _without_dry_snow(live, aligned, slots, threshold_mm_h)
+
+    scored = tuple(
+        _score_slot(slot, aligned, weights, threshold_mm_h, snowed=snowed.get(slot, set()))
+        for slot in slots
+    )
     voted = {
         source_id for source_id, values in aligned.items() if any(slot in values for slot in slots)
     }
@@ -187,11 +211,74 @@ def build_consensus(
     )
 
 
+def _without_dry_snow(
+    series: Mapping[str, SourceSeries],
+    aligned: Mapping[str, Mapping[datetime, float]],
+    slots: Sequence[datetime],
+    threshold_mm_h: float,
+) -> tuple[dict[str, Mapping[datetime, float]], dict[datetime, set[str]]]:
+    """Every source's values with dry snow taken out, and whose vote that changed.
+
+    The second value maps a slot to the sources that reached the threshold before
+    and do not after — the votes the snow would have turned wet.
+    """
+    liquid = {sid: align_pairs(s.liquid, s.step_s, slots) for sid, s in series.items()}
+    warmth = [align_pairs(s.temperature_c, s.step_s, slots) for s in series.values()]
+    adjusted = {sid: dict(values) for sid, values in aligned.items()}
+    snowed: dict[datetime, set[str]] = {}
+    for slot in slots:
+        temperatures = [by_slot[slot] for by_slot in warmth if slot in by_slot]
+        if temperatures and max(temperatures) > SNOW_MAX_TEMP_C:
+            continue
+        share = _rain_share(slot, aligned, liquid)
+        for source_id, values in adjusted.items():
+            total = values.get(slot)
+            if total is None:
+                continue
+            rain = liquid[source_id].get(slot)
+            if rain is None:
+                if share is None:
+                    continue
+                rain = total * share
+            rain = min(total, rain)
+            values[slot] = rain
+            if total >= threshold_mm_h > rain:
+                snowed.setdefault(slot, set()).add(source_id)
+    return dict(adjusted), snowed
+
+
+def _rain_share(
+    slot: datetime,
+    aligned: Mapping[str, Mapping[datetime, float]],
+    liquid: Mapping[str, Mapping[datetime, float]],
+) -> float | None:
+    """How much of the precipitation in this slot falls as rain, or None if unknown.
+
+    For a source that cannot tell for itself. The radars that can tell are asked
+    first — they see the same minutes at the same scale — and the models only when
+    no such radar sees anything here; a share needs something falling to be a share.
+    """
+    for radars in (True, False):
+        total = rain = 0.0
+        for source_id, values in aligned.items():
+            if (source_id in NOWCAST_SOURCES) != radars:
+                continue
+            value, part = values.get(slot), liquid[source_id].get(slot)
+            if value is not None and part is not None:
+                total += value
+                rain += min(value, part)
+        if total > 0.0:
+            return rain / total
+    return None
+
+
 def _score_slot(
     slot: datetime,
     aligned: Mapping[str, Mapping[datetime, float]],
     weights: Mapping[str, float],
     threshold_mm_h: float,
+    *,
+    snowed: set[str] | None = None,
 ) -> SlotScore:
     """Weighted vote over the sources that reach this slot — the radars, if any do."""
     contributors = tuple(source_id for source_id in sorted(aligned) if slot in aligned[source_id])
@@ -216,6 +303,9 @@ def _score_slot(
         contributors=contributors,
         voters=voters,
         disputed=disputed,
+        # Only a voter's snow explains the slot: a model's, inside the radar's
+        # reach, was never going to decide it.
+        snow=bool(snowed and snowed.intersection(voters)),
     )
 
 

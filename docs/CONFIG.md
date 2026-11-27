@@ -49,9 +49,11 @@ config entry. The **location is entry data, not an option**: it is set once in t
 | Shortest walk still worth it | `min_walk_duration_min` | int minutes, 0–50, 10-min steps | **10** | When no dry window of the full length exists anywhere in the margins, offer the longest dry window that is at least this long. Moves in whole 10-minute steps because one step is one radar frame — the shortest gap any source publishes — and is refused if it exceeds `walk_duration_min`, which would ask for a window both shorter than the walk and longer than it. `0` switches shortening off entirely. See [Shortening the walk](#shortening-the-walk) |
 | Second message shortly before you leave | `confirm_margin_min` | int minutes, 0–60, 5-min steps | **0 (off)** | Sends a second short message this many minutes before you set off: the plan still stands, the rain has gone and the walk is back to its normal time, or there is still no dry window and the raincoat still applies. Goes to the same devices as the first message, and is only ever sent when something was already said about that walk |
 | Heads-up before the radar can see the walk | `preliminary_alert` | bool | **on** | One quiet message when the hourly models expect rain but no radar reaches the walk yet. It never decides anything: the alert still waits for the radar, and if the radar then sees the walk dry the user is told the maybe is off. See [The preliminary notice](#the-preliminary-notice) |
+| Ignore snow | `ignore_snow` | bool | **on** | Dry snow is left out of the rain vote, so a walk in falling snow gets no alert. Only while the weather models put the temperature at or below +1 °C — warmer "snow" is wet snow or sleet and counts as rain. See [Snow](#snow) |
 | Always notify this device | `notify_service` | string | *(unset)* | A `notify.mobile_app_*` service, stored **without** the `notify.` prefix. **Receives every walk's alert.** Per-walk devices are notified *in addition* to it, never instead of it, and the combined list is de-duplicated so a device named in both places gets one push. Registered services are offered in a dropdown; a custom value is accepted so a device that has not registered yet can be configured ahead of time. Optional — unset means only the per-walk devices are notified. |
 | Per-walk alerts | `walk_targets` | map | *(unset)* | One entry per walk the user configured something for. See [Per-walk alerts](#per-walk-alerts). |
 | Auto-mute entity | `auto_mute_entity` | entity id | *(unset)* | Optional `person`/`device_tracker`; pushes suppressed for **every** walk while it is not `home`. A walk that sets its own `away_entity` follows that one instead. |
+| Phones told in Polish / in English | `notify_languages` | map service → `pl` \| `en` | *(unset)* | Filled from two form fields, `polish_devices` and `english_devices`, each a list of `mobile_app_*` services. A phone on a list always gets its pushes in that language; a phone on neither follows its user's profile ([Language](#language)). A phone on both lists is refused with `language_conflict`. Since 1.6.0 |
 
 Optional options that are left empty are **absent** from the stored options, never stored as
 `null` — clearing a field in the options flow really removes it.
@@ -134,6 +136,29 @@ preliminary notice, and sent whatever `preliminary_alert` is set to — says so:
 
 If both radars then see rain, the ordinary alert follows and replaces it on the phone. The event
 carries `disputed: true`, and so does the sensor while the disagreement lasts.
+
+### Snow
+
+Snow does not soak a dog the way rain does, and since the radar decides the alert, every winter
+snowfall used to send a raincoat alert. With `ignore_snow` on — the default since 1.6.0 — snow is
+left out of the vote:
+
+- **LibreWXR** tells rain from snow pixel by pixel, so its value over the disc is split into
+  the whole precipitation and the rain in it.
+- **The models** (ICON-EU, KNMI) report rain and showers separately from the total, and the
+  2 m temperature. MET Norway, while it stands in, gives the hour's weather symbol instead.
+- **CHMI** cannot tell. Its value is cut by the share of rain the others see in the same ten
+  minutes — LibreWXR first, the models if LibreWXR sees nothing there — and left alone when
+  nobody can tell.
+
+Snow is ignored only while **the warmest model temperature for that hour is at or below
++1 °C**. Above that it is likely wet snow or sleet, which soaks like rain, and it counts in full.
+Rain in the frost — freezing rain or drizzle — is rain, and still alerts. With no model
+temperature at all, the radar's own rain/snow label is trusted.
+
+A walk left in place because of snow carries `snow: true` in the sensor attributes and the event
+payload, so "why no alert in this snow?" has an answer on the sensor's screen. Turn the option
+off to be told about snow like rain.
 
 ### How urgently a push travels
 
@@ -409,6 +434,7 @@ is saved; nothing reads it.
   "provisional": false,
   "radar_backed": true,
   "disputed": false,
+  "snow": false,
   "data_age_s": 0,
   "muted": false,
   "confirmation": false,
@@ -447,6 +473,7 @@ is saved; nothing reads it.
 | `provisional` | bool | No radar reaches the recommended window, so the timing rests on hourly models. An early answer the coordinator keeps re-checking, not a final one |
 | `radar_backed` | bool | A radar reaches every slot of the *scheduled* walk. Since 1.3.0 an alert is only ever decided while this holds (or after it has held once for this walk); everything before it is at most the preliminary notice |
 | `disputed` | bool | The walk was left in place only because the radars disagree about it: one sees rain, another reaching the same minutes does not ([When the radars disagree](#when-the-radars-disagree)). Always `false` unless `direction` is `none` |
+| `snow` | bool | Snow on the scheduled walk was left out of the vote as harmless ([Snow](#snow)): without it at least one slot would have been wet. Since 1.6.0 |
 | `data_age_s` | int \| `null` | Age of the freshest source that voted |
 | `muted` | bool | Nobody was reached at all. One phone being skipped does not set it; an entry with an always-notified device effectively never does |
 | `confirmation` | bool | This is the pre-departure reassurance rather than a new recommendation |
@@ -484,14 +511,27 @@ Translated:
   top-level key Home Assistant allows for prose belonging to no form and no entity — and are
   read at dispatch time in the user's language.
 
-**Whose language a push is in.** Each phone is written to in the language of the Home Assistant
-user the companion app is signed in as — the one they picked under *Profile → Language*. Two
-phones signed in as two users with English and Polish profiles get an English and a Polish push
-about the same walk. The server language (*Settings → System → General*) is used for a phone
-whose user never picked a language on their profile (one that just follows the browser saves
-nothing), for a phone the companion app did not register, and if the profile cannot be read.
-The `summary` in the event payload, and with it the logbook line, is always in the server
+**Whose language a push is in.** In this order:
+
+1. **The language chosen for that phone** in the integration's settings — *Phones told in
+   Polish* / *Phones told in English* (since 1.6.0). This is the fix for a phone whose push
+   arrives in the wrong language: it needs no change to anybody's Home Assistant interface.
+2. **The language of the Home Assistant user** the companion app is signed in as — the one they
+   picked under *Profile → Language*. Two phones signed in as two users with English and Polish
+   profiles get an English and a Polish push about the same walk.
+3. **The server language** (*Settings → System → General*), for a phone whose user never picked
+   a language on their profile, for a phone the companion app did not register, and if the
+   profile cannot be read.
+
+Step 3 is the trap step 1 exists for. A profile left on following the browser saves **no**
+language on the server, and the Android companion app does not report the phone's own language
+anywhere, so on a server set up in English such a phone is told in English whatever language it
+runs in. The `summary` in the event payload, and with it the logbook line, is always in the server
 language: it is one history shared by the whole home.
+
+On Android the quiet channel the preliminary and disputed notices use is named in the push's
+language, and the companion app identifies a channel by its name: changing a phone's language
+creates the channel afresh under its new name, with the default settings.
 
 Deliberately **not** translated, because it is an identifier rather than prose:
 
@@ -531,8 +571,10 @@ never change afterwards, and can be renamed in the entity registry.
   "walk_duration_min": 20,
   "min_walk_duration_min": 10,
   "preliminary_alert": true,
+  "ignore_snow": true,
   "notify_service": "mobile_app_phone",
   "auto_mute_entity": "person.owner",
+  "notify_languages": { "mobile_app_anna": "pl" },
   "walk_targets": {
     "weekday|07:00": { "notify_services": ["mobile_app_anna"], "away_entity": "person.anna" },
     "weekend|09:00": { "mute": true }
